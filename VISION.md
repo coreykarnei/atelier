@@ -19,11 +19,7 @@ Each quirk is small. Together they form a tax on every session. Atelier exists t
 
 ## Who it's for
 
-Me, first. The shape of the tool is derived from how I work, not from a hypothetical user.
-
-It is also a portfolio artifact. The job search targets agentic-systems and developer-tools roles — Anthropic's Agent Platform, Claude Code, agent skills, or a comparable startup. A polished, native client for agent-assisted coding is *the* on-target demonstration of that work. Atelier should look the part: a public repo, a real README, a screenshot that sells it.
-
-These two audiences don't conflict as long as Atelier stays opinionated. A daily driver another engineer can read is worth more than a generic tool nobody uses.
+One developer: me. The shape is derived from how I work, not from a hypothetical audience. The repo is public because there's no reason for it not to be — but the design choices won't bend to generalize.
 
 ## Principles
 
@@ -52,5 +48,3 @@ What it adds that the current setup can't:
 ## What success looks like
 
 A morning where I open Atelier on a fresh worktree, work for four hours, and never think about the tool. No escape-sequence hack, no double-copy to clean up an agent response, no shell-script branch dance, no "wait, which pane has focus." The friction tax is gone.
-
-And a public repo where another engineer can open the README, see the screenshot, read the why, and want to either use it or talk to me about how it was built.
