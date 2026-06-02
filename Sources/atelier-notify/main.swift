@@ -1,0 +1,60 @@
+import Foundation
+import AtelierIPC
+
+// atelier-notify <stop|input> [message...]
+//
+// Invoked by Claude Code's Stop / Notification hooks. Connects to the running
+// Atelier app's unix socket and sends one NotifyMessage. If Atelier isn't running
+// (no socket / refused), it exits 0 silently — a notification helper must never
+// break the agent's hook chain.
+
+let args = Array(CommandLine.arguments.dropFirst())
+let kindArg = args.first ?? "stop"
+
+let kind: NotifyMessage.Kind
+let defaultTitle: String
+let defaultBody: String
+switch kindArg {
+case "input", "inputNeeded", "notification":
+    kind = .inputNeeded
+    defaultTitle = "Claude needs you"
+    defaultBody = "The agent is waiting for input."
+default:
+    kind = .stop
+    defaultTitle = "Claude finished"
+    defaultBody = "The agent completed its turn."
+}
+
+let override = args.dropFirst().joined(separator: " ")
+let body = override.isEmpty ? defaultBody : override
+let message = NotifyMessage(kind: kind, title: defaultTitle, body: body)
+
+// Connect to the unix domain socket.
+let path = AtelierIPC.socketPath()
+let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+guard fd >= 0 else { exit(0) }
+defer { close(fd) }
+
+var addr = sockaddr_un()
+addr.sun_family = sa_family_t(AF_UNIX)
+let pathBytes = Array(path.utf8)
+guard pathBytes.count < MemoryLayout.size(ofValue: addr.sun_path) else { exit(0) }
+withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+    ptr.withMemoryRebound(to: CChar.self, capacity: pathBytes.count + 1) { dst in
+        for (i, b) in pathBytes.enumerated() { dst[i] = CChar(bitPattern: b) }
+        dst[pathBytes.count] = 0
+    }
+}
+
+let connected = withUnsafePointer(to: &addr) { p in
+    p.withMemoryRebound(to: sockaddr.self, capacity: 1) { sp in
+        connect(fd, sp, socklen_t(MemoryLayout<sockaddr_un>.size))
+    }
+}
+guard connected == 0 else { exit(0) }
+
+let payload = message.encodedLine()
+_ = payload.withUnsafeBytes { raw in
+    write(fd, raw.baseAddress, raw.count)
+}
+exit(0)

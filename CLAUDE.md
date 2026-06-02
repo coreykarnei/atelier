@@ -1,0 +1,90 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project state
+
+**Milestone 0 (the spike), in progress.** The native substrate is scaffolded and
+runs. Read `VISION.md` (the authoritative *what*) and `TECHNICAL_PLAN.md` (the
+*how* and the milestone sequence) before proposing anything.
+
+What exists today:
+- A **SwiftPM macOS app** (Swift 6 toolchain, language mode v5) using **AppKit** +
+  **SwiftTerm**. Three targets: `Atelier` (the app), `atelier-notify` (the hook
+  CLI), and `AtelierIPC` (shared socket/message contract).
+- A **single window** with two PTY-backed SwiftTerm panes — `zsh` (left) and the
+  hosted `claude` binary (right) — Catppuccin Mocha palette, native blur.
+- A **notification bridge**: a unix-socket listener in the app + the
+  `atelier-notify` CLI, invoked from Claude Code `Stop`/`Notification` hooks.
+
+Not yet built (see `TECHNICAL_PLAN.md` §4): truthful-copy verification, the
+three-pane layout, worktree manager, session persistence, and the code editor.
+
+## Commands
+
+- `make build` — compile all targets via SwiftPM.
+- `make bundle` — assemble `.build/Atelier.app` (Info.plist → bundle id
+  `dev.sterlingcore.atelier`, ad-hoc signed; bundles `atelier-notify` too).
+- `make run` — build, bundle, and `open` the app.
+- `make clean` — `swift package clean` + remove the app bundle.
+
+Notifications need a real `.app` launch (`make run`/`open`) for the bundle identity
+UNUserNotification requires — and a one-time permission grant. To enable agent
+notifications, merge `Resources/hooks/atelier-hooks.json` into
+`~/.claude/settings.json` (same manual-merge pattern as the dotfiles fragment).
+
+## What Atelier is
+
+A single-window, **native macOS** workspace for agent-assisted coding: an editor,
+a shell, and **Claude Code** composed side-by-side in one app that owns its own
+chrome, keyboard, clipboard, and notifications.
+
+It is the native successor to the author's current terminal IDE — Ghostty + tmux +
+Helix + Claude Code, driven by the `ide` script (see `~/CLAUDE.md` and the
+`dotfiles` repo). That stack works because terminals compose, but it leaks: too
+many processes pretend to be each other and negotiate through escape sequences.
+Atelier's thesis is to pay that friction tax **once, in code** — replacing the
+four-layer stack with one native app while preserving its composition.
+
+## Architecture intent (the load-bearing constraints)
+
+These are design commitments from `VISION.md`, not yet implemented. Any code
+proposal must fit them:
+
+- **Fixed three-pane shape, one window.** Editor top-left, shell bottom-left,
+  agent on the right. The layout *is* the IDE — not arbitrary splits, not a window
+  manager, not a general multiplexer. It manages exactly these panes.
+- **Claude Code runs as a hosted process, unchanged.** Atelier is its *host*, not
+  a replacement. Do not reimplement the agent loop, its tools, or skills. The
+  agent talks to the OS directly (real notifications) instead of through the
+  bell/`afplay`/status-flag chain.
+- **Native ownership of chrome, keyboard, clipboard, notifications.** The reason
+  the app exists is to stop plumbing these through escape sequences. One clipboard,
+  one selection model. Copy from any pane returns the *actual* text (paragraphs as
+  paragraphs, no agent gutter-indent leaking in).
+- **VSCode-shaped editor, not Helix.** Insert-mode default, drag-select,
+  multi-cursor, repo-wide search with a results panel, fuzzy file picker on a
+  single chord. Not a VSCode clone — an editor that doesn't fight common editing
+  instincts.
+- **Worktrees are first-class.** Spawning/listing/returning-to/tearing-down an
+  isolated branch workspace is one visible action each (mirrors `ide -b`).
+- **Keyboard-first.** Pane focus, picker, search, command palette all reachable
+  from the home row. Pointer optional.
+- **Sessions survive restart.** Reopen and the repo, worktrees, and panes are
+  where they were left.
+- **Aesthetic is a real constraint:** Catppuccin Mocha, transparent, native blur.
+  Treat it as a spec requirement, not decoration.
+
+## Non-goals (do not propose these)
+
+- Not cross-platform on day one — **macOS-first**. Linux is plausible later;
+  Windows is out of scope.
+- No language-specific build runners, no plugin marketplace, no settings UI for
+  every preference. Scope is strictly: code, shell, agent, side by side.
+- Not a general IDE and not a general multiplexer.
+
+## Audience
+
+Single developer, by design. The repo is public, but the design choices **will not
+bend to generalize**. When a decision trades broad applicability against fit for
+this one workflow, choose fit.

@@ -1,0 +1,14 @@
+## Swift / SwiftPM
+.build/
+.swiftpm/
+Package.resolved
+*.xcodeproj
+DerivedData/
+
+## Stray compiler artifacts (e.g. from ad-hoc swiftc invocations)
+*.o
+*.d
+*.swiftdeps
+
+## macOS
+.DS_Store

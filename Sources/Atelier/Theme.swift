@@ -1,0 +1,40 @@
+import AppKit
+import SwiftTerm
+
+/// Catppuccin Mocha — the single source of truth for color across Atelier's
+/// components. Aesthetic is a spec requirement, not decoration (see VISION.md /
+/// TECHNICAL_PLAN §2.9). Tokens are added here as components start using them.
+enum Theme {
+    /// The 16-color ANSI palette SwiftTerm installs into each terminal.
+    /// Order: 0-7 normal, 8-15 bright.
+    static let ansi: [SwiftTerm.Color] = [
+        hexTerm(0x45475A), // 0  black   (surface1)
+        hexTerm(0xF38BA8), // 1  red
+        hexTerm(0xA6E3A1), // 2  green
+        hexTerm(0xF9E2AF), // 3  yellow
+        hexTerm(0x89B4FA), // 4  blue
+        hexTerm(0xF5C2E7), // 5  magenta (pink)
+        hexTerm(0x94E2D5), // 6  cyan    (teal)
+        hexTerm(0xBAC2DE), // 7  white   (subtext1)
+        hexTerm(0x585B70), // 8  bright black   (surface2)
+        hexTerm(0xF38BA8), // 9  bright red
+        hexTerm(0xA6E3A1), // 10 bright green
+        hexTerm(0xF9E2AF), // 11 bright yellow
+        hexTerm(0x89B4FA), // 12 bright blue
+        hexTerm(0xF5C2E7), // 13 bright magenta
+        hexTerm(0x94E2D5), // 14 bright cyan
+        hexTerm(0xA6ADC8), // 15 bright white  (subtext0)
+    ]
+
+    static let terminalBackground = hexTerm(0x1E1E2E) // base
+    static let terminalForeground = hexTerm(0xCDD6F4) // text
+    static let terminalCursor = hexTerm(0xF5E0DC)     // rosewater
+
+    /// SwiftTerm.Color uses 16-bit channels (0–65535).
+    private static func hexTerm(_ hex: UInt32) -> SwiftTerm.Color {
+        let r = UInt16((hex >> 16) & 0xFF) * 257
+        let g = UInt16((hex >> 8) & 0xFF) * 257
+        let b = UInt16(hex & 0xFF) * 257
+        return SwiftTerm.Color(red: r, green: g, blue: b)
+    }
+}

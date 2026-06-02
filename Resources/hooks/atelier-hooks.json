@@ -1,0 +1,25 @@
+{
+  "//": "Atelier notification hooks. Merge this into ~/.claude/settings.json (under the top-level \"hooks\" key), the same way the dotfiles claude/hooks.json fragment is manually merged. Replace the command path if Atelier.app lives somewhere other than the dev build dir.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/core/repositories/atelier/.build/Atelier.app/Contents/MacOS/atelier-notify stop"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/core/repositories/atelier/.build/Atelier.app/Contents/MacOS/atelier-notify input"
+          }
+        ]
+      }
+    ]
+  }
+}
