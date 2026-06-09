@@ -292,13 +292,21 @@ cleanup, no shell-script branch dance, no "which pane has focus."
 
 ## 6. Open questions
 
-- **[OPEN] Worktree storage location** — mirror dotfiles' `~/.local/share/worktrees/`
-  or keep repo-local? (§3.8)
-- **[OPEN] The home-row keymap** — define the actual chords for pane focus, picker,
-  search, palette. (§3.10)
-- **[OPEN] Session-restore vs torn-down worktree** — behavior when a restored session
-  references a worktree removed out-of-band. (§3.9)
-- **[OPEN] Notification bridge transport** — fire-and-forget CLI (`UNUserNotification`)
-  vs a local socket the app listens on (enables focus actions). (§3.7)
-- **[OPEN] Multi-repo / multi-window** — vision implies one workspace; confirm whether
-  more than one Atelier window is ever allowed.
+All five were resolved in the Milestone 1 design pass (2026-06-09). See
+[docs/MILESTONE_1.md](docs/MILESTONE_1.md) §11 for the full rationale.
+
+- **[RESOLVED] Worktree storage location** — `~/.local/share/worktrees/`, mirroring
+  `ide`, anchored to the primary tree (keeps worktrees outside the repo so picker /
+  search / status never trip on them). (§3.8 · MILESTONE_1 §6)
+- **[RESOLVED] The home-row keymap** — defined: `⌃⌘+hjkl` pane focus, `⌘⇧[ ]` /
+  `⌘T` / `⌘W` sessions, `⌘P` / `⌘⇧P` / `⌘⇧F` picker / palette / search, `⌘/⌥+arrows`
+  reserved to the focused pane. (§3.10 · MILESTONE_1 §5)
+- **[RESOLVED] Session-restore vs torn-down worktree** — validate every root on
+  restore; an invalid one is surfaced, never silently dropped, reparented, or
+  resurrected (non-silent drop + fan re-creation; Claude conversation recoverable
+  from `~/.claude`). (§3.9 · MILESTONE_1 §9.1)
+- **[RESOLVED] Notification bridge transport** — the socket the app listens on
+  (settled in M0). Per-tab attention state reuses it. (§3.7 · MILESTONE_1 §7.1)
+- **[RESOLVED] Multi-repo / multi-window** — single application, one window per
+  project, sessions as tabs. Not single-workspace; not multi-application.
+  (MILESTONE_1 §2)

@@ -4,9 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-**Milestone 0 (the spike), in progress.** The native substrate is scaffolded and
-runs. Read `VISION.md` (the authoritative *what*) and `TECHNICAL_PLAN.md` (the
-*how* and the milestone sequence) before proposing anything.
+**Milestone 0 (the spike) complete; Milestone 1 designed, pre-implementation.**
+The native substrate is scaffolded and runs, and the bet is proven. Read
+`VISION.md` (the authoritative *what*), `TECHNICAL_PLAN.md` (the *how* and the
+milestone sequence), and — for the next phase — `docs/MILESTONE_1.md` (the
+resolved workspace/layout/keymap/worktree/persistence design) before proposing
+anything.
 
 What exists today:
 - A **SwiftPM macOS app** (Swift 6 toolchain, language mode v5) using **AppKit** +
@@ -17,8 +20,13 @@ What exists today:
 - A **notification bridge**: a unix-socket listener in the app + the
   `atelier-notify` CLI, invoked from Claude Code `Stop`/`Notification` hooks.
 
-Not yet built (see `TECHNICAL_PLAN.md` §4): truthful-copy verification, the
-three-pane layout, worktree manager, session persistence, and the code editor.
+Truthful copy is working in both panes (shell via soft-wrap join; agent via
+transcript-aligned markdown — see the M0 devlog).
+
+Not yet built (Milestone 1, designed in `docs/MILESTONE_1.md`): the fixed
+three-pane layout + Triptych/Split modes, projects-as-windows with session tabs,
+the worktree manager + `atelier` CLI, session persistence, and the command
+palette. The code editor remains a placeholder until Milestone 2.
 
 ## Commands
 
