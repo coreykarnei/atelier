@@ -30,6 +30,20 @@ enum Theme {
     static let terminalForeground = hexTerm(0xCDD6F4) // text
     static let terminalCursor = hexTerm(0xF5E0DC)     // rosewater
 
+    // Chrome tokens (non-terminal AppKit views).
+    static let editorPlaceholderBackground = nsColor(0x181825) // mantle
+    static let chromeMutedText = nsColor(0x6C7086)             // overlay0
+
+    /// AppKit chrome color from a 0xRRGGBB hex.
+    private static func nsColor(_ hex: UInt32) -> NSColor {
+        NSColor(
+            srgbRed: CGFloat((hex >> 16) & 0xFF) / 255.0,
+            green: CGFloat((hex >> 8) & 0xFF) / 255.0,
+            blue: CGFloat(hex & 0xFF) / 255.0,
+            alpha: 1.0
+        )
+    }
+
     /// SwiftTerm.Color uses 16-bit channels (0–65535).
     private static func hexTerm(_ hex: UInt32) -> SwiftTerm.Color {
         let r = UInt16((hex >> 16) & 0xFF) * 257

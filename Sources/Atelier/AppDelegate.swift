@@ -23,4 +23,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
+
+    // MARK: Menu actions
+
+    /// `⌘\` — forward the layout toggle to the window controller. The nil-targeted
+    /// menu item reaches here through the responder chain. (M1.3 will route to the
+    /// key window's controller once there is more than one window.)
+    @objc func toggleLayout(_ sender: Any?) {
+        mainWindowController?.toggleLayout()
+    }
 }

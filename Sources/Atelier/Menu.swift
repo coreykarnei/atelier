@@ -35,6 +35,14 @@ enum Menu {
         editMenu.addItem(.separator())
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
 
+        // View menu. `⌘\` toggles the layout mode; the nil target routes through the
+        // responder chain to AppDelegate (and, later, to the key window's controller).
+        let viewItem = NSMenuItem()
+        main.addItem(viewItem)
+        let viewMenu = NSMenu(title: "View")
+        viewItem.submenu = viewMenu
+        viewMenu.addItem(withTitle: "Toggle Layout", action: #selector(AppDelegate.toggleLayout(_:)), keyEquivalent: "\\")
+
         return main
     }
 }

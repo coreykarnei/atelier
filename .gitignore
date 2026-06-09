@@ -8,7 +8,7 @@ DerivedData/
 ## Stray compiler artifacts (e.g. from ad-hoc swiftc invocations)
 *.o
 *.d
-*.swiftdeps
+*.swiftdeps*
 
 ## macOS
 .DS_Store
