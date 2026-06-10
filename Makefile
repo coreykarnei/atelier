@@ -17,6 +17,12 @@ bundle: build ## Assemble Atelier.app from the build product
 run: bundle ## Build, bundle, and launch the app
 	open $(APP)
 
+.PHONY: install-cli
+install-cli: bundle ## Symlink the atelier CLI into ~/.local/bin
+	mkdir -p $(HOME)/.local/bin
+	ln -sf $(CURDIR)/$(APP)/Contents/MacOS/atelier-cli $(HOME)/.local/bin/atelier
+	@echo "linked: ~/.local/bin/atelier"
+
 .PHONY: clean
 clean: ## Remove build artifacts
 	swift package clean

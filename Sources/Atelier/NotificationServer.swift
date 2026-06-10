@@ -13,6 +13,10 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
     private var acceptSource: DispatchSource?
     private let queue = DispatchQueue(label: "dev.sterlingcore.atelier.notify")
 
+    /// Workspace commands from the `atelier` CLI arrive on the same socket;
+    /// the app delegate handles them (main thread).
+    var onCommand: ((CommandMessage) -> Void)?
+
     /// Request authorization and begin listening. Safe to call once at launch.
     func start() {
         let center = UNUserNotificationCenter.current()
@@ -80,8 +84,12 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
         let data = Data(buffer[0..<n])
 
         for line in data.split(separator: 0x0A) where !line.isEmpty {
-            guard let msg = try? JSONDecoder().decode(NotifyMessage.self, from: Data(line)) else { continue }
-            DispatchQueue.main.async { self.post(msg) }
+            let payload = Data(line)
+            if let msg = try? JSONDecoder().decode(NotifyMessage.self, from: payload) {
+                DispatchQueue.main.async { self.post(msg) }
+            } else if let cmd = try? JSONDecoder().decode(CommandMessage.self, from: payload) {
+                DispatchQueue.main.async { self.onCommand?(cmd) }
+            }
         }
     }
 

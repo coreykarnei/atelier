@@ -5,6 +5,7 @@ protocol BottomBarDelegate: AnyObject {
     func bottomBarDidRequestNewSession()
     func bottomBarDidRequestCloseSession(at index: Int)
     func bottomBarDidToggleLayout()
+    func bottomBarDidClickPill(anchor: NSView)
 }
 
 /// The bottom bar (MILESTONE_1 §7). For M1.2 it carries the session tab strip, a `+`
@@ -56,6 +57,8 @@ final class BottomBar: NSView {
         pillView.layer?.backgroundColor = Theme.accentBlue.cgColor
         pillView.layer?.cornerRadius = 4
         pillView.translatesAutoresizingMaskIntoConstraints = false
+        // The pill is the worktree fan's trigger (MILESTONE_1 §6).
+        pillView.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(pillClicked)))
         addSubview(pillView)
 
         pillLabel.font = .systemFont(ofSize: 11, weight: .semibold)
@@ -170,6 +173,7 @@ final class BottomBar: NSView {
 
     @objc private func addTapped() { delegate?.bottomBarDidRequestNewSession() }
     @objc private func layoutTapped() { delegate?.bottomBarDidToggleLayout() }
+    @objc private func pillClicked() { delegate?.bottomBarDidClickPill(anchor: pillView) }
 }
 
 /// A single session tab: ellipsized title plus a close affordance. Clicking the body

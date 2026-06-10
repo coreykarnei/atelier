@@ -31,5 +31,15 @@ let package = Package(
             path: "Sources/atelier-notify",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        // The workspace CLI (`atelier`, `atelier -b`, `atelier -rm`) — the `ide`
+        // script's successor. Same socket, command messages instead of notify.
+        // (Named atelier-cli because target names clash case-insensitively with
+        // the app module; the bundle ships it as plain `atelier`.)
+        .executableTarget(
+            name: "atelier-cli",
+            dependencies: ["AtelierIPC"],
+            path: "Sources/atelier-cli",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )

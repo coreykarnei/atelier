@@ -14,6 +14,10 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     private var activeIndex = 0
     private var processesStarted = false
 
+    /// The primary checkout this window's project is anchored to — set when the
+    /// first IDE session lands. The `atelier` CLI routes commands by this.
+    private(set) var projectRepoRoot: String?
+
     private let sessionArea = NSView()
     private let bottomBar = BottomBar()
     private var bottomBarHeight: NSLayoutConstraint?
@@ -24,7 +28,9 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         sessions.indices.contains(activeIndex) ? sessions[activeIndex] : nil
     }
 
-    convenience init() {
+    /// `root == nil` opens as a Landing (a new project tab); a path opens the
+    /// project directly (the CLI's `atelier <path>`).
+    convenience init(root: String? = nil) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -51,7 +57,11 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         window.setFrameAutosaveName("AtelierMainWindow")
 
         buildChrome(in: blur)
-        addSession()
+        if let root {
+            adopt(Session(ideRoot: root))
+        } else {
+            addSession()
+        }
     }
 
     deinit {
@@ -114,17 +124,29 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     private func adopt(_ session: Session) {
         session.onPromoted = { [weak self, weak session] in
             guard let self else { return }
-            // The promoted root names the project — shown in the native tab strip.
-            if let session { self.window?.title = (session.cwd as NSString).lastPathComponent }
-            self.refreshBranch()
-            if let session, session === self.activeSession {
-                self.window?.makeFirstResponder(session.defaultFocusView)
+            if let session {
+                self.noteProjectRoot(for: session)
+                if session === self.activeSession {
+                    self.window?.makeFirstResponder(session.defaultFocusView)
+                }
             }
+            self.refreshBranch()
         }
         sessions.append(session)
         if processesStarted { session.start() }
+        noteProjectRoot(for: session)
         showSession(at: sessions.count - 1)
         refreshBranch()
+    }
+
+    /// Anchor the window to its project once the first IDE session exists: cache
+    /// the primary checkout and name the native tab after it.
+    private func noteProjectRoot(for session: Session) {
+        guard session.state == .ide else { return }
+        if projectRepoRoot == nil {
+            projectRepoRoot = WorktreeManager.repoRoot(for: session.cwd) ?? session.cwd
+        }
+        window?.title = ((projectRepoRoot ?? session.cwd) as NSString).lastPathComponent
     }
 
     /// Kill every session's hosted processes (window closing / app quitting).
@@ -287,6 +309,150 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         closeActiveSession()
     }
     func bottomBarDidToggleLayout() { toggleLayout() }
+    func bottomBarDidClickPill(anchor: NSView) { showWorktreeFan(from: anchor) }
+
+    // MARK: Worktree fan (MILESTONE_1 §6)
+
+    private var fanPopover: NSPopover?
+
+    private func showWorktreeFan(from anchor: NSView) {
+        guard let session = activeSession,
+              let repoRoot = WorktreeManager.repoRoot(for: session.cwd) else {
+            NSSound.beep() // landing on a non-repo: nothing to fan
+            return
+        }
+
+        let rows = WorktreeManager.list(repoRoot: repoRoot).map { worktree in
+            WorktreeFanRow(
+                worktree: worktree,
+                isOpen: sessions.contains { $0.cwd == worktree.path },
+                isDirty: WorktreeManager.isDirty(worktree.path)
+            )
+        }
+
+        let fan = WorktreeFanController(rows: rows)
+        fan.onOpen = { [weak self] worktree in
+            self?.dismissFan()
+            self?.openWorktree(at: worktree.path)
+        }
+        fan.onCreate = { [weak self] branch in
+            self?.dismissFan()
+            self?.createWorktree(branch: branch, repoRoot: repoRoot)
+        }
+        fan.onRemove = { [weak self] row in
+            self?.dismissFan()
+            self?.confirmRemoveWorktree(row, repoRoot: repoRoot)
+        }
+
+        let popover = NSPopover()
+        popover.contentViewController = fan
+        popover.behavior = .transient
+        popover.appearance = NSAppearance(named: .darkAqua)
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+        fanPopover = popover
+    }
+
+    private func dismissFan() {
+        fanPopover?.close()
+        fanPopover = nil
+    }
+
+    /// Return-to: focus the worktree's session if one is open, else open one.
+    private func openWorktree(at path: String) {
+        if let index = sessions.firstIndex(where: { $0.cwd == path }) {
+            showSession(at: index)
+        } else {
+            adopt(Session(ideRoot: path))
+        }
+    }
+
+    /// CLI entry (`atelier -b <branch>`): open the branch's worktree session,
+    /// creating the worktree if needed.
+    func openWorktree(branch: String) {
+        guard let repoRoot = projectRepoRoot else { return }
+        if let existing = WorktreeManager.list(repoRoot: repoRoot).first(where: { $0.branch == branch }) {
+            openWorktree(at: existing.path)
+        } else {
+            createWorktree(branch: branch, repoRoot: repoRoot)
+        }
+    }
+
+    /// CLI entry (`atelier -rm <branch>`): same guarded modal as the fan's ×.
+    func removeWorktree(branch: String) {
+        guard let repoRoot = projectRepoRoot,
+              let worktree = WorktreeManager.list(repoRoot: repoRoot).first(where: { $0.branch == branch }),
+              !worktree.isPrimary else { return }
+        let row = WorktreeFanRow(
+            worktree: worktree,
+            isOpen: sessions.contains { $0.cwd == worktree.path },
+            isDirty: WorktreeManager.isDirty(worktree.path)
+        )
+        confirmRemoveWorktree(row, repoRoot: repoRoot)
+    }
+
+    private func createWorktree(branch: String, repoRoot: String) {
+        do {
+            let path = try WorktreeManager.create(branch: branch, repoRoot: repoRoot)
+            adopt(Session(ideRoot: path))
+        } catch {
+            presentError(title: "Couldn't create worktree", error: error)
+        }
+    }
+
+    /// The informative delete modal: clean → quick confirm; dirty → names the loss
+    /// and requires an explicit force (git's own refusal, surfaced).
+    private func confirmRemoveWorktree(_ row: WorktreeFanRow, repoRoot: String) {
+        let branch = row.worktree.branch
+        let openSessions = sessions.filter { $0.cwd == row.worktree.path }
+
+        let alert = NSAlert()
+        if row.isDirty {
+            alert.alertStyle = .critical
+            alert.messageText = "⎇ \(branch) has uncommitted changes"
+            alert.informativeText = "Removing this worktree will permanently discard them."
+                + (openSessions.isEmpty ? "" : " Its \(openSessions.count) open session(s) will close.")
+            alert.addButton(withTitle: "Force Remove")
+        } else {
+            alert.messageText = "Remove worktree ⎇ \(branch)?"
+            alert.informativeText = "The checkout at \(Self.abbreviate(row.worktree.path)) will be deleted."
+                + (openSessions.isEmpty ? "" : " Its \(openSessions.count) open session(s) will close.")
+            alert.addButton(withTitle: "Remove")
+        }
+        alert.addButton(withTitle: "Cancel")
+
+        guard let window else { return }
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .alertFirstButtonReturn else { return }
+            do {
+                // Close its sessions first so no PTY holds the tree.
+                for session in openSessions {
+                    if let index = self.sessions.firstIndex(where: { $0 === session }) {
+                        self.sessions.remove(at: index)
+                        session.terminate()
+                        session.container.removeFromSuperview()
+                    }
+                }
+                if self.sessions.isEmpty {
+                    self.adopt(Session(ideRoot: repoRoot))
+                } else {
+                    self.showSession(at: min(self.activeIndex, self.sessions.count - 1))
+                    self.refreshBranch()
+                }
+                try WorktreeManager.remove(path: row.worktree.path, repoRoot: repoRoot, force: row.isDirty)
+            } catch {
+                self.presentError(title: "Couldn't remove worktree", error: error)
+            }
+        }
+    }
+
+    private func presentError(title: String, error: Error) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = error.localizedDescription
+        alert.addButton(withTitle: "OK")
+        if let window { alert.beginSheetModal(for: window) } else { alert.runModal() }
+    }
 
     // MARK: Environment
 

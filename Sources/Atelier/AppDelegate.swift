@@ -1,4 +1,5 @@
 import AppKit
+import AtelierIPC
 
 /// One app, N project windows (MILESTONE_1 §2): each `MainWindowController` is one
 /// project; macOS native window tabbing draws the always-visible project strip in
@@ -18,9 +19,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let windowMenu = NSApp.mainMenu?.items.first(where: { $0.submenu?.title == "Window" })?.submenu {
             NSApp.windowsMenu = windowMenu
         }
+        notificationServer.onCommand = { [weak self] command in self?.handle(command) }
         notificationServer.start()
 
         openProjectWindow()
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// A command from the `atelier` CLI: route to the project window anchored to
+    /// the target's primary checkout, opening one if none exists.
+    private func handle(_ command: CommandMessage) {
+        let root = WorktreeManager.repoRoot(for: command.path) ?? command.path
+        let controller = controllers.first { $0.projectRepoRoot == root }
+
+        switch command.verb {
+        case .open:
+            let target = controller ?? openProjectWindow(root: root)
+            target.window?.makeKeyAndOrderFront(nil)
+        case .worktreeAdd:
+            guard let branch = command.branch else { return }
+            let target = controller ?? openProjectWindow(root: root)
+            target.window?.makeKeyAndOrderFront(nil)
+            target.openWorktree(branch: branch)
+        case .worktreeRemove:
+            guard let branch = command.branch, let controller else { return }
+            controller.window?.makeKeyAndOrderFront(nil)
+            controller.removeWorktree(branch: branch)
+        }
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -35,11 +60,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Project windows
 
-    /// Open a new project tab: a window starting as a Landing. Joins the key
-    /// window's native tab group so projects line up in the titlebar strip.
+    /// Open a new project tab — a Landing, or directly on `root` (CLI). Joins the
+    /// key window's native tab group so projects line up in the titlebar strip.
     @discardableResult
-    private func openProjectWindow() -> MainWindowController {
-        let controller = MainWindowController()
+    private func openProjectWindow(root: String? = nil) -> MainWindowController {
+        let controller = MainWindowController(root: root)
         controllers.append(controller)
 
         if let window = controller.window {

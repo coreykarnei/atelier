@@ -47,3 +47,63 @@ public struct NotifyMessage: Codable {
         return data
     }
 }
+
+/// One workspace command from the `atelier` CLI (MILESTONE_1 §6) — the native
+/// successor of the `ide` script's verbs. Shares the socket with notifications;
+/// the listener tells the two message shapes apart by their keys.
+public struct CommandMessage: Codable {
+    public enum Verb: String, Codable {
+        case open           // atelier [path]      → focus/open the project for path
+        case worktreeAdd    // atelier -b <branch> → create/reuse worktree + session
+        case worktreeRemove // atelier -rm <branch>
+    }
+
+    public let verb: Verb
+    /// Absolute path the CLI was aimed at (its $PWD or the positional arg).
+    public let path: String
+    public let branch: String?
+
+    public init(verb: Verb, path: String, branch: String? = nil) {
+        self.verb = verb
+        self.path = path
+        self.branch = branch
+    }
+
+    public func encodedLine() -> Data {
+        var data = (try? JSONEncoder().encode(self)) ?? Data()
+        data.append(0x0A)
+        return data
+    }
+}
+
+extension AtelierIPC {
+    /// Connect to the app's socket and write one message line. Returns false if
+    /// the app isn't listening (callers decide whether to launch it and retry).
+    public static func send(line: Data) -> Bool {
+        let path = socketPath()
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let bytes = Array(path.utf8)
+        guard bytes.count < MemoryLayout.size(ofValue: addr.sun_path) else { return false }
+        withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+            ptr.withMemoryRebound(to: CChar.self, capacity: bytes.count + 1) { dst in
+                for (i, b) in bytes.enumerated() { dst[i] = CChar(bitPattern: b) }
+                dst[bytes.count] = 0
+            }
+        }
+        let connected = withUnsafePointer(to: &addr) { p in
+            p.withMemoryRebound(to: sockaddr.self, capacity: 1) { sp in
+                connect(fd, sp, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard connected == 0 else { return false }
+        let written = line.withUnsafeBytes { raw in
+            write(fd, raw.baseAddress, raw.count)
+        }
+        return written == line.count
+    }
+}

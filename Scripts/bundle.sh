@@ -25,6 +25,13 @@ if [[ -x "$BIN_DIR/atelier-notify" ]]; then
   cp "$BIN_DIR/atelier-notify" "$APP/Contents/MacOS/atelier-notify"
 fi
 
+# Ship the workspace CLI the same way. It keeps the atelier-cli name inside the
+# bundle — `MacOS/atelier` would case-collide with the app binary `MacOS/Atelier`
+# on APFS — and `make install-cli` symlinks it onto PATH as plain `atelier`.
+if [[ -x "$BIN_DIR/atelier-cli" ]]; then
+  cp "$BIN_DIR/atelier-cli" "$APP/Contents/MacOS/atelier-cli"
+fi
+
 # Codesign with the stable self-signed identity if present (see
 # Scripts/make-signing-cert.sh) so macOS persists TCC grants across rebuilds.
 # Fall back to ad-hoc if it isn't installed — the app still runs, but you'll be
