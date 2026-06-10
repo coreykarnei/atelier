@@ -168,6 +168,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Menu actions (responder chain)
 
     @objc func newProject(_ sender: Any?) { openProjectWindow() }
+    @objc func showPalette(_ sender: Any?) { keyController?.showPalette() }
+
+    /// Switch targets for the palette: every other project window, by title.
+    func otherProjects(excluding: MainWindowController) -> [(String, NSWindow)] {
+        controllers.compactMap { controller in
+            guard controller !== excluding, let window = controller.window else { return nil }
+            return (window.title, window)
+        }
+    }
 
     /// `⌘1..9` — focus the Nth project tab (menu item tag carries N).
     @objc func selectProject(_ sender: NSMenuItem) {

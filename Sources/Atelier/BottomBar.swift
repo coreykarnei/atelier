@@ -18,6 +18,9 @@ final class BottomBar: NSView {
 
     static let height: CGFloat = 30
 
+    /// Anchor for surfaces that fan from the pill (palette-triggered worktree fan).
+    var pillAnchor: NSView { pillView }
+
     private let pillView = NSView()
     private let pillLabel = NSTextField(labelWithString: "")
     private let tabsStack = NSStackView()

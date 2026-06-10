@@ -467,6 +467,100 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         }
     }
 
+    // MARK: Command palette (MILESTONE_1 §8)
+
+    private var palette: CommandPalette?
+
+    func showPalette() {
+        guard palette == nil, let container = window?.contentView else { return }
+
+        let overlay = CommandPalette(commands: paletteCommands()) { [weak self] in
+            self?.dismissPalette()
+        }
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(overlay)
+        let contentTop = (window?.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? container.topAnchor
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: contentTop),
+            overlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            overlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        palette = overlay
+        window?.makeFirstResponder(overlay.focusField)
+    }
+
+    private func dismissPalette() {
+        palette?.removeFromSuperview()
+        palette = nil
+        window?.makeFirstResponder(activeSession?.defaultFocusView)
+    }
+
+    /// The fixed command set (§8), plus dynamic switch targets. Category-prefixed
+    /// so fuzzy search groups (`wt` surfaces every worktree command).
+    private func paletteCommands() -> [PaletteCommand] {
+        var commands: [PaletteCommand] = []
+
+        if activeSession?.state == .landing {
+            commands.append(PaletteCommand(id: "session.ideHere", title: "Session: Open IDE Here", key: "⌘↩") { [weak self] in
+                self?.promoteActiveSessionHere()
+            })
+        }
+        commands.append(PaletteCommand(id: "session.new", title: "Session: New on This Root", key: "⌘⇧T") { [weak self] in
+            self?.addSessionOnCurrentRoot()
+        })
+        commands.append(PaletteCommand(id: "session.close", title: "Session: Close", key: "⌘W") { [weak self] in
+            self?.closeActiveSession()
+        })
+        commands.append(PaletteCommand(id: "session.next", title: "Session: Next", key: "⌘⇧]") { [weak self] in
+            self?.selectNext()
+        })
+        commands.append(PaletteCommand(id: "session.prev", title: "Session: Previous", key: "⌘⇧[") { [weak self] in
+            self?.selectPrev()
+        })
+        for (index, session) in sessions.enumerated() where index != activeIndex {
+            commands.append(PaletteCommand(id: "session.switch.\(index)", title: "Session: Switch to \(session.title)", key: nil) { [weak self] in
+                self?.showSession(at: index)
+            })
+        }
+
+        commands.append(PaletteCommand(id: "worktree.fan", title: "Worktree: New / Switch / Remove…", key: nil) { [weak self] in
+            guard let self else { return }
+            self.showWorktreeFan(from: self.bottomBar.pillAnchor)
+        })
+
+        commands.append(PaletteCommand(id: "project.new", title: "Project: New Tab", key: "⌘T") {
+            (NSApp.delegate as? AppDelegate)?.newProject(nil)
+        })
+        for (title, window) in (NSApp.delegate as? AppDelegate)?.otherProjects(excluding: self) ?? [] {
+            commands.append(PaletteCommand(id: "project.switch.\(title)", title: "Project: Switch to \(title)", key: nil) {
+                window.makeKeyAndOrderFront(nil)
+            })
+        }
+
+        if activeSession?.state == .ide {
+            commands.append(PaletteCommand(id: "view.layout", title: "View: Toggle Layout", key: "⌘\\") { [weak self] in
+                self?.toggleLayout()
+            })
+        }
+        let focusTargets: [(String, WorkspacePane?)] = [
+            ("Editor", activeSession?.editorPane),
+            ("Shell", activeSession?.shellPane),
+            ("Agent", activeSession?.agentPane),
+        ]
+        for (name, pane) in focusTargets {
+            guard let pane else { continue }
+            commands.append(PaletteCommand(id: "view.focus.\(name)", title: "View: Focus \(name)", key: nil) { [weak self] in
+                self?.window?.makeFirstResponder(pane.focusView)
+            })
+        }
+
+        commands.append(PaletteCommand(id: "app.quit", title: "Atelier: Quit", key: "⌘Q") {
+            NSApp.terminate(nil)
+        })
+        return commands
+    }
+
     private func presentError(title: String, error: Error) {
         let alert = NSAlert()
         alert.alertStyle = .warning
