@@ -86,10 +86,8 @@ final class LandingView: NSView, WorkspacePane, NSTableViewDataSource, NSTableVi
         addSubview(scroll)
 
         NSLayoutConstraint.activate([
-            // Top inset clears the traffic lights (hidden titlebar, full-size
-            // content). The titlebar project strip (M1.3) replaces this.
-            header.topAnchor.constraint(equalTo: topAnchor, constant: 34),
-            header.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 84),
+            header.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+            header.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             hint.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             hint.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8),

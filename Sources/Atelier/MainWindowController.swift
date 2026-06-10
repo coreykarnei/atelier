@@ -31,10 +31,13 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Atelier"
+        window.title = "New Tab"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
+        // Projects are native window tabs (MILESTONE_1 §2): the OS draws the
+        // always-visible project strip in the titlebar.
+        window.tabbingMode = .preferred
 
         let blur = NSVisualEffectView()
         blur.material = .sidebar
@@ -62,8 +65,13 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         container.addSubview(sessionArea)
         container.addSubview(bottomBar)
 
+        // Pin below the titlebar/tab bar, not the window top: with
+        // .fullSizeContentView the contentView extends under the chrome, and the
+        // panes would draw straight through the project tab strip.
+        let contentTop = (window?.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? container.topAnchor
+
         NSLayoutConstraint.activate([
-            sessionArea.topAnchor.constraint(equalTo: container.topAnchor),
+            sessionArea.topAnchor.constraint(equalTo: contentTop),
             sessionArea.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             sessionArea.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             sessionArea.bottomAnchor.constraint(equalTo: bottomBar.topAnchor),
@@ -106,6 +114,8 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     private func adopt(_ session: Session) {
         session.onPromoted = { [weak self, weak session] in
             guard let self else { return }
+            // The promoted root names the project — shown in the native tab strip.
+            if let session { self.window?.title = (session.cwd as NSString).lastPathComponent }
             self.refreshBranch()
             if let session, session === self.activeSession {
                 self.window?.makeFirstResponder(session.defaultFocusView)
@@ -115,6 +125,11 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         if processesStarted { session.start() }
         showSession(at: sessions.count - 1)
         refreshBranch()
+    }
+
+    /// Kill every session's hosted processes (window closing / app quitting).
+    func terminateAllSessions() {
+        for session in sessions { session.terminate() }
     }
 
     /// `⌘↩` — promote the active Landing to an IDE session rooted at the landing

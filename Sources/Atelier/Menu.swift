@@ -45,7 +45,8 @@ enum Menu {
         viewMenu.addItem(withTitle: "Toggle Layout", action: #selector(AppDelegate.toggleLayout(_:)), keyEquivalent: "\\")
         viewMenu.addItem(.separator())
 
-        viewMenu.addItem(withTitle: "New Terminal Tab", action: #selector(AppDelegate.newSession(_:)), keyEquivalent: "t")
+        viewMenu.addItem(withTitle: "New Project Tab", action: #selector(AppDelegate.newProject(_:)), keyEquivalent: "t")
+        viewMenu.addItem(chord("New Session", #selector(AppDelegate.newSession(_:)), "t", [.command, .shift]))
         viewMenu.addItem(withTitle: "Open IDE Here", action: #selector(AppDelegate.openIDEHere(_:)), keyEquivalent: "\r")
         viewMenu.addItem(withTitle: "Close Session", action: #selector(AppDelegate.closeSession(_:)), keyEquivalent: "w")
         viewMenu.addItem(chord("Next Session", #selector(AppDelegate.nextSession(_:)), "]", [.command, .shift]))
@@ -56,6 +57,21 @@ enum Menu {
         viewMenu.addItem(chord("Focus Down", #selector(AppDelegate.focusDown(_:)), "j", [.command, .control]))
         viewMenu.addItem(chord("Focus Up", #selector(AppDelegate.focusUp(_:)), "k", [.command, .control]))
         viewMenu.addItem(chord("Focus Right", #selector(AppDelegate.focusRight(_:)), "l", [.command, .control]))
+
+        // Window menu. AppKit auto-inserts the native tab commands (Show Next Tab,
+        // Merge All Windows, …) once this is registered as NSApp.windowsMenu.
+        // ⌘1..⌘9 focus the Nth project tab (MILESTONE_1 §5).
+        let windowItem = NSMenuItem()
+        main.addItem(windowItem)
+        let windowMenu = NSMenu(title: "Window")
+        windowItem.submenu = windowMenu
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(.separator())
+        for n in 1...9 {
+            let item = NSMenuItem(title: "Project \(n)", action: #selector(AppDelegate.selectProject(_:)), keyEquivalent: "\(n)")
+            item.tag = n
+            windowMenu.addItem(item)
+        }
 
         return main
     }
