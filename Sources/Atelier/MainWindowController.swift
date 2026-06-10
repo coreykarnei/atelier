@@ -21,7 +21,6 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     private let sessionArea = NSView()
     private let bottomBar = BottomBar()
     private var bottomBarHeight: NSLayoutConstraint?
-    private var cachedBranch: String?
     private var titleTimer: Timer?
 
     private var activeSession: Session? {
@@ -133,11 +132,12 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         adopt(Session(cwd: Self.defaultWorkdir()))
     }
 
-    /// The tab-strip `+` — another session on the active session's root
-    /// (MILESTONE_1 §6). Falls back to a Landing when the active tab is one.
-    func addSessionOnCurrentRoot() {
-        if let active = activeSession, active.state == .ide {
-            adopt(Session(ideRoot: active.cwd))
+    /// The tab-strip `+` / `⌘⇧T` — another session on the project's *main*
+    /// checkout, regardless of which worktree the active tab is on. Falls back to
+    /// a Landing when the window isn't anchored to a project yet.
+    func addSessionOnMain() {
+        if let root = projectRepoRoot {
+            adopt(Session(ideRoot: root))
         } else {
             addSession()
         }
@@ -152,13 +152,13 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
                     self.window?.makeFirstResponder(session.defaultFocusView)
                 }
             }
-            self.refreshBranch()
+            self.updateBottomBar()
         }
         sessions.append(session)
         if processesStarted { session.start() }
         noteProjectRoot(for: session)
         showSession(at: sessions.count - 1)
-        refreshBranch()
+        updateBottomBar()
     }
 
     /// Anchor the window to its project once the first IDE session exists: cache
@@ -191,11 +191,19 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         session.container.removeFromSuperview()
 
         if sessions.isEmpty {
-            window?.close()
+            // Closing the last tab kicks back to the Launch view — the window
+            // un-anchors from its project and becomes a fresh Landing.
+            revertToLanding()
             return
         }
         showSession(at: min(activeIndex, sessions.count - 1))
-        refreshBranch()
+        updateBottomBar()
+    }
+
+    private func revertToLanding() {
+        projectRepoRoot = nil
+        window?.title = "New Tab"
+        addSession()
     }
 
     func selectNext() { guard !sessions.isEmpty else { return }; showSession(at: (activeIndex + 1) % sessions.count) }
@@ -216,7 +224,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             session.container.trailingAnchor.constraint(equalTo: sessionArea.trailingAnchor),
         ])
         window?.makeFirstResponder(session.defaultFocusView)
-        refreshBranch()
+        updateBottomBar()
     }
 
     // MARK: Layout & focus
@@ -267,33 +275,24 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         bottomBar.isHidden = barHidden
         bottomBarHeight?.constant = barHidden ? 0 : BottomBar.height
 
+        // The pill is *static* per window: the project name once anchored, so
+        // switching sessions never reflows the bar. Pre-anchor it shows where a
+        // landing would open.
         let pill: String
-        var mode: LayoutMode?
-        if let session = activeSession {
-            switch session.state {
-            case .ide:
-                pill = cachedBranch.map { "⎇ \($0)" } ?? Self.abbreviate(session.cwd)
-                mode = session.layoutMode
-            case .landing:
-                // No branch to show yet — the pill is still "you are here."
-                pill = Self.abbreviate(session.cwd)
-            }
+        if let projectRepoRoot {
+            pill = (projectRepoRoot as NSString).lastPathComponent
+        } else if let session = activeSession {
+            pill = Self.abbreviate(session.cwd)
         } else {
             pill = ""
         }
+        let mode: LayoutMode? = activeSession?.state == .ide ? activeSession?.layoutMode : nil
         bottomBar.update(
             titles: sessions.map(\.title),
             activeIndex: activeIndex,
             pill: pill,
             mode: mode
         )
-    }
-
-    private func refreshBranch() {
-        cachedBranch = activeSession.flatMap { session in
-            session.state == .ide ? Self.currentBranch(cwd: session.cwd) : nil
-        }
-        updateBottomBar()
     }
 
     private static func abbreviate(_ path: String) -> String {
@@ -325,7 +324,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     // MARK: BottomBarDelegate
 
     func bottomBarDidSelectSession(at index: Int) { showSession(at: index) }
-    func bottomBarDidRequestNewSession() { addSessionOnCurrentRoot() }
+    func bottomBarDidRequestNewSession() { addSessionOnMain() }
     func bottomBarDidRequestCloseSession(at index: Int) {
         showSession(at: index)
         closeActiveSession()
@@ -458,7 +457,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
                     self.adopt(Session(ideRoot: repoRoot))
                 } else {
                     self.showSession(at: min(self.activeIndex, self.sessions.count - 1))
-                    self.refreshBranch()
+                    self.updateBottomBar()
                 }
                 try WorktreeManager.remove(path: row.worktree.path, repoRoot: repoRoot, force: row.isDirty)
             } catch {
@@ -506,8 +505,8 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
                 self?.promoteActiveSessionHere()
             })
         }
-        commands.append(PaletteCommand(id: "session.new", title: "Session: New on This Root", key: "⌘⇧T") { [weak self] in
-            self?.addSessionOnCurrentRoot()
+        commands.append(PaletteCommand(id: "session.new", title: "Session: New on Main", key: "⌘⇧T") { [weak self] in
+            self?.addSessionOnMain()
         })
         commands.append(PaletteCommand(id: "session.close", title: "Session: Close", key: "⌘W") { [weak self] in
             self?.closeActiveSession()
@@ -590,18 +589,4 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         return home
     }
 
-    /// The current git branch of `cwd`, or nil if it isn't a repo / is detached.
-    private static func currentBranch(cwd: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"]
-        let out = Pipe()
-        process.standardOutput = out
-        process.standardError = Pipe()
-        try? process.run()
-        process.waitUntilExit()
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        let branch = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return branch.isEmpty || branch == "HEAD" ? nil : branch
-    }
 }

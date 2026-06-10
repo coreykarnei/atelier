@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             activeWindow: controllers.firstIndex { $0.window === NSApp.keyWindow } ?? 0
         )
         SessionStore.save(state)
+        isTerminating = true
         return .terminateNow
     }
 
@@ -74,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 : "\(orphans.count) sessions weren't restored"
             alert.informativeText = "Their worktrees no longer exist: "
                 + orphans.joined(separator: ", ")
-                + ". Recreate a worktree from the branch pill if you need one back."
+                + ". Recreate a worktree from the project pill if you need one back."
             alert.addButton(withTitle: "OK")
             if let window = NSApp.keyWindow {
                 alert.beginSheetModal(for: window)
@@ -128,9 +129,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notificationServer.stop()
     }
 
+    /// Closing the last project tab kicks back to the Launch view, not out of the
+    /// app: a fresh Landing window opens in its place (unless we're quitting).
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        false
     }
+
+    private var isTerminating = false
 
     // MARK: Project windows
 
@@ -163,6 +168,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controllers[index].terminateAllSessions()
             controllers.remove(at: index)
         }
+        // Last project tab closed → back to the Launch view (a fresh Landing),
+        // not out of the app. Deferred so the close finishes unwinding first.
+        if controllers.isEmpty, !isTerminating {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.controllers.isEmpty, !self.isTerminating else { return }
+                self.openProjectWindow()
+            }
+        }
     }
 
     // MARK: Menu actions (responder chain)
@@ -188,7 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func toggleLayout(_ sender: Any?) { keyController?.toggleLayout() }
 
-    @objc func newSession(_ sender: Any?) { keyController?.addSessionOnCurrentRoot() }
+    @objc func newSession(_ sender: Any?) { keyController?.addSessionOnMain() }
     @objc func openIDEHere(_ sender: Any?) { keyController?.promoteActiveSessionHere() }
     @objc func closeSession(_ sender: Any?) { keyController?.closeActiveSession() }
     @objc func nextSession(_ sender: Any?) { keyController?.selectNext() }
