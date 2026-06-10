@@ -6,7 +6,12 @@ import AppKit
 ///
 /// It is a long-lived view: in Split mode it is removed from the split tree but not
 /// destroyed, so toggling back to Triptych is lossless (MILESTONE_1 §3).
-final class EditorPlaceholderView: NSView {
+final class EditorPlaceholderView: NSView, WorkspacePane {
+    /// Focus target for the focus manager — the placeholder itself, so `⌃⌘+hjkl` can
+    /// land here even before the real editor exists.
+    var focusView: NSView { self }
+    override var acceptsFirstResponder: Bool { true }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true

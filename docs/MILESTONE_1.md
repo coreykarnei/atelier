@@ -64,6 +64,27 @@ context, and native window tabbing if you ever want them collapsed into one fram
 The always-visible project row the author wanted is delivered by putting project
 tabs **in the titlebar** (§4), at zero extra vertical cost.
 
+### 2.1 The Landing (added during M1.2)
+
+A session does not start as the full pane shape — it starts as a **Landing** and
+is **promoted** into an IDE session:
+
+- **`⌘T` opens a Landing tab:** a compact recents list (recent roots + git repos
+  in the default folder) over a plain terminal. No editor, no Claude — a Landing
+  *is* the "just a terminal" tab, useful as-is forever; promotion is optional.
+- **Two promote paths, same result:** pick a recent (`↩` / double-click), or
+  `cd` anywhere in the landing terminal and hit **`⌘↩` ("Open IDE Here")** — the
+  session transforms *in place* into the Triptych rooted there: the shell
+  re-roots (send-keys `cd`, the `ide` script's own move), Claude spawns with the
+  pinned session id, the pill picks up the branch.
+- **Claude only ever spawns on promote**, rooted in a real project — there is no
+  "claude running in a junk default cwd," which also shrinks the TCC prompt
+  surface.
+- **Promotion is one-way.** To go elsewhere, open a new Landing (`⌘T` is two
+  keys). App/project-window open with no restored session lands on a Landing.
+- The landing terminal is **focused by default** (terminal-first); the list is
+  one `⌃⌘k` away.
+
 ---
 
 ## 3. Layouts **[LOCKED]**
@@ -316,7 +337,9 @@ Dependency-ordered; each sub-step is independently useful.
   the layout right for a single session before multiplying anything.
 - **M1.2 — Sessions within a window.** Bottom-bar tab strip; new/close/switch;
   focus manager (`⌃⌘+hjkl`, session chords); Claude-title labels (reuse M0
-  transcript reader); worktree grouping; max-width/ellipsis/two-row wrap.
+  transcript reader); the Landing + promote flow (§2.1); tmux-style bar colors
+  (blue pill, green active tab); worktree grouping and two-row wrap follow with
+  worktrees (M1.4).
 - **M1.3 — Projects as windows.** Multi-window app; titlebar project tabs;
   `⌘1..9` / `⌘``; per-window session state.
 - **M1.4 — Worktree manager.** The left-pill fan (list/create/return/remove),

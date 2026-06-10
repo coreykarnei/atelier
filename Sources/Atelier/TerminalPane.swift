@@ -6,8 +6,11 @@ import SwiftTerm
 ///
 /// Both the shell pane and the agent (Claude Code) pane are instances of this —
 /// per TECHNICAL_PLAN §1, both are terminal programs and Atelier owns the emulator.
-final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
+final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePane {
     let terminal: LocalProcessTerminalView
+
+    /// Focus target for the window's `⌃⌘+hjkl` focus manager.
+    var focusView: NSView { terminal }
 
     /// Called when the hosted process exits, so the host can decide what to do
     /// (e.g. respawn the shell, or mark the agent pane idle).
@@ -57,6 +60,24 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
             (terminal as? AgentTerminalView)?.transcriptCwd = cwd
         }
         terminal.startProcess(executable: executable, args: args, environment: env, execName: nil)
+    }
+
+    /// Kill the hosted process (used when a session is closed).
+    func terminate() {
+        terminal.terminate()
+    }
+
+    /// Type into the hosted process's PTY — used to re-root the shell on session
+    /// promote, the same move the `ide` script makes with tmux send-keys.
+    func send(text: String) {
+        let bytes = Array(text.utf8)
+        terminal.process?.send(data: bytes[...])
+    }
+
+    /// PID of the hosted process (nil before `start`).
+    var hostedPid: pid_t? {
+        guard let process = terminal.process, process.shellPid != 0 else { return nil }
+        return process.shellPid
     }
 
     // MARK: LocalProcessTerminalViewDelegate

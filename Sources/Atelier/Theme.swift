@@ -33,6 +33,14 @@ enum Theme {
     // Chrome tokens (non-terminal AppKit views).
     static let editorPlaceholderBackground = nsColor(0x181825) // mantle
     static let chromeMutedText = nsColor(0x6C7086)             // overlay0
+    static let chromeText = nsColor(0xCDD6F4)                  // text
+    static let bottomBarBackground = nsColor(0x181825)         // mantle
+    static let bottomBarBorder = nsColor(0x313244)             // surface0
+    static let tabActiveBackground = nsColor(0x313244)         // surface0
+    static let accentBlue = nsColor(0x89B4FA)                  // blue
+    static let accentGreen = nsColor(0xA6E3A1)                 // green
+    /// Dark text on accent fills — the tmux status-bar look (blue/green pill, base text).
+    static let accentTextDark = nsColor(0x1E1E2E)              // base
 
     /// AppKit chrome color from a 0xRRGGBB hex.
     private static func nsColor(_ hex: UInt32) -> NSColor {

@@ -13,46 +13,36 @@ enum LayoutMode: String {
     var next: LayoutMode { self == .triptych ? .split : .triptych }
 }
 
-/// A resizable divider whose position persists across restarts.
+/// Static configuration for one resizable divider: its identity, default position,
+/// and the minimum sizes of the two subviews it separates.
 ///
-/// Stepping stone: persisted globally per (mode, slot) in `UserDefaults` for
-/// Milestone 1.1, since there is only one implicit session. M1.2 re-keys this by
-/// session id so each tab owns its own dividers (MILESTONE_1 §3: "per-session is
-/// the only truth"). The fraction is stored 0–1 so it survives window resizing.
+/// The *actual* position is owned per-session (M1.2): each `Session` stores its own
+/// fraction keyed by `(mode, slot.id)`, so two tabs on the same root keep
+/// independent dividers (MILESTONE_1 §3: "per-session is the only truth"). M1.5
+/// serializes those to disk; until then they live in memory on the session.
 struct LayoutSlot {
-    let key: String
+    let id: String
     let defaultFraction: CGFloat
     /// Minimum point size of the first (top/left) subview.
     let minFirst: CGFloat
     /// Minimum point size of the second (bottom/right) subview.
     let minSecond: CGFloat
-
-    var fraction: CGFloat {
-        get {
-            guard let stored = UserDefaults.standard.object(forKey: key) as? Double else {
-                return defaultFraction
-            }
-            return CGFloat(stored)
-        }
-        nonmutating set {
-            UserDefaults.standard.set(Double(newValue), forKey: key)
-        }
-    }
 }
 
 enum LayoutSlots {
     /// Triptych outer split: left column width vs. agent (vertical divider).
-    static let triptychOuter = LayoutSlot(key: "layout.triptych.outer", defaultFraction: 0.47, minFirst: 280, minSecond: 360)
+    static let triptychOuter = LayoutSlot(id: "triptych.outer", defaultFraction: 0.47, minFirst: 280, minSecond: 360)
     /// Triptych inner split: editor height vs. shell (horizontal divider).
-    static let triptychInner = LayoutSlot(key: "layout.triptych.inner", defaultFraction: 0.70, minFirst: 120, minSecond: 80)
+    static let triptychInner = LayoutSlot(id: "triptych.inner", defaultFraction: 0.70, minFirst: 120, minSecond: 80)
     /// Split mode: agent height vs. shell (horizontal divider). Agent takes the
     /// larger share — in this mode you're driving the agent, the shell is a sidecar.
-    static let splitVertical = LayoutSlot(key: "layout.split.vertical", defaultFraction: 0.75, minFirst: 160, minSecond: 80)
+    static let splitVertical = LayoutSlot(id: "split.vertical", defaultFraction: 0.75, minFirst: 160, minSecond: 80)
+    /// Landing: recents list height vs. terminal (horizontal divider).
+    static let landingVertical = LayoutSlot(id: "landing.vertical", defaultFraction: 0.32, minFirst: 110, minSecond: 120)
 }
 
-/// An `NSSplitView` that knows which persisted slot governs its divider, so the
-/// window controller can save/restore and constrain it without tracking identity
-/// separately.
+/// An `NSSplitView` that knows which slot governs its divider, so the owning session
+/// can save/restore and constrain it without tracking identity separately.
 final class LayoutSplitView: NSSplitView {
     var slot: LayoutSlot!
 }
