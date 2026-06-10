@@ -4,12 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-**Milestone 0 (the spike) complete; Milestone 1 designed, pre-implementation.**
-The native substrate is scaffolded and runs, and the bet is proven. Read
+**Milestones 0 and 1 built (M1.1–M1.6 landed); refinement pass pending.** Read
 `VISION.md` (the authoritative *what*), `TECHNICAL_PLAN.md` (the *how* and the
-milestone sequence), and — for the next phase — `docs/MILESTONE_1.md` (the
-resolved workspace/layout/keymap/worktree/persistence design) before proposing
-anything.
+milestone sequence), and `docs/MILESTONE_1.md` (the workspace/layout/keymap/
+worktree/persistence design, as built) before proposing anything.
 
 What exists today:
 - A **SwiftPM macOS app** (Swift 6 toolchain, language mode v5) using **AppKit** +
@@ -23,10 +21,23 @@ What exists today:
 Truthful copy is working in both panes (shell via soft-wrap join; agent via
 transcript-aligned markdown — see the M0 devlog).
 
-Not yet built (Milestone 1, designed in `docs/MILESTONE_1.md`): the fixed
-three-pane layout + Triptych/Split modes, projects-as-windows with session tabs,
-the worktree manager + `atelier` CLI, session persistence, and the command
-palette. The code editor remains a placeholder until Milestone 2.
+Milestone 1 (built; see `docs/MILESTONE_1.md`):
+- **Projects as native tabbed windows** (`⌘T` new project tab, `⌘1..9`),
+  **sessions as bottom-bar tabs** (`⌘⇧T` sibling on the same root), each hosting
+  its own pinned `claude --session-id` whose transcript `ai-title` labels the tab.
+- **The Landing** (§2.1): sessions start as recents-over-terminal and promote in
+  place (pick a repo, or `⌘↩` on the landing terminal's cwd); Claude spawns only
+  on promote.
+- **Triptych/Split layouts** (`⌘\`), per-session dividers; `⌃⌘+hjkl` pane focus.
+- **Worktree manager**: the pill fan (create/return/guarded-remove) +
+  `atelier` / `-b` / `-rm` CLI over the M0 socket (`make install-cli`).
+- **Session persistence**: window→session tree saved on quit, restored on launch
+  with root validation; agents resume via `claude --resume`.
+- **Command palette** (`⌘⇧P`).
+
+Not yet built: per-tab attention state (§7.1, deferred), worktree grouping +
+two-row wrap in the tab strip, tab rename. The code editor (and `⌘P`/`⌘⇧F`)
+remains a placeholder until Milestone 2.
 
 ## Commands
 
