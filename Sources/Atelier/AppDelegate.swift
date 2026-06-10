@@ -22,8 +22,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notificationServer.onCommand = { [weak self] command in self?.handle(command) }
         notificationServer.start()
 
-        openProjectWindow()
+        restoreOrOpenFresh()
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: Persistence (MILESTONE_1 §9)
+
+    /// Snapshot before windows tear down — `applicationWillTerminate` is too late,
+    /// the controllers are already gone by then. Closing every window by hand
+    /// quits without a snapshot; that's deliberate ("I closed my projects").
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let state = PersistedState(
+            windows: controllers.map { $0.persisted() },
+            activeWindow: controllers.firstIndex { $0.window === NSApp.keyWindow } ?? 0
+        )
+        SessionStore.save(state)
+        return .terminateNow
+    }
+
+    /// Restore the saved workspace; validate every session root first (§9.1):
+    /// an orphaned root is surfaced and dropped — never silently dropped,
+    /// reparented, or resurrected.
+    private func restoreOrOpenFresh() {
+        guard let state = SessionStore.load(), !state.windows.isEmpty else {
+            openProjectWindow()
+            return
+        }
+
+        var orphans: [String] = []
+        var restoredAny = false
+        for window in state.windows {
+            let valid = window.sessions.filter { session in
+                var isDir: ObjCBool = false
+                let ok = FileManager.default.fileExists(atPath: session.cwd, isDirectory: &isDir) && isDir.boolValue
+                if !ok { orphans.append(session.title) }
+                return ok
+            }
+            guard !valid.isEmpty else { continue }
+            var pruned = window
+            pruned.sessions = valid
+            pruned.activeIndex = min(window.activeIndex, valid.count - 1)
+            restoreProjectWindow(pruned)
+            restoredAny = true
+        }
+        if !restoredAny { openProjectWindow() }
+
+        if !orphans.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = orphans.count == 1
+                ? "1 session wasn't restored"
+                : "\(orphans.count) sessions weren't restored"
+            alert.informativeText = "Their worktrees no longer exist: "
+                + orphans.joined(separator: ", ")
+                + ". Recreate a worktree from the branch pill if you need one back."
+            alert.addButton(withTitle: "OK")
+            if let window = NSApp.keyWindow {
+                alert.beginSheetModal(for: window)
+            } else {
+                alert.runModal()
+            }
+        }
+    }
+
+    private func restoreProjectWindow(_ persisted: PersistedWindow) {
+        let controller = MainWindowController(restored: persisted)
+        controllers.append(controller)
+        if let window = controller.window {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(windowWillClose(_:)),
+                name: NSWindow.willCloseNotification, object: window
+            )
+            if let anchor = controllers.dropLast().last?.window {
+                anchor.addTabbedWindow(window, ordered: .above)
+            }
+        }
+        controller.showWindow(nil)
+        controller.startProcesses()
     }
 
     /// A command from the `atelier` CLI: route to the project window anchored to

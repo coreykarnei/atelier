@@ -31,6 +31,29 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     /// `root == nil` opens as a Landing (a new project tab); a path opens the
     /// project directly (the CLI's `atelier <path>`).
     convenience init(root: String? = nil) {
+        self.init(chrome: ())
+        if let root {
+            adopt(Session(ideRoot: root))
+        } else {
+            addSession()
+        }
+    }
+
+    /// Rebuild a window from a snapshot (sessions are pre-validated by the caller).
+    convenience init(restored: PersistedWindow) {
+        self.init(chrome: ())
+        for persisted in restored.sessions {
+            adopt(Session(restored: persisted))
+        }
+        if sessions.isEmpty {
+            addSession()
+        } else if sessions.indices.contains(restored.activeIndex) {
+            showSession(at: restored.activeIndex)
+        }
+    }
+
+    /// Shared window + chrome setup; sessions are the caller's job.
+    private convenience init(chrome: Void) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -55,13 +78,12 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         self.init(window: window)
         window.center()
         window.setFrameAutosaveName("AtelierMainWindow")
-
         buildChrome(in: blur)
-        if let root {
-            adopt(Session(ideRoot: root))
-        } else {
-            addSession()
-        }
+    }
+
+    /// Snapshot for the session store.
+    func persisted() -> PersistedWindow {
+        PersistedWindow(sessions: sessions.map { $0.persisted() }, activeIndex: activeIndex)
     }
 
     deinit {

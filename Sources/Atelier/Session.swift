@@ -27,7 +27,10 @@ final class Session: NSObject, NSSplitViewDelegate {
     private(set) var state: State = .landing
     private(set) var cwd: String
     /// Lowercased to match Claude's on-disk transcript filename.
-    let claudeSessionId = UUID().uuidString.lowercased()
+    let claudeSessionId: String
+    /// True when this session came back from disk — the agent then *resumes* its
+    /// previous Claude conversation instead of starting a fresh one.
+    private let isRestored: Bool
 
     let editorPane = EditorPlaceholderView(frame: .zero)
     let shellPane = TerminalPane()
@@ -60,6 +63,8 @@ final class Session: NSObject, NSSplitViewDelegate {
     init(cwd: String) {
         self.cwd = cwd
         self.title = (cwd as NSString).lastPathComponent
+        self.claudeSessionId = UUID().uuidString.lowercased()
+        self.isRestored = false
         super.init()
         container.translatesAutoresizingMaskIntoConstraints = false
 
@@ -76,9 +81,45 @@ final class Session: NSObject, NSSplitViewDelegate {
         self.cwd = ideRoot
         self.title = (ideRoot as NSString).lastPathComponent
         self.state = .ide
+        self.claudeSessionId = UUID().uuidString.lowercased()
+        self.isRestored = false
         super.init()
         container.translatesAutoresizingMaskIntoConstraints = false
         rebuildLayout()
+    }
+
+    /// A session restored from disk (MILESTONE_1 §9). IDE sessions come back on
+    /// their root with their layout and dividers; the agent resumes its previous
+    /// conversation. Landings come back as Landings.
+    init(restored: PersistedSession) {
+        self.cwd = restored.cwd
+        self.title = restored.title
+        self.claudeSessionId = restored.claudeSessionId
+        self.isRestored = true
+        self.state = restored.isIDE ? .ide : .landing
+        self.layoutMode = LayoutMode(rawValue: restored.layoutMode) ?? .triptych
+        self.dividers = restored.dividers.mapValues { CGFloat($0) }
+        super.init()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        if state == .landing {
+            let landing = LandingView(defaultFolder: cwd)
+            landing.onOpen = { [weak self] path in self?.promote(to: path) }
+            landingView = landing
+        }
+        rebuildLayout()
+    }
+
+    /// Snapshot for the session store.
+    func persisted() -> PersistedSession {
+        PersistedSession(
+            cwd: cwd,
+            isIDE: state == .ide,
+            layoutMode: layoutMode.rawValue,
+            title: title,
+            claudeSessionId: claudeSessionId,
+            dividers: dividers.mapValues { Double($0) }
+        )
     }
 
     deinit {
@@ -121,10 +162,28 @@ final class Session: NSObject, NSSplitViewDelegate {
         guard !agentStarted else { return }
         agentStarted = true
         let claude = Session.resolveClaudeBinary()
-        agentPane.start(executable: claude, args: ["--session-id", claudeSessionId], cwd: cwd)
+        // A restored session resumes its previous conversation — provided its
+        // transcript still exists; otherwise start fresh under the same id.
+        let args: [String]
+        if isRestored, Self.transcriptExists(sessionId: claudeSessionId, cwd: cwd) {
+            args = ["--resume", claudeSessionId]
+        } else {
+            args = ["--session-id", claudeSessionId]
+        }
+        agentPane.start(executable: claude, args: args, cwd: cwd)
         agentPane.onProcessTerminated = { [id] code in
             NSLog("Atelier: agent process exited (session \(id), code: \(String(describing: code)))")
         }
+    }
+
+    private static func transcriptExists(sessionId: String, cwd: String) -> Bool {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let encoded = cwd
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ".", with: "-")
+        return FileManager.default.fileExists(
+            atPath: "\(home)/.claude/projects/\(encoded)/\(sessionId).jsonl"
+        )
     }
 
     /// Terminate the hosted processes when the session is closed.
