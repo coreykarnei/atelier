@@ -35,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 break
             }
         }
+        notificationServer.onDebug = { [weak self] debug in self?.handle(debug) }
         notificationServer.start()
 
         restoreOrOpenFresh()
@@ -137,6 +138,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.removeWorktree(branch: branch)
         }
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Dev-only (`DebugMessage`): self-capture every visible window to PNGs.
+    /// Renders the app's own view tree, so it needs no Screen Recording grant;
+    /// note the behind-window blur is composited by the WindowServer and won't
+    /// appear — judge translucency live, use these for layout/type/color.
+    private func handle(_ debug: DebugMessage) {
+        guard debug.debug == .snapshot else { return }
+        let dir = URL(fileURLWithPath: debug.path, isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for (index, window) in NSApp.windows.enumerated() where window.isVisible {
+            guard let view = window.contentView,
+                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            guard let png = rep.representation(using: .png, properties: [:]) else { continue }
+            let name = "atelier-\(index)-\(window.title.isEmpty ? "untitled" : window.title).png"
+            try? png.write(to: dir.appendingPathComponent(name))
+        }
+        NSLog("Atelier: debug snapshot written to \(debug.path)")
     }
 
     func applicationWillTerminate(_ notification: Notification) {

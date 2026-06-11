@@ -27,6 +27,10 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
     /// Click-to-focus the right session tab (TECHNICAL_PLAN §4 M3). Main thread.
     var onNotificationClick: ((String) -> Void)?
 
+    /// Dev-only debug commands (window snapshots for the polish pass's visual
+    /// loop). Main thread.
+    var onDebug: ((DebugMessage) -> Void)?
+
     /// Request authorization and begin listening. Safe to call once at launch.
     func start() {
         let center = UNUserNotificationCenter.current()
@@ -99,6 +103,8 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
                 DispatchQueue.main.async { self.post(msg) }
             } else if let cmd = try? JSONDecoder().decode(CommandMessage.self, from: payload) {
                 DispatchQueue.main.async { self.onCommand?(cmd) }
+            } else if let dbg = try? JSONDecoder().decode(DebugMessage.self, from: payload) {
+                DispatchQueue.main.async { self.onDebug?(dbg) }
             }
         }
     }

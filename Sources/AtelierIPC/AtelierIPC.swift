@@ -81,6 +81,25 @@ public struct CommandMessage: Codable {
     }
 }
 
+/// Dev-only plumbing: debug commands for the polish pass's visual feedback
+/// loop. `snapshot` makes the app write PNGs of its own windows (self-capture
+/// needs no Screen Recording grant, unlike `screencapture`). Not surfaced in
+/// the `atelier` CLI — send raw JSON at the socket.
+public struct DebugMessage: Codable {
+    public enum Action: String, Codable {
+        case snapshot // write a PNG per visible window into `path`
+    }
+
+    public let debug: Action
+    /// Output directory for snapshots.
+    public let path: String
+
+    public init(debug: Action, path: String) {
+        self.debug = debug
+        self.path = path
+    }
+}
+
 extension AtelierIPC {
     /// Connect to the app's socket and write one message line. Returns false if
     /// the app isn't listening (callers decide whether to launch it and retry).
