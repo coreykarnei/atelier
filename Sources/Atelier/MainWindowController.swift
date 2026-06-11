@@ -218,8 +218,9 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         activeSession?.container.removeFromSuperview()
         activeIndex = index
         let session = sessions[index]
-        // Focusing a tab is "seeing" it — its attention badge clears (§7.1).
-        session.attention = .none
+        // Focusing a tab is "seeing" it — an unseen-completion badge clears
+        // (§7.1). Live states (working / needs-input) stay: still true facts.
+        if session.attention == .doneUnseen { session.attention = .none }
 
         session.container.removeFromSuperview()
         sessionArea.addSubview(session.container)
@@ -334,8 +335,9 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     // MARK: Attention (MILESTONE_1 §7.1)
 
     /// Apply an agent hook event to the session that fired it. Returns false if
-    /// the session lives in another window. Events on the tab you're looking at
-    /// are dropped — badges are for sessions you're *not* watching.
+    /// the session lives in another window. Live states (working, needs-input)
+    /// show on every tab including the active one; a completion you watched
+    /// happen is *seen* and leaves no badge.
     @discardableResult
     func applyAgentEvent(_ kind: NotifyMessage.Kind, sessionId: String) -> Bool {
         guard let index = sessions.firstIndex(where: { $0.claudeSessionId == sessionId }) else {
@@ -343,8 +345,8 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         }
         let onScreen = index == activeIndex && (window?.isKeyWindow ?? false)
         switch kind {
-        case .working: sessions[index].attention = onScreen ? .none : .working
-        case .inputNeeded: sessions[index].attention = onScreen ? .none : .needsInput
+        case .working: sessions[index].attention = .working
+        case .inputNeeded: sessions[index].attention = .needsInput
         case .stop: sessions[index].attention = onScreen ? .none : .doneUnseen
         }
         updateBottomBar()

@@ -232,22 +232,24 @@ No activity dot — see §7.1.
 
 ### 7.1 Per-session attention state **[BUILT]**
 
-The right-side "activity dot" idea was dropped as under-motivated: the active
-session is visible on screen (a dot for it is noise), and an inactive session needs
-a *per-session* signal, not a global one. The correctly-motivated version lives on
-the **tabs**, as a colored dot before the title:
+The right-side "activity dot" idea was dropped as under-motivated: a global dot
+can't say *which* session wants you. The per-session version lives on the
+**tabs**, as an always-visible colored dot before the title — color, not symbols,
+because the strip is peripheral vision and color reads without fixation:
 
 - **working** (blue) — agent mid-turn (`UserPromptSubmit` hook; tab state only,
-  no banner),
-- **needs input** (red) — agent blocked on a question (`Notification` hook),
+  no banner). Shows on every tab, including the active one.
+- **needs input** (red) — agent blocked on a question (`Notification` hook).
+  Also always visible.
 - **finished-since-away** (green) — completed while you were on another
-  tab/project (`Stop` hook); clears when you focus the tab (an unread badge).
+  tab/project (`Stop` hook); clears when you focus the tab (an unread badge —
+  a completion you watched happen leaves no badge).
 
 Mechanics: the hooks pipe their stdin payload's `session_id` through
 `atelier-notify` onto the M0 socket; the app maps it to the session via its pinned
 claude session id. One event, two sinks — the OS banner for "look at the app"
 (banner clicks **focus the exact session tab**, the M3 affordance) and the tab
-badge for "look at *this* session." Events on the tab you're watching are dropped.
+badge for "look at *this* session."
 The hooks fragment is merged *alongside* the dotfiles afplay hooks, additively.
 
 ---

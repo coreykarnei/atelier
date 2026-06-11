@@ -352,9 +352,11 @@ private final class SessionTabView: NSView {
         var leading: NSLayoutXAxisAnchor = leadingAnchor
         var leadingPad: CGFloat = 8
 
-        // Attention dot (MILESTONE_1 §7.1) — only meaningful on inactive tabs;
-        // the active tab's state is on screen.
-        if info.attention != .none, !isActive {
+        // Attention dot (MILESTONE_1 §7.1) — always visible: live states show on
+        // every tab including the active one (color reads peripherally; that's
+        // the dot's whole job). Unseen-completion never reaches an active tab —
+        // it clears on focus.
+        if info.attention != .none {
             let dot = NSView()
             dot.wantsLayer = true
             dot.layer?.cornerRadius = 3
