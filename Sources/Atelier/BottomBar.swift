@@ -352,24 +352,34 @@ private final class SessionTabView: NSView {
         var leading: NSLayoutXAxisAnchor = leadingAnchor
         var leadingPad: CGFloat = 8
 
-        // Attention dot (MILESTONE_1 §7.1) — always visible: live states show on
-        // every tab including the active one (color reads peripherally; that's
-        // the dot's whole job). Unseen-completion never reaches an active tab —
-        // it clears on focus.
+        // Attention badge (MILESTONE_1 §7.1) — always visible: the agent's exact
+        // state, read peripherally. Dots for working/waiting/done-unseen; a `!`
+        // when the agent is explicitly blocked on you.
         if info.attention != .none {
-            let dot = NSView()
-            dot.wantsLayer = true
-            dot.layer?.cornerRadius = 3
-            dot.layer?.backgroundColor = Self.badgeColor(info.attention).cgColor
-            dot.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(dot)
+            let badge: NSView
+            if info.attention == .needsInput {
+                let mark = NSTextField(labelWithString: "!")
+                mark.font = .systemFont(ofSize: 11, weight: .heavy)
+                mark.textColor = Theme.accentPeach
+                badge = mark
+            } else {
+                let dot = NSView()
+                dot.wantsLayer = true
+                dot.layer?.cornerRadius = 3
+                dot.layer?.backgroundColor = Self.badgeColor(info.attention).cgColor
+                NSLayoutConstraint.activate([
+                    dot.widthAnchor.constraint(equalToConstant: 6),
+                    dot.heightAnchor.constraint(equalToConstant: 6),
+                ])
+                badge = dot
+            }
+            badge.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(badge)
             NSLayoutConstraint.activate([
-                dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-                dot.centerYAnchor.constraint(equalTo: centerYAnchor),
-                dot.widthAnchor.constraint(equalToConstant: 6),
-                dot.heightAnchor.constraint(equalToConstant: 6),
+                badge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+                badge.centerYAnchor.constraint(equalTo: centerYAnchor),
             ])
-            leading = dot.trailingAnchor
+            leading = badge.trailingAnchor
             leadingPad = 5
         }
 
@@ -416,7 +426,8 @@ private final class SessionTabView: NSView {
         switch attention {
         case .none: return .clear
         case .working: return Theme.accentBlue
-        case .needsInput: return Theme.accentRed
+        case .waiting: return Theme.accentPeach
+        case .needsInput: return Theme.accentPeach // rendered as `!`, not a dot
         case .doneUnseen: return Theme.accentGreen
         }
     }

@@ -218,9 +218,9 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         activeSession?.container.removeFromSuperview()
         activeIndex = index
         let session = sessions[index]
-        // Focusing a tab is "seeing" it — an unseen-completion badge clears
-        // (§7.1). Live states (working / needs-input) stay: still true facts.
-        if session.attention == .doneUnseen { session.attention = .none }
+        // Focusing a tab is "seeing" it: an unseen completion becomes *waiting* —
+        // the agent finished and it's your move (§7.1). Live states stay as-is.
+        if session.attention == .doneUnseen { session.attention = .waiting }
 
         session.container.removeFromSuperview()
         sessionArea.addSubview(session.container)
@@ -335,19 +335,29 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     // MARK: Attention (MILESTONE_1 §7.1)
 
     /// Apply an agent hook event to the session that fired it. Returns false if
-    /// the session lives in another window. Live states (working, needs-input)
-    /// show on every tab including the active one; a completion you watched
-    /// happen is *seen* and leaves no badge.
+    /// the session lives in another window. The dot is the agent's exact state:
+    /// working and waiting are live facts shown on every tab; a completion you
+    /// watched happen goes straight to *waiting* (your move), while one you
+    /// missed shows green until seen.
     @discardableResult
-    func applyAgentEvent(_ kind: NotifyMessage.Kind, sessionId: String) -> Bool {
-        guard let index = sessions.firstIndex(where: { $0.claudeSessionId == sessionId }) else {
+    func applyAgentEvent(_ message: NotifyMessage) -> Bool {
+        guard let sessionId = message.sessionId,
+              let index = sessions.firstIndex(where: { $0.claudeSessionId == sessionId }) else {
             return false
         }
         let onScreen = index == activeIndex && (window?.isKeyWindow ?? false)
-        switch kind {
-        case .working: sessions[index].attention = .working
-        case .inputNeeded: sessions[index].attention = .needsInput
-        case .stop: sessions[index].attention = onScreen ? .none : .doneUnseen
+        switch message.kind {
+        case .working:
+            sessions[index].attention = .working
+        case .inputNeeded:
+            // The Notification hook carries both Claude's idle "waiting for your
+            // input" ping and genuine blockers (permission, question). Only the
+            // latter earns the `!`.
+            sessions[index].attention = message.body.lowercased().contains("waiting")
+                ? .waiting
+                : .needsInput
+        case .stop:
+            sessions[index].attention = onScreen ? .waiting : .doneUnseen
         }
         updateBottomBar()
         return true

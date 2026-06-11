@@ -23,13 +23,15 @@ protocol WorkspacePane: NSView {
 final class Session: NSObject, NSSplitViewDelegate {
     enum State { case landing, ide }
 
-    /// Per-tab attention (MILESTONE_1 §7.1) — about sessions you're *not* looking
-    /// at. Set from agent hook events; cleared the moment the tab is focused.
+    /// Per-tab attention (MILESTONE_1 §7.1): the agent's exact state, always
+    /// visible on the tab. Once a session has run, it is essentially always
+    /// either working or waiting — `none` is the never-prompted state.
     enum Attention {
         case none
-        case working      // agent mid-turn
-        case needsInput   // agent blocked on a question
-        case doneUnseen   // finished while you were elsewhere
+        case working      // agent mid-turn (blue dot)
+        case waiting      // turn done, your move (peach dot)
+        case needsInput   // agent explicitly blocked — permission/question (peach !)
+        case doneUnseen   // finished while you were elsewhere (green dot → waiting on focus)
     }
 
     let id = UUID()

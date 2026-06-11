@@ -234,16 +234,21 @@ No activity dot — see §7.1.
 
 The right-side "activity dot" idea was dropped as under-motivated: a global dot
 can't say *which* session wants you. The per-session version lives on the
-**tabs**, as an always-visible colored dot before the title — color, not symbols,
-because the strip is peripheral vision and color reads without fixation:
+**tabs**, always visible — the agent's *exact* state, read peripherally (color
+over symbols; the one symbol is reserved for the one urgent state). Once a
+session has run it is essentially always either working or waiting:
 
-- **working** (blue) — agent mid-turn (`UserPromptSubmit` hook; tab state only,
-  no banner). Shows on every tab, including the active one.
-- **needs input** (red) — agent blocked on a question (`Notification` hook).
-  Also always visible.
-- **finished-since-away** (green) — completed while you were on another
-  tab/project (`Stop` hook); clears when you focus the tab (an unread badge —
-  a completion you watched happen leaves no badge).
+- **working** (blue dot) — agent mid-turn (`UserPromptSubmit` hook; tab state
+  only, no banner).
+- **waiting** (peach dot) — turn done, your move. Entered when a completion
+  happens on the tab you're watching, when a green tab is focused, or via
+  Claude's idle "waiting for your input" ping (classified from the
+  `Notification` hook body).
+- **needs input** (peach `!`) — agent explicitly blocked: permission or a
+  question (the remaining `Notification` hook cases).
+- **finished-since-away** (green dot) — completed while you were on another
+  tab/project (`Stop` hook); on focus it becomes *waiting*, not nothing — the
+  unread mark clears, the fact that it's your move doesn't.
 
 Mechanics: the hooks pipe their stdin payload's `session_id` through
 `atelier-notify` onto the M0 socket; the app maps it to the session via its pinned

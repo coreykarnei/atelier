@@ -18,8 +18,10 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
     var onCommand: ((CommandMessage) -> Void)?
 
     /// Every agent lifecycle event (incl. `working`, which posts no banner) —
-    /// feeds the per-tab attention state (MILESTONE_1 §7.1). Main thread.
-    var onAgentEvent: ((NotifyMessage.Kind, String?) -> Void)?
+    /// feeds the per-tab attention state (MILESTONE_1 §7.1). The full message is
+    /// passed so the app can classify (e.g. idle-waiting vs needs-permission).
+    /// Main thread.
+    var onAgentEvent: ((NotifyMessage) -> Void)?
 
     /// A notification banner was clicked; the payload is the Claude session id.
     /// Click-to-focus the right session tab (TECHNICAL_PLAN §4 M3). Main thread.
@@ -103,7 +105,7 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
 
     private func post(_ msg: NotifyMessage) {
         NSLog("Atelier: notify received kind=\(msg.kind.rawValue) session=\(msg.sessionId ?? "-")")
-        onAgentEvent?(msg.kind, msg.sessionId)
+        onAgentEvent?(msg)
 
         // `working` is tab-state only — no banner for "you pressed Enter."
         guard msg.kind != .working else { return }

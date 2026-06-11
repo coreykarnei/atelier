@@ -22,9 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notificationServer.onCommand = { [weak self] command in self?.handle(command) }
         // Tab badges (§7.1): route each agent event to whichever window owns the
         // session; banner clicks focus that session's tab.
-        notificationServer.onAgentEvent = { [weak self] kind, sessionId in
-            guard let self, let sessionId else { return }
-            for controller in self.controllers where controller.applyAgentEvent(kind, sessionId: sessionId) {
+        notificationServer.onAgentEvent = { [weak self] message in
+            guard let self, message.sessionId != nil else { return }
+            for controller in self.controllers where controller.applyAgentEvent(message) {
                 break
             }
         }
