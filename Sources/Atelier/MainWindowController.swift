@@ -1,4 +1,5 @@
 import AppKit
+import AtelierIPC
 
 /// Direction for the `⌃⌘+hjkl` focus manager.
 enum FocusDirection { case left, right, up, down }
@@ -111,9 +112,12 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             bottomBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             bottomBar.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
-        let height = bottomBar.heightAnchor.constraint(equalToConstant: BottomBar.height)
+        let height = bottomBar.heightAnchor.constraint(equalToConstant: BottomBar.rowHeight)
         height.isActive = true
         bottomBarHeight = height
+        bottomBar.onDesiredHeightChange = { [weak self] newHeight in
+            self?.bottomBarHeight?.constant = newHeight
+        }
     }
 
     /// Start the hosted processes for every session. Called once the window is on
@@ -214,6 +218,8 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         activeSession?.container.removeFromSuperview()
         activeIndex = index
         let session = sessions[index]
+        // Focusing a tab is "seeing" it — its attention badge clears (§7.1).
+        session.attention = .none
 
         session.container.removeFromSuperview()
         sessionArea.addSubview(session.container)
@@ -273,7 +279,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         // yet and nothing to switch. The bar appears with promotion or a second tab.
         let barHidden = sessions.count == 1 && sessions[0].state == .landing
         bottomBar.isHidden = barHidden
-        bottomBarHeight?.constant = barHidden ? 0 : BottomBar.height
+        bottomBarHeight?.constant = barHidden ? 0 : bottomBar.desiredHeight
 
         // The pill is *static* per window: the project name once anchored, so
         // switching sessions never reflows the bar. Pre-anchor it shows where a
@@ -288,11 +294,72 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         }
         let mode: LayoutMode? = activeSession?.state == .ide ? activeSession?.layoutMode : nil
         bottomBar.update(
-            titles: sessions.map(\.title),
+            tabs: groupedTabs(),
             activeIndex: activeIndex,
             pill: pill,
             mode: mode
         )
+    }
+
+    /// Display order for the strip: tabs grouped by root, the project's main
+    /// checkout first, worktree groups in first-appearance order (MILESTONE_1 §7).
+    private func groupedTabs() -> [SessionTabInfo] {
+        var groupOrder: [String] = []
+        var groups: [String: [Int]] = [:]
+        for (index, session) in sessions.enumerated() {
+            if groups[session.cwd] == nil {
+                groups[session.cwd] = []
+                groupOrder.append(session.cwd)
+            }
+            groups[session.cwd]?.append(index)
+        }
+        if let root = projectRepoRoot, let mainIndex = groupOrder.firstIndex(of: root), mainIndex != 0 {
+            groupOrder.remove(at: mainIndex)
+            groupOrder.insert(root, at: 0)
+        }
+        return groupOrder.flatMap { key in
+            (groups[key] ?? []).map { index in
+                let session = sessions[index]
+                return SessionTabInfo(
+                    index: index,
+                    title: session.displayTitle,
+                    isWorktree: session.isWorktree,
+                    groupKey: key,
+                    attention: session.attention
+                )
+            }
+        }
+    }
+
+    // MARK: Attention (MILESTONE_1 §7.1)
+
+    /// Apply an agent hook event to the session that fired it. Returns false if
+    /// the session lives in another window. Events on the tab you're looking at
+    /// are dropped — badges are for sessions you're *not* watching.
+    @discardableResult
+    func applyAgentEvent(_ kind: NotifyMessage.Kind, sessionId: String) -> Bool {
+        guard let index = sessions.firstIndex(where: { $0.claudeSessionId == sessionId }) else {
+            return false
+        }
+        let onScreen = index == activeIndex && (window?.isKeyWindow ?? false)
+        switch kind {
+        case .working: sessions[index].attention = onScreen ? .none : .working
+        case .inputNeeded: sessions[index].attention = onScreen ? .none : .needsInput
+        case .stop: sessions[index].attention = onScreen ? .none : .doneUnseen
+        }
+        updateBottomBar()
+        return true
+    }
+
+    /// Notification click-to-focus: bring this window forward on the right tab.
+    @discardableResult
+    func focusSession(claudeSessionId: String) -> Bool {
+        guard let index = sessions.firstIndex(where: { $0.claudeSessionId == claudeSessionId }) else {
+            return false
+        }
+        window?.makeKeyAndOrderFront(nil)
+        showSession(at: index)
+        return true
     }
 
     private static func abbreviate(_ path: String) -> String {
@@ -331,6 +398,30 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     }
     func bottomBarDidToggleLayout() { toggleLayout() }
     func bottomBarDidClickPill(anchor: NSView) { showWorktreeFan(from: anchor) }
+    func bottomBarDidRequestRenameSession(at index: Int) { renameSession(at: index) }
+
+    /// Double-click a tab (or the palette command): set a custom name that the
+    /// live Claude title never overwrites. Empty input reverts to the auto title.
+    func renameSession(at index: Int) {
+        guard sessions.indices.contains(index), let window else { return }
+        let session = sessions[index]
+
+        let alert = NSAlert()
+        alert.messageText = "Rename session"
+        alert.informativeText = "Leave empty to follow Claude's live title again."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        field.stringValue = session.customTitle ?? session.displayTitle
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .alertFirstButtonReturn else { return }
+            let text = field.stringValue.trimmingCharacters(in: .whitespaces)
+            session.customTitle = text.isEmpty ? nil : text
+            self.updateBottomBar()
+        }
+    }
 
     // MARK: Worktree fan (MILESTONE_1 §6)
 
@@ -516,6 +607,10 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         })
         commands.append(PaletteCommand(id: "session.prev", title: "Session: Previous", key: "⌘⇧[") { [weak self] in
             self?.selectPrev()
+        })
+        commands.append(PaletteCommand(id: "session.rename", title: "Session: Rename…", key: nil) { [weak self] in
+            guard let self else { return }
+            self.renameSession(at: self.activeIndex)
         })
         for (index, session) in sessions.enumerated() where index != activeIndex {
             commands.append(PaletteCommand(id: "session.switch.\(index)", title: "Session: Switch to \(session.title)", key: nil) { [weak self] in

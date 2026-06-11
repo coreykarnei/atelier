@@ -35,9 +35,12 @@ Milestone 1 (built; see `docs/MILESTONE_1.md`):
   with root validation; agents resume via `claude --resume`.
 - **Command palette** (`⌘⇧P`).
 
-Not yet built: per-tab attention state (§7.1, deferred), worktree grouping +
-two-row wrap in the tab strip, tab rename. The code editor (and `⌘P`/`⌘⇧F`)
-remains a placeholder until Milestone 2.
+Also built: per-tab attention state (§7.1 — working/needs-input/done-unseen dots
+fed by hooks carrying `session_id`; banner click focuses the exact session),
+worktree grouping + two-row group-aware wrap + `»` overflow in the tab strip, and
+tab rename (double-click; hard override of the live Claude title).
+
+Not yet built: the code editor (and `⌘P`/`⌘⇧F`) — a placeholder until Milestone 2.
 
 ## Commands
 

@@ -20,6 +20,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.windowsMenu = windowMenu
         }
         notificationServer.onCommand = { [weak self] command in self?.handle(command) }
+        // Tab badges (§7.1): route each agent event to whichever window owns the
+        // session; banner clicks focus that session's tab.
+        notificationServer.onAgentEvent = { [weak self] kind, sessionId in
+            guard let self, let sessionId else { return }
+            for controller in self.controllers where controller.applyAgentEvent(kind, sessionId: sessionId) {
+                break
+            }
+        }
+        notificationServer.onNotificationClick = { [weak self] sessionId in
+            guard let self else { return }
+            for controller in self.controllers where controller.focusSession(claudeSessionId: sessionId) {
+                NSApp.activate(ignoringOtherApps: true)
+                break
+            }
+        }
         notificationServer.start()
 
         restoreOrOpenFresh()

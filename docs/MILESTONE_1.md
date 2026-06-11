@@ -230,23 +230,25 @@ it opens the worktree fan (§6). This is the single home for branch — branch i
 with a blinking `:` (subtle 1 Hz) · the **layout toggle** in the very corner.
 No activity dot — see §7.1.
 
-### 7.1 Per-session attention state **[DEFERRED]**
+### 7.1 Per-session attention state **[BUILT]**
 
 The right-side "activity dot" idea was dropped as under-motivated: the active
 session is visible on screen (a dot for it is noise), and an inactive session needs
 a *per-session* signal, not a global one. The correctly-motivated version lives on
-the **tabs** and is built later:
+the **tabs**, as a colored dot before the title:
 
-- **working** — agent mid-turn,
-- **needs input** — agent blocked on a question,
-- **finished-since-away** — completed while you were on another tab/project and
-  *haven't seen it yet*; clears when you focus the tab (an unread-badge analog).
+- **working** (blue) — agent mid-turn (`UserPromptSubmit` hook; tab state only,
+  no banner),
+- **needs input** (red) — agent blocked on a question (`Notification` hook),
+- **finished-since-away** (green) — completed while you were on another
+  tab/project (`Stop` hook); clears when you focus the tab (an unread badge).
 
-Cheap to build: M0's `Stop`/`Notification` hooks already fire into the app over the
-socket. Today they post an OS notification; the same event also sets the
-originating session's tab state (mapped via the agent pane's session id). One event,
-two sinks — notification for "look at the app," tab badge for "look at *this*
-session."
+Mechanics: the hooks pipe their stdin payload's `session_id` through
+`atelier-notify` onto the M0 socket; the app maps it to the session via its pinned
+claude session id. One event, two sinks — the OS banner for "look at the app"
+(banner clicks **focus the exact session tab**, the M3 affordance) and the tab
+badge for "look at *this* session." Events on the tab you're watching are dropped.
+The hooks fragment is merged *alongside* the dotfiles afplay hooks, additively.
 
 ---
 

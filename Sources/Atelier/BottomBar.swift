@@ -4,30 +4,54 @@ protocol BottomBarDelegate: AnyObject {
     func bottomBarDidSelectSession(at index: Int)
     func bottomBarDidRequestNewSession()
     func bottomBarDidRequestCloseSession(at index: Int)
+    func bottomBarDidRequestRenameSession(at index: Int)
     func bottomBarDidToggleLayout()
     func bottomBarDidClickPill(anchor: NSView)
 }
 
-/// The bottom bar (MILESTONE_1 §7). For M1.2 it carries the session tab strip, a `+`
-/// to add sessions, the location pill on the left, and a clock + layout-toggle on the
-/// right. Styling follows the tmux status bar this app succeeds: a blue-filled pill,
-/// a green-filled active tab, dark text on both. The pill becomes the clickable
-/// worktree fan in M1.4; per-session attention state on the tabs is deferred (§7.1).
+/// Everything one session tab needs to draw. `index` is the session's index in the
+/// window's session list (display order may differ — tabs are grouped by root).
+struct SessionTabInfo {
+    let index: Int
+    let title: String
+    let isWorktree: Bool
+    /// Group boundary marker — tabs sharing a root sit together (MILESTONE_1 §7);
+    /// the grouping *is* how codebase sharing is shown.
+    let groupKey: String
+    let attention: Session.Attention
+}
+
+/// The bottom bar (MILESTONE_1 §7). Static project pill on the left (the worktree
+/// fan's trigger), session tabs grouped by root in the middle — wrapping to a
+/// second row group-aware when full, with a `»` overflow menu as the hard ceiling —
+/// and the clock + layout toggle on the right. Styling follows the tmux status bar
+/// this app succeeds: blue pill, green active tab, dark text on both.
 final class BottomBar: NSView {
     weak var delegate: BottomBarDelegate?
 
-    static let height: CGFloat = 30
+    static let rowHeight: CGFloat = 30
+    static let twoRowHeight: CGFloat = 54
 
-    /// Anchor for surfaces that fan from the pill (palette-triggered worktree fan).
+    /// The bar's current natural height (one or two tab rows).
+    private(set) var desiredHeight: CGFloat = BottomBar.rowHeight
+    /// Fired when `desiredHeight` changes so the owner can resize the constraint.
+    var onDesiredHeightChange: ((CGFloat) -> Void)?
+
+    /// Anchor for surfaces that fan from the pill.
     var pillAnchor: NSView { pillView }
 
     private let pillView = NSView()
     private let pillLabel = NSTextField(labelWithString: "")
-    private let tabsStack = NSStackView()
+    private let rowsStack = NSStackView()
     private let addButton = NSButton()
+    private let overflowButton = NSButton()
     private let clockLabel = NSTextField(labelWithString: "")
     private let layoutButton = NSButton()
     private let topBorder = NSBox()
+
+    private var tabs: [SessionTabInfo] = []
+    private var activeIndex = 0
+    private var lastFlowWidth: CGFloat = 0
 
     private var clockTimer: Timer?
     private var colonVisible = true
@@ -60,7 +84,6 @@ final class BottomBar: NSView {
         pillView.layer?.backgroundColor = Theme.accentBlue.cgColor
         pillView.layer?.cornerRadius = 4
         pillView.translatesAutoresizingMaskIntoConstraints = false
-        // The pill is the worktree fan's trigger (MILESTONE_1 §6).
         pillView.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(pillClicked)))
         addSubview(pillView)
 
@@ -70,15 +93,15 @@ final class BottomBar: NSView {
         pillLabel.translatesAutoresizingMaskIntoConstraints = false
         pillView.addSubview(pillLabel)
 
-        tabsStack.orientation = .horizontal
-        tabsStack.spacing = 4
-        tabsStack.alignment = .centerY
-        tabsStack.translatesAutoresizingMaskIntoConstraints = false
-        tabsStack.setHuggingPriority(.defaultHigh, for: .horizontal)
-        addSubview(tabsStack)
+        rowsStack.orientation = .vertical
+        rowsStack.alignment = .leading
+        rowsStack.spacing = 2
+        rowsStack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(rowsStack)
 
         configureIconButton(addButton, symbol: "plus", action: #selector(addTapped))
-        addSubview(addButton)
+        configureIconButton(overflowButton, symbol: "chevron.right.2", action: nil)
+        overflowButton.isHidden = true
 
         clockLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         clockLabel.textColor = Theme.chromeMutedText
@@ -110,16 +133,13 @@ final class BottomBar: NSView {
             clockLabel.trailingAnchor.constraint(equalTo: layoutButton.leadingAnchor, constant: -12),
             clockLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
 
-            tabsStack.leadingAnchor.constraint(equalTo: pillView.trailingAnchor, constant: 14),
-            tabsStack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            tabsStack.trailingAnchor.constraint(lessThanOrEqualTo: clockLabel.leadingAnchor, constant: -12),
-
-            addButton.widthAnchor.constraint(equalToConstant: 22),
-            addButton.heightAnchor.constraint(equalToConstant: 22),
+            rowsStack.leadingAnchor.constraint(equalTo: pillView.trailingAnchor, constant: 14),
+            rowsStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            rowsStack.trailingAnchor.constraint(lessThanOrEqualTo: clockLabel.leadingAnchor, constant: -12),
         ])
     }
 
-    private func configureIconButton(_ button: NSButton, symbol: String, action: Selector) {
+    private func configureIconButton(_ button: NSButton, symbol: String, action: Selector?) {
         button.bezelStyle = .regularSquare
         button.isBordered = false
         button.imagePosition = .imageOnly
@@ -128,30 +148,158 @@ final class BottomBar: NSView {
         button.target = self
         button.action = action
         button.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: 22),
+            button.heightAnchor.constraint(equalToConstant: 22),
+        ])
     }
 
     // MARK: Update
 
-    /// Rebuild the tab strip and refresh the chrome for the current session set.
-    /// `pill` is the active session's location (branch or folder); `mode` is nil for
-    /// a Landing, which has no layout to toggle.
-    func update(titles: [String], activeIndex: Int, pill: String, mode: LayoutMode?) {
+    func update(tabs: [SessionTabInfo], activeIndex: Int, pill: String, mode: LayoutMode?) {
+        self.tabs = tabs
+        self.activeIndex = activeIndex
+
         pillLabel.stringValue = pill
         pillView.isHidden = pill.isEmpty
-
-        // Rebuild tabs. (M1.2 is a single row; grouping/wrap arrive with worktrees.)
-        for view in tabsStack.arrangedSubviews { view.removeFromSuperview() }
-        for (i, title) in titles.enumerated() {
-            let tab = SessionTabView(index: i, title: title, isActive: i == activeIndex)
-            tab.onSelect = { [weak self] idx in self?.delegate?.bottomBarDidSelectSession(at: idx) }
-            tab.onClose = { [weak self] idx in self?.delegate?.bottomBarDidRequestCloseSession(at: idx) }
-            tabsStack.addArrangedSubview(tab)
-        }
-        tabsStack.addArrangedSubview(addButton)
 
         layoutButton.isHidden = mode == nil
         let symbol = mode == .triptych ? "rectangle.split.3x1" : "rectangle.split.1x2"
         layoutButton.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Toggle layout")
+
+        flowTabs()
+    }
+
+    override func layout() {
+        super.layout()
+        // Re-flow when the bar is resized enough to change what fits.
+        if abs(bounds.width - lastFlowWidth) > 40 { flowTabs() }
+    }
+
+    /// Lay tabs into one or two rows, never splitting a root group across rows
+    /// unless the group alone exceeds a full row. Beyond two rows, the remainder
+    /// collapses into a `»` menu — the bar must not grow into a third pane.
+    private func flowTabs() {
+        lastFlowWidth = bounds.width
+        for view in rowsStack.arrangedSubviews { view.removeFromSuperview() }
+
+        // Group chunks: runs of consecutive tabs sharing a root.
+        var chunks: [[SessionTabInfo]] = []
+        for tab in tabs {
+            if let last = chunks.last, last.first?.groupKey == tab.groupKey {
+                chunks[chunks.count - 1].append(tab)
+            } else {
+                chunks.append([tab])
+            }
+        }
+
+        let reservedRight: CGFloat = 170 // clock + toggle + spacing
+        let reservedLeft = pillView.isHidden ? 24 : pillLabel.intrinsicContentSize.width + 16 + 24
+        let rowWidth = max(240, bounds.width - reservedLeft - reservedRight)
+
+        var rows: [[NSView]] = [[]]
+        var widths: [CGFloat] = [0]
+        var overflow: [SessionTabInfo] = []
+
+        func append(_ view: NSView, width: CGFloat, breakable: Bool) -> Bool {
+            let row = rows.count - 1
+            if widths[row] + width > rowWidth, !rows[row].isEmpty {
+                guard rows.count < 2 else { return false }
+                rows.append([])
+                widths.append(0)
+            }
+            rows[rows.count - 1].append(view)
+            widths[rows.count - 1] += width
+            return true
+        }
+
+        outer: for (chunkIndex, chunk) in chunks.enumerated() {
+            let chunkWidth = chunk.reduce(0) { $0 + tabWidth($1) } + (chunkIndex > 0 ? 9 : 0)
+            let fitsAsGroup = chunkWidth <= rowWidth
+            // Try to keep the whole group on one row: jump rows if it won't fit here.
+            if fitsAsGroup, widths[rows.count - 1] + chunkWidth > rowWidth, !rows[rows.count - 1].isEmpty, rows.count < 2 {
+                rows.append([])
+                widths.append(0)
+            }
+            for (i, tab) in chunk.enumerated() {
+                if chunkIndex > 0 && i == 0 {
+                    _ = append(makeSeparator(), width: 9, breakable: true)
+                }
+                let view = SessionTabView(info: tab, isActive: tab.index == activeIndex)
+                wire(view)
+                if !append(view, width: tabWidth(tab), breakable: true) {
+                    overflow.append(contentsOf: chunk[i...])
+                    for rest in chunks[(chunkIndex + 1)...] { overflow.append(contentsOf: rest) }
+                    break outer
+                }
+            }
+        }
+
+        // Overflow menu, then the trailing `+`.
+        if overflow.isEmpty {
+            overflowButton.isHidden = true
+        } else {
+            overflowButton.isHidden = false
+            overflowButton.menu = overflowMenu(for: overflow)
+            overflowButton.action = #selector(overflowTapped)
+            _ = append(overflowButton, width: 26, breakable: true)
+        }
+        _ = append(addButton, width: 26, breakable: true)
+
+        for row in rows where !row.isEmpty {
+            let rowStack = NSStackView(views: row)
+            rowStack.orientation = .horizontal
+            rowStack.spacing = 4
+            rowStack.alignment = .centerY
+            rowsStack.addArrangedSubview(rowStack)
+        }
+
+        let newHeight = rows.count > 1 ? Self.twoRowHeight : Self.rowHeight
+        if newHeight != desiredHeight {
+            desiredHeight = newHeight
+            onDesiredHeightChange?(newHeight)
+        }
+    }
+
+    private func wire(_ view: SessionTabView) {
+        view.onSelect = { [weak self] idx in self?.delegate?.bottomBarDidSelectSession(at: idx) }
+        view.onClose = { [weak self] idx in self?.delegate?.bottomBarDidRequestCloseSession(at: idx) }
+        view.onRename = { [weak self] idx in self?.delegate?.bottomBarDidRequestRenameSession(at: idx) }
+    }
+
+    /// Estimated width: label (capped) + glyphs + close + padding.
+    private func tabWidth(_ tab: SessionTabInfo) -> CGFloat {
+        let label = (tab.isWorktree ? "⎇ " : "") + tab.title
+        let textWidth = min(
+            (label as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 11)]).width,
+            160
+        )
+        let badge: CGFloat = tab.attention == .none ? 0 : 10
+        return textWidth + badge + 38
+    }
+
+    private func makeSeparator() -> NSView {
+        let line = NSBox()
+        line.boxType = .custom
+        line.fillColor = Theme.bottomBarBorder
+        line.borderWidth = 0
+        line.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            line.widthAnchor.constraint(equalToConstant: 1),
+            line.heightAnchor.constraint(equalToConstant: 14),
+        ])
+        return line
+    }
+
+    private func overflowMenu(for tabs: [SessionTabInfo]) -> NSMenu {
+        let menu = NSMenu()
+        for tab in tabs {
+            let item = NSMenuItem(title: tab.title, action: #selector(overflowItemSelected(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = tab.index
+            menu.addItem(item)
+        }
+        return menu
     }
 
     // MARK: Clock
@@ -177,27 +325,54 @@ final class BottomBar: NSView {
     @objc private func addTapped() { delegate?.bottomBarDidRequestNewSession() }
     @objc private func layoutTapped() { delegate?.bottomBarDidToggleLayout() }
     @objc private func pillClicked() { delegate?.bottomBarDidClickPill(anchor: pillView) }
+    @objc private func overflowTapped() {
+        overflowButton.menu?.popUp(positioning: nil, at: NSPoint(x: 0, y: overflowButton.bounds.maxY), in: overflowButton)
+    }
+    @objc private func overflowItemSelected(_ sender: NSMenuItem) {
+        delegate?.bottomBarDidSelectSession(at: sender.tag)
+    }
 }
 
-/// A single session tab: ellipsized title plus a close affordance. Clicking the body
-/// selects the session; clicking the `×` closes it.
+/// A single session tab: optional attention dot, ⎇ glyph for worktree sessions,
+/// ellipsized title, close affordance. Click selects; double-click renames.
 private final class SessionTabView: NSView {
     let index: Int
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
+    var onRename: ((Int) -> Void)?
 
-    private let titleLabel = NSTextField(labelWithString: "")
-    private let closeButton = NSButton()
-
-    init(index: Int, title: String, isActive: Bool) {
-        self.index = index
+    init(info: SessionTabInfo, isActive: Bool) {
+        self.index = info.index
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 4
         // Active tab wears the tmux green; inactive tabs stay quiet.
         layer?.backgroundColor = (isActive ? Theme.accentGreen : .clear).cgColor
 
-        titleLabel.stringValue = title.isEmpty ? "untitled" : title
+        var leading: NSLayoutXAxisAnchor = leadingAnchor
+        var leadingPad: CGFloat = 8
+
+        // Attention dot (MILESTONE_1 §7.1) — only meaningful on inactive tabs;
+        // the active tab's state is on screen.
+        if info.attention != .none, !isActive {
+            let dot = NSView()
+            dot.wantsLayer = true
+            dot.layer?.cornerRadius = 3
+            dot.layer?.backgroundColor = Self.badgeColor(info.attention).cgColor
+            dot.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(dot)
+            NSLayoutConstraint.activate([
+                dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+                dot.centerYAnchor.constraint(equalTo: centerYAnchor),
+                dot.widthAnchor.constraint(equalToConstant: 6),
+                dot.heightAnchor.constraint(equalToConstant: 6),
+            ])
+            leading = dot.trailingAnchor
+            leadingPad = 5
+        }
+
+        let text = (info.isWorktree ? "⎇ " : "") + (info.title.isEmpty ? "untitled" : info.title)
+        let titleLabel = NSTextField(labelWithString: text)
         titleLabel.font = .systemFont(ofSize: 11, weight: isActive ? .semibold : .regular)
         titleLabel.textColor = isActive ? Theme.accentTextDark : Theme.chromeMutedText
         titleLabel.lineBreakMode = .byTruncatingTail
@@ -205,6 +380,7 @@ private final class SessionTabView: NSView {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
+        let closeButton = NSButton()
         closeButton.bezelStyle = .regularSquare
         closeButton.isBordered = false
         closeButton.imagePosition = .imageOnly
@@ -220,7 +396,7 @@ private final class SessionTabView: NSView {
         width.priority = .required
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 22),
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            titleLabel.leadingAnchor.constraint(equalTo: leading, constant: leadingPad),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             width,
             closeButton.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 4),
@@ -234,8 +410,21 @@ private final class SessionTabView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    private static func badgeColor(_ attention: Session.Attention) -> NSColor {
+        switch attention {
+        case .none: return .clear
+        case .working: return Theme.accentBlue
+        case .needsInput: return Theme.accentRed
+        case .doneUnseen: return Theme.accentGreen
+        }
+    }
+
     override func mouseDown(with event: NSEvent) {
-        onSelect?(index)
+        if event.clickCount == 2 {
+            onRename?(index)
+        } else {
+            onSelect?(index)
+        }
     }
 
     @objc private func closeTapped() { onClose?(index) }

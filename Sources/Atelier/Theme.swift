@@ -39,6 +39,7 @@ enum Theme {
     static let tabActiveBackground = nsColor(0x313244)         // surface0
     static let accentBlue = nsColor(0x89B4FA)                  // blue
     static let accentGreen = nsColor(0xA6E3A1)                 // green
+    static let accentRed = nsColor(0xF38BA8)                   // red
     /// Dark text on accent fills — the tmux status-bar look (blue/green pill, base text).
     static let accentTextDark = nsColor(0x1E1E2E)              // base
 

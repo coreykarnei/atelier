@@ -8,6 +8,7 @@ struct PersistedSession: Codable {
     var isIDE: Bool
     var layoutMode: String
     var title: String
+    var customTitle: String?
     var claudeSessionId: String
     var dividers: [String: Double]
 }

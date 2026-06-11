@@ -23,6 +23,15 @@ protocol WorkspacePane: NSView {
 final class Session: NSObject, NSSplitViewDelegate {
     enum State { case landing, ide }
 
+    /// Per-tab attention (MILESTONE_1 §7.1) — about sessions you're *not* looking
+    /// at. Set from agent hook events; cleared the moment the tab is focused.
+    enum Attention {
+        case none
+        case working      // agent mid-turn
+        case needsInput   // agent blocked on a question
+        case doneUnseen   // finished while you were elsewhere
+    }
+
     let id = UUID()
     private(set) var state: State = .landing
     private(set) var cwd: String
@@ -43,6 +52,22 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// Tab label. Seeded from the cwd; refreshed from the transcript by the window
     /// controller once Claude assigns an `ai-title`.
     var title: String
+
+    /// A user-given name (double-click the tab) — a hard override that the live
+    /// transcript title never replaces.
+    var customTitle: String?
+
+    /// Current attention badge for this session's tab.
+    var attention: Attention = .none
+
+    /// The label the tab actually shows.
+    var displayTitle: String { customTitle ?? title }
+
+    /// True when this session's root is a linked worktree (not the primary
+    /// checkout) — drives the ⎇ glyph and tab grouping.
+    var isWorktree: Bool {
+        cwd.hasPrefix(WorktreeManager.base + "/")
+    }
 
     /// Fired after the session is promoted to an IDE session, so the window can
     /// refresh the branch pill, tabs, and focus.
@@ -94,6 +119,7 @@ final class Session: NSObject, NSSplitViewDelegate {
     init(restored: PersistedSession) {
         self.cwd = restored.cwd
         self.title = restored.title
+        self.customTitle = restored.customTitle
         self.claudeSessionId = restored.claudeSessionId
         self.isRestored = true
         self.state = restored.isIDE ? .ide : .landing
@@ -117,6 +143,7 @@ final class Session: NSObject, NSSplitViewDelegate {
             isIDE: state == .ide,
             layoutMode: layoutMode.rawValue,
             title: title,
+            customTitle: customTitle,
             claudeSessionId: claudeSessionId,
             dividers: dividers.mapValues { Double($0) }
         )

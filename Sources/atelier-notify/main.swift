@@ -1,12 +1,15 @@
 import Foundation
 import AtelierIPC
 
-// atelier-notify <stop|input> [message...]
+// atelier-notify <stop|input|working> [message...]
 //
-// Invoked by Claude Code's Stop / Notification hooks. Connects to the running
-// Atelier app's unix socket and sends one NotifyMessage. If Atelier isn't running
-// (no socket / refused), it exits 0 silently — a notification helper must never
-// break the agent's hook chain.
+// Invoked by Claude Code's Stop / Notification / UserPromptSubmit hooks. Connects
+// to the running Atelier app's unix socket and sends one NotifyMessage. If Atelier
+// isn't running (no socket / refused), it exits 0 silently — a notification helper
+// must never break the agent's hook chain.
+//
+// Claude Code passes the hook payload as JSON on stdin; we read it for the
+// session_id so the app can badge / focus the exact session tab.
 
 let args = Array(CommandLine.arguments.dropFirst())
 let kindArg = args.first ?? "stop"
@@ -19,15 +22,29 @@ case "input", "inputNeeded", "notification":
     kind = .inputNeeded
     defaultTitle = "Claude needs you"
     defaultBody = "The agent is waiting for input."
+case "working", "prompt":
+    kind = .working
+    defaultTitle = ""
+    defaultBody = ""
 default:
     kind = .stop
     defaultTitle = "Claude finished"
     defaultBody = "The agent completed its turn."
 }
 
+// Best-effort session id from the hook's stdin payload. Never block: only read
+// when stdin is a pipe (hooks always pipe; a stray manual run from a TTY skips).
+var sessionId: String?
+if isatty(0) == 0 {
+    let stdinData = FileHandle.standardInput.readDataToEndOfFile()
+    if let payload = try? JSONSerialization.jsonObject(with: stdinData) as? [String: Any] {
+        sessionId = payload["session_id"] as? String
+    }
+}
+
 let override = args.dropFirst().joined(separator: " ")
 let body = override.isEmpty ? defaultBody : override
-let message = NotifyMessage(kind: kind, title: defaultTitle, body: body)
+let message = NotifyMessage(kind: kind, title: defaultTitle, body: body, sessionId: sessionId)
 
 // Connect to the unix domain socket.
 let path = AtelierIPC.socketPath()

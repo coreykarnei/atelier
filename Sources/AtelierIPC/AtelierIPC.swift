@@ -22,22 +22,27 @@ public enum AtelierIPC {
     }
 }
 
-/// One notification request. `kind` distinguishes the agent lifecycle event so the
-/// app can choose copy, sound, and (later) a click action per event.
+/// One agent lifecycle event. `kind` distinguishes the event so the app can choose
+/// copy, sound, tab badge, and click action per event. `sessionId` (Claude's own
+/// session id, from the hook's stdin payload) lets the app badge and focus the
+/// exact session tab that fired.
 public struct NotifyMessage: Codable {
     public enum Kind: String, Codable {
         case stop          // agent finished a turn
         case inputNeeded   // agent is waiting on the user
+        case working       // agent began a turn (tab state only, no banner)
     }
 
     public let kind: Kind
     public let title: String
     public let body: String
+    public let sessionId: String?
 
-    public init(kind: Kind, title: String, body: String) {
+    public init(kind: Kind, title: String, body: String, sessionId: String? = nil) {
         self.kind = kind
         self.title = title
         self.body = body
+        self.sessionId = sessionId
     }
 
     /// Encode as a single newline-terminated JSON line for the stream protocol.

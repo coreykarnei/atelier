@@ -17,6 +17,14 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
     /// the app delegate handles them (main thread).
     var onCommand: ((CommandMessage) -> Void)?
 
+    /// Every agent lifecycle event (incl. `working`, which posts no banner) —
+    /// feeds the per-tab attention state (MILESTONE_1 §7.1). Main thread.
+    var onAgentEvent: ((NotifyMessage.Kind, String?) -> Void)?
+
+    /// A notification banner was clicked; the payload is the Claude session id.
+    /// Click-to-focus the right session tab (TECHNICAL_PLAN §4 M3). Main thread.
+    var onNotificationClick: ((String) -> Void)?
+
     /// Request authorization and begin listening. Safe to call once at launch.
     func start() {
         let center = UNUserNotificationCenter.current()
@@ -94,11 +102,19 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private func post(_ msg: NotifyMessage) {
-        NSLog("Atelier: notify received kind=\(msg.kind.rawValue) title=\(msg.title)")
+        NSLog("Atelier: notify received kind=\(msg.kind.rawValue) session=\(msg.sessionId ?? "-")")
+        onAgentEvent?(msg.kind, msg.sessionId)
+
+        // `working` is tab-state only — no banner for "you pressed Enter."
+        guard msg.kind != .working else { return }
+
         let content = UNMutableNotificationContent()
         content.title = msg.title
         content.body = msg.body
         content.sound = .default
+        if let sessionId = msg.sessionId {
+            content.userInfo = ["sessionId": sessionId]
+        }
         let request = UNNotificationRequest(
             identifier: UUID().uuidString, content: content, trigger: nil
         )
@@ -115,5 +131,17 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         completionHandler([.banner, .sound])
+    }
+
+    // Click-to-focus: the banner carries the Claude session id; route to the app.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        if let sessionId = response.notification.request.content.userInfo["sessionId"] as? String {
+            DispatchQueue.main.async { self.onNotificationClick?(sessionId) }
+        }
+        completionHandler()
     }
 }

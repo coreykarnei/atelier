@@ -20,6 +20,16 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/core/repositories/atelier/.build/Atelier.app/Contents/MacOS/atelier-notify working"
+          }
+        ]
+      }
     ]
   }
 }
