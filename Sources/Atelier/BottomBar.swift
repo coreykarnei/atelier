@@ -59,35 +59,49 @@ final class BottomBar: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.backgroundColor = Theme.bottomBarBackground.cgColor
+        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
         build()
         startClock()
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(accessibilityDisplayChanged),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil
+        )
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    deinit { clockTimer?.invalidate() }
+    deinit {
+        clockTimer?.invalidate()
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+    }
 
     override func updateLayer() {
-        layer?.backgroundColor = Theme.bottomBarBackground.cgColor
+        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+    }
+
+    @objc private func accessibilityDisplayChanged() {
+        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
     }
 
     private func build() {
         topBorder.boxType = .custom
-        topBorder.fillColor = Theme.bottomBarBorder
+        topBorder.fillColor = Theme.Elevation.frameLine
         topBorder.borderWidth = 0
         topBorder.translatesAutoresizingMaskIntoConstraints = false
         addSubview(topBorder)
 
         pillView.wantsLayer = true
         pillView.layer?.backgroundColor = Theme.accentBlue.cgColor
-        pillView.layer?.cornerRadius = 4
+        pillView.layer?.cornerRadius = Theme.Elevation.radiusSmall
         pillView.translatesAutoresizingMaskIntoConstraints = false
         pillView.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(pillClicked)))
         addSubview(pillView)
 
-        pillLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        // The pill carries the project name — a path component, so mono (§1.4).
+        pillLabel.font = Theme.Typography.mono(Theme.Typography.small, weight: .semibold)
         pillLabel.textColor = Theme.accentTextDark
         pillLabel.lineBreakMode = .byTruncatingMiddle
         pillLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -103,7 +117,7 @@ final class BottomBar: NSView {
         configureIconButton(overflowButton, symbol: "chevron.right.2", action: nil)
         overflowButton.isHidden = true
 
-        clockLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        clockLabel.font = Theme.Typography.mono(Theme.Typography.small)
         clockLabel.textColor = Theme.chromeMutedText
         clockLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(clockLabel)
@@ -271,7 +285,8 @@ final class BottomBar: NSView {
     /// the two-row wrap and the `»` overflow absorb long ones.
     private func tabWidth(_ tab: SessionTabInfo) -> CGFloat {
         let label = (tab.isWorktree ? "⎇ " : "") + tab.title
-        let textWidth = (label as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 11)]).width
+        let font = Theme.Typography.mono(Theme.Typography.small)
+        let textWidth = (label as NSString).size(withAttributes: [.font: font]).width
         let badge: CGFloat = tab.attention == .none ? 0 : 10
         return textWidth + badge + 38
     }
@@ -279,7 +294,7 @@ final class BottomBar: NSView {
     private func makeSeparator() -> NSView {
         let line = NSBox()
         line.boxType = .custom
-        line.fillColor = Theme.bottomBarBorder
+        line.fillColor = Theme.Elevation.frameLine
         line.borderWidth = 0
         line.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -343,7 +358,7 @@ private final class SessionTabView: NSView {
         self.index = info.index
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 4
+        layer?.cornerRadius = Theme.Elevation.radiusSmall
         // Active tab wears the tmux green; inactive tabs stay quiet.
         layer?.backgroundColor = (isActive ? Theme.accentGreen : .clear).cgColor
 
@@ -357,7 +372,7 @@ private final class SessionTabView: NSView {
             let badge: NSView
             if info.attention == .needsInput {
                 let mark = NSTextField(labelWithString: "!")
-                mark.font = .systemFont(ofSize: 11, weight: .heavy)
+                mark.font = Theme.Typography.ui(Theme.Typography.small, weight: .heavy)
                 mark.textColor = Theme.accentPeach
                 badge = mark
             } else {
@@ -383,7 +398,9 @@ private final class SessionTabView: NSView {
 
         let text = (info.isWorktree ? "⎇ " : "") + (info.title.isEmpty ? "untitled" : info.title)
         let titleLabel = NSTextField(labelWithString: text)
-        titleLabel.font = .systemFont(ofSize: 11, weight: isActive ? .semibold : .regular)
+        // Session titles are mono — the tmux-status idiom, a written-down
+        // exception in §1.4.
+        titleLabel.font = Theme.Typography.mono(Theme.Typography.small, weight: isActive ? .semibold : .regular)
         titleLabel.textColor = isActive ? Theme.accentTextDark : Theme.chromeMutedText
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.cell?.usesSingleLineMode = true

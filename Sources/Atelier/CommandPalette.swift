@@ -31,6 +31,9 @@ final class CommandPalette: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     private var filtered: [PaletteCommand]
     private let onDismiss: () -> Void
 
+    /// Carries the floating shadow; the card itself masks to its rounded
+    /// corners, which would clip a shadow set on its own layer.
+    private let cardHost = NSView()
     private let card = NSVisualEffectView()
     private let field = NSTextField()
     private let table = PaletteTableView()
@@ -54,22 +57,35 @@ final class CommandPalette: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     private func build() {
-        // Dim layer: swallow clicks; a click outside the card dismisses.
+        // Scrim: swallow clicks; a click outside the card dismisses (§Phase-0
+        // lighting model: modals get a dimmed scrim).
         wantsLayer = true
-        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.35).cgColor
+        layer?.backgroundColor = Theme.Elevation.scrim.cgColor
+
+        cardHost.wantsLayer = true
+        cardHost.shadow = Theme.Elevation.floatingShadow
+        cardHost.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(cardHost)
 
         card.material = .hudWindow
         card.blendingMode = .withinWindow
         card.state = .active
         card.wantsLayer = true
-        card.layer?.cornerRadius = 10
-        card.layer?.borderWidth = 1
-        card.layer?.borderColor = Theme.bottomBarBorder.cgColor
+        card.layer?.cornerRadius = Theme.Elevation.radiusLarge
+        card.layer?.masksToBounds = true
         card.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(card)
+        cardHost.addSubview(card)
+
+        // Light from above: the 1 px top hairline of a floating surface.
+        let topHairline = NSBox()
+        topHairline.boxType = .custom
+        topHairline.fillColor = Theme.Elevation.hairline
+        topHairline.borderWidth = 0
+        topHairline.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(topHairline)
 
         field.placeholderString = "Type a command…"
-        field.font = .systemFont(ofSize: 14)
+        field.font = Theme.Typography.ui(Theme.Typography.large)
         field.focusRingType = .none
         field.isBezeled = false
         field.drawsBackground = false
@@ -80,7 +96,7 @@ final class CommandPalette: NSView, NSTableViewDataSource, NSTableViewDelegate, 
 
         let divider = NSBox()
         divider.boxType = .custom
-        divider.fillColor = Theme.bottomBarBorder
+        divider.fillColor = Theme.Elevation.frameLine
         divider.borderWidth = 0
         divider.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(divider)
@@ -105,10 +121,20 @@ final class CommandPalette: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         card.addSubview(scroll)
 
         NSLayoutConstraint.activate([
-            card.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-            card.centerXAnchor.constraint(equalTo: centerXAnchor),
-            card.widthAnchor.constraint(equalToConstant: 560),
-            card.heightAnchor.constraint(lessThanOrEqualToConstant: 360),
+            cardHost.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            cardHost.centerXAnchor.constraint(equalTo: centerXAnchor),
+            cardHost.widthAnchor.constraint(equalToConstant: 560),
+            cardHost.heightAnchor.constraint(lessThanOrEqualToConstant: 360),
+
+            card.topAnchor.constraint(equalTo: cardHost.topAnchor),
+            card.leadingAnchor.constraint(equalTo: cardHost.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: cardHost.trailingAnchor),
+            card.bottomAnchor.constraint(equalTo: cardHost.bottomAnchor),
+
+            topHairline.topAnchor.constraint(equalTo: card.topAnchor),
+            topHairline.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            topHairline.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            topHairline.heightAnchor.constraint(equalToConstant: 1),
 
             field.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
             field.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
@@ -135,7 +161,7 @@ final class CommandPalette: NSView, NSTableViewDataSource, NSTableViewDelegate, 
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if !card.frame.contains(point) { onDismiss() }
+        if !cardHost.frame.contains(point) { onDismiss() }
     }
 
     // MARK: Filtering
@@ -202,8 +228,10 @@ final class CommandPalette: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         let command = filtered[row]
         let cell = NSTableCellView()
 
+        // Command names are Atelier speaking (§1.4); the chord is keycap
+        // content, so mono. (Full keycap chips land in Phase 4.)
         let title = NSTextField(labelWithString: command.title)
-        title.font = .systemFont(ofSize: 13)
+        title.font = Theme.Typography.ui(Theme.Typography.body)
         title.textColor = Theme.chromeText
         title.lineBreakMode = .byTruncatingTail
         title.translatesAutoresizingMaskIntoConstraints = false
@@ -215,7 +243,7 @@ final class CommandPalette: NSView, NSTableViewDataSource, NSTableViewDelegate, 
 
         if let key = command.key {
             let chord = NSTextField(labelWithString: key)
-            chord.font = .systemFont(ofSize: 11)
+            chord.font = Theme.Typography.mono(Theme.Typography.small)
             chord.textColor = Theme.chromeMutedText
             chord.translatesAutoresizingMaskIntoConstraints = false
             cell.addSubview(chord)

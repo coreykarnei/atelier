@@ -45,7 +45,7 @@ final class WorktreeFanController: NSViewController, NSTableViewDataSource, NSTa
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 0))
 
         field.placeholderString = "filter, or name a new worktree…"
-        field.font = .systemFont(ofSize: 12)
+        field.font = Theme.Typography.ui(Theme.Typography.body)
         field.focusRingType = .none
         field.bezelStyle = .roundedBezel
         field.delegate = self
@@ -143,14 +143,16 @@ final class WorktreeFanController: NSViewController, NSTableViewDataSource, NSTa
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         if showsCreateRow && row == 0 {
+            // The §1.4 signature move: Atelier speaks ("create"), the branch
+            // name is inset in mono.
             return Self.label(attributed: {
                 let text = NSMutableAttributedString()
                 text.append(NSAttributedString(string: "＋ create ", attributes: [
-                    .font: NSFont.systemFont(ofSize: 12),
+                    .font: Theme.Typography.ui(Theme.Typography.body),
                     .foregroundColor: Theme.accentGreen,
                 ]))
                 text.append(NSAttributedString(string: "⎇ \(trimmedQuery)", attributes: [
-                    .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+                    .font: Theme.Typography.mono(Theme.Typography.body, weight: .medium),
                     .foregroundColor: Theme.chromeText,
                 ]))
                 return text
@@ -162,8 +164,9 @@ final class WorktreeFanController: NSViewController, NSTableViewDataSource, NSTa
         let fanRow = filtered[index]
 
         let text = NSMutableAttributedString()
+        // Branch names are mono (§1.4); the state words are Atelier speaking.
         text.append(NSAttributedString(string: "⎇ \(fanRow.worktree.branch)", attributes: [
-            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            .font: Theme.Typography.mono(Theme.Typography.body, weight: .medium),
             .foregroundColor: Theme.chromeText,
         ]))
         var marks: [String] = []
@@ -172,7 +175,7 @@ final class WorktreeFanController: NSViewController, NSTableViewDataSource, NSTa
         if fanRow.isDirty { marks.append("dirty") }
         if !marks.isEmpty {
             text.append(NSAttributedString(string: "  \(marks.joined(separator: " · "))", attributes: [
-                .font: NSFont.systemFont(ofSize: 10),
+                .font: Theme.Typography.ui(Theme.Typography.small),
                 .foregroundColor: fanRow.isDirty ? Theme.accentBlue : Theme.chromeMutedText,
             ]))
         }

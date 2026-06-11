@@ -39,27 +39,41 @@ final class LandingView: NSView, WorkspacePane, NSTableViewDataSource, NSTableVi
     init(defaultFolder: String) {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = Theme.editorPlaceholderBackground.cgColor
+        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
         entries = Self.entries(defaultFolder: defaultFolder)
         build()
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(accessibilityDisplayChanged),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil
+        )
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    deinit {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+    }
+
     override func updateLayer() {
-        layer?.backgroundColor = Theme.editorPlaceholderBackground.cgColor
+        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+    }
+
+    @objc private func accessibilityDisplayChanged() {
+        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
     }
 
     private func build() {
         let header = NSTextField(labelWithString: "Open a project")
-        header.font = .systemFont(ofSize: 11, weight: .semibold)
+        header.font = Theme.Typography.ui(Theme.Typography.small, weight: .semibold)
         header.textColor = Theme.chromeMutedText
         header.translatesAutoresizingMaskIntoConstraints = false
         addSubview(header)
 
         let hint = NSTextField(labelWithString: "↩ open · ⌘↩ ide in terminal dir")
-        hint.font = .systemFont(ofSize: 10)
+        hint.font = Theme.Typography.ui(Theme.Typography.small)
         hint.textColor = Theme.chromeMutedText
         hint.translatesAutoresizingMaskIntoConstraints = false
         addSubview(hint)
@@ -150,12 +164,13 @@ final class LandingView: NSView, WorkspacePane, NSTableViewDataSource, NSTableVi
                 .baselineOffset: 2,
             ]))
         }
+        // Repo names and paths are things you could paste into a terminal: mono.
         text.append(NSAttributedString(string: entry.name, attributes: [
-            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            .font: Theme.Typography.mono(Theme.Typography.body, weight: .medium),
             .foregroundColor: Theme.chromeText,
         ]))
         text.append(NSAttributedString(string: "  \(dir)", attributes: [
-            .font: NSFont.systemFont(ofSize: 11),
+            .font: Theme.Typography.mono(Theme.Typography.small),
             .foregroundColor: Theme.chromeMutedText,
         ]))
 

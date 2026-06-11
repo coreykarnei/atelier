@@ -34,16 +34,40 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
 
         applyTheme()
         terminal.processDelegate = self
+
+        // The translucency token reads Reduce Transparency at apply-time (§1.5);
+        // re-apply if the user flips it while we're running.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(accessibilityDisplayChanged),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil
+        )
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    deinit {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+    }
+
     private func applyTheme() {
         terminal.installColors(Theme.ansi)
-        terminal.nativeBackgroundColor = NSColor(swiftTerm: Theme.terminalBackground)
+        // §2.1: the field is translucent over the behind-window blur — glyphs
+        // stay full-contrast. SwiftTerm copies this into its layer background
+        // only at setup, so set the layer directly too.
+        let background = NSColor(swiftTerm: Theme.terminalBackground)
+            .withAlphaComponent(Theme.effectiveFieldAlpha)
+        terminal.nativeBackgroundColor = background
+        terminal.layer?.backgroundColor = background.cgColor
         terminal.nativeForegroundColor = NSColor(swiftTerm: Theme.terminalForeground)
         terminal.caretColor = NSColor(swiftTerm: Theme.terminalCursor)
+    }
+
+    @objc private func accessibilityDisplayChanged() {
+        applyTheme()
+        terminal.needsDisplay = true
     }
 
     /// Spawn a process in this pane's PTY. `environment` defaults to the inherited

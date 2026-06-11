@@ -4,10 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-**Milestones 0 and 1 built (M1.1–M1.6 landed); refinement pass pending.** Read
-`VISION.md` (the authoritative *what*), `TECHNICAL_PLAN.md` (the *how* and the
-milestone sequence), and `docs/MILESTONE_1.md` (the workspace/layout/keymap/
-worktree/persistence design, as built) before proposing anything.
+**Milestones 0 and 1 built (M1.1–M1.6 landed); polish pass underway — Phase 0
+(foundation tokens) built, Phases 1–4 pending.** Read `VISION.md` (the
+authoritative *what*), `TECHNICAL_PLAN.md` (the *how* and the milestone
+sequence), and `docs/MILESTONE_1.md` (the workspace/layout/keymap/worktree/
+persistence design, as built) before proposing anything. The polish pass is
+planned in `docs/POLISH_PLAN.md` — phased (tokens → cockpit → distances →
+arrivals → overlays) and carrying the written design rules (motion inventory,
+contrast discipline, no-escalation, two-voice type, latency budget); treat
+those rules as binding when touching any UI. Phase 0 landed `Theme.Elevation`
+(Catppuccin z-ramp + lighting model), `Theme.Typography` (the two-voice type
+system; the plan's `Theme.Type`, renamed — Swift reserves `Type`), and the
+`Theme.fieldAlpha` translucency token (fields translucent over the
+behind-window blur, text never; opaque under Reduce Transparency).
 
 What exists today:
 - A **SwiftPM macOS app** (Swift 6 toolchain, language mode v5) using **AppKit** +

@@ -15,10 +15,12 @@ final class EditorPlaceholderView: NSView, WorkspacePane {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.backgroundColor = Theme.editorPlaceholderBackground.cgColor
+        // A recessed well on the z-ramp: the editor doesn't exist yet, so its
+        // slot reads as *below* the content plane.
+        layer?.backgroundColor = Theme.Elevation.crust.cgColor
 
         let label = NSTextField(labelWithString: "Editor · Milestone 2")
-        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.font = Theme.Typography.ui(Theme.Typography.body, weight: .medium)
         label.textColor = Theme.chromeMutedText
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
@@ -26,14 +28,29 @@ final class EditorPlaceholderView: NSView, WorkspacePane {
             label.centerXAnchor.constraint(equalTo: centerXAnchor),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
+
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(accessibilityDisplayChanged),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil
+        )
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    deinit {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+    }
+
     // Keep the layer background correct if the view is reattached in a different
     // appearance context.
     override func updateLayer() {
-        layer?.backgroundColor = Theme.editorPlaceholderBackground.cgColor
+        layer?.backgroundColor = Theme.Elevation.crust.cgColor
+    }
+
+    @objc private func accessibilityDisplayChanged() {
+        layer?.backgroundColor = Theme.Elevation.crust.cgColor
     }
 }
