@@ -267,13 +267,11 @@ final class BottomBar: NSView {
         view.onRename = { [weak self] idx in self?.delegate?.bottomBarDidRequestRenameSession(at: idx) }
     }
 
-    /// Estimated width: label (capped) + glyphs + close + padding.
+    /// Estimated width: full label + glyphs + close + padding. Titles are uncapped —
+    /// the two-row wrap and the `»` overflow absorb long ones.
     private func tabWidth(_ tab: SessionTabInfo) -> CGFloat {
         let label = (tab.isWorktree ? "⎇ " : "") + tab.title
-        let textWidth = min(
-            (label as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 11)]).width,
-            160
-        )
+        let textWidth = (label as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 11)]).width
         let badge: CGFloat = tab.attention == .none ? 0 : 10
         return textWidth + badge + 38
     }
@@ -404,13 +402,10 @@ private final class SessionTabView: NSView {
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(closeButton)
 
-        let width = titleLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 160)
-        width.priority = .required
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 22),
             titleLabel.leadingAnchor.constraint(equalTo: leading, constant: leadingPad),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            width,
             closeButton.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 4),
             closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
