@@ -5,11 +5,13 @@ spec for *what* Atelier is and what it deliberately is not; this document record
 *how* it gets built — the load-bearing technical decisions, the components, and the
 order in which they ship.
 
-**Status: pre-scaffolding.** No code exists yet. Decisions marked **[LOCKED]** are
-committed and should not be relitigated without revisiting the vision. Decisions
-marked **[CANDIDATE]** are leading choices to be validated during the spike (see
-§4, Milestone 0). Decisions marked **[OPEN]** still need a call and are collected
-in §6.
+**Status: Milestones 0 and 1 built; Milestone 2 (the editor) is next.** M0 proved
+the bet (see the [M0 devlog](docs/devlog/2026-06-01-milestone-0.md)); M1 built the
+workspace around it (designed in [docs/MILESTONE_1.md](docs/MILESTONE_1.md), built
+per the [M1 devlog](docs/devlog/2026-06-10-milestone-1.md)). Decisions marked
+**[LOCKED]** are committed and should not be relitigated without revisiting the
+vision. The **[CANDIDATE]** picks were validated in the spike (SwiftTerm held).
+The former **[OPEN]** questions are all resolved in §6.
 
 ---
 
@@ -234,7 +236,7 @@ Sequenced to **prove the thesis before building the long pole**. The editor (§3
 is the biggest piece but the least *uncertain*; the risky, project-defining bet is
 the native-terminal-ownership thesis. So that comes first.
 
-### Milestone 0 — The spike (prove the bet)
+### Milestone 0 — The spike (prove the bet) ✅ (built 2026-06-01)
 **Goal:** validate that owning the terminal makes truthful copy and native
 notifications feel right, and that SwiftTerm renders Claude Code faithfully.
 1. SwiftPM macOS app target; a single native window.
@@ -248,11 +250,16 @@ notifications feel right, and that SwiftTerm renders Claude Code faithfully.
 ping feels native. If yes, the premise holds and we commit to the long road. If no,
 revisit §2.1 / §3.2 before writing more.
 
-### Milestone 1 — The shell becomes a workspace
+### Milestone 1 — The shell becomes a workspace ✅ (built 2026-06-09/10)
 1. Fixed three-pane `NSSplitView` layout (editor pane can be a placeholder).
 2. Worktree manager (§3.8): spawn / list / return / tear-down.
 3. Session persistence (§3.9): panes, cwds, active worktree survive restart.
 4. Keyboard focus manager (§3.10): home-row pane focus; a minimal command palette.
+
+As built it grew beyond this list — projects as native tabbed windows, sessions
+as tabs, the Landing/promote flow, the `atelier` CLI, per-tab agent state, and
+the M3 click-to-focus affordance pulled forward. `docs/MILESTONE_1.md` is the
+as-built record.
 
 ### Milestone 2 — The editor, incrementally
 Each step is independently useful and shippable in order:

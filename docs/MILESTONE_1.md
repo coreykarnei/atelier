@@ -6,7 +6,10 @@ The design companion to [TECHNICAL_PLAN.md](../TECHNICAL_PLAN.md) §4 (Milestone
 Milestone 1 specifically — the workspace model, the chrome, the keymap, and the
 build order — settled in a design pass on 2026-06-09.
 
-**Status: designed, pre-implementation.** Milestone 0 (the native two-pane spike)
+**Status: built (M1.1–M1.6 landed, plus the post-plan refinements; see the
+[M1 devlog](devlog/2026-06-10-milestone-1.md)).** This document is kept as-built —
+where the implementation deliberately diverged from the original design pass, the
+text reflects what shipped. Milestone 0 (the native two-pane spike)
 is complete and committed. Decisions here marked **[LOCKED]** were settled in the
 design pass and should not be relitigated without revisiting the vision.
 **[DEFERRED]** items are designed but intentionally built later. The §6 open
@@ -84,6 +87,10 @@ is **promoted** into an IDE session:
   keys). App/project-window open with no restored session lands on a Landing.
 - The landing terminal is **focused by default** (terminal-first); the list is
   one `⌃⌘k` away.
+- **Closing everything kicks back to the Launch view, never out of the app**
+  (refinement pass): closing the last session tab un-anchors the window into a
+  fresh Landing; closing the last project window opens a fresh Landing window.
+  Only `⌘Q` quits — which is also the persistence snapshot point (§9).
 
 ---
 
@@ -138,7 +145,10 @@ VSCode, and move only the bindings that *must* move to stop fighting the editor.
 | Cycle projects | `⌘`` | free — projects are windows |
 | Focus pane (directional) | `⌃⌘ + h/j/k/l` | collision-free; matches tmux `prefix+hjkl` instinct |
 | Next / prev session | `⌘⇧]` / `⌘⇧[` | browser/VSCode tab nav |
-| New / close session | `⌘T` / `⌘W` | universal tab idiom |
+| New project tab | `⌘T` | a Landing — matches Ghostty's new-tab muscle memory (revised during M1.3: the Landing is a *project* opener, so it lives at the project tier) |
+| New session (on main) | `⌘⇧T` | sibling session on the project's main checkout |
+| Open IDE here | `⌘↩` | promote a Landing at the terminal's cwd |
+| Close session | `⌘W` | last one reverts the window to a Landing |
 | Toggle layout | `⌘\` | Triptych ↔ Split |
 | Fuzzy file picker | `⌘P` | VSCode — locked |
 | Command palette | `⌘⇧P` | VSCode — locked |
@@ -173,8 +183,11 @@ worktree path, so this is about *invocation*.
   *informative*: clean → quick confirm; dirty → names what would be lost and
   requires explicit force (surfacing git's own refusal, never a silent `--force`).
 
-**New session** is the `+` at the trailing edge of the session-tab strip — a
-deliberate "another session on the current root."
+**New session** is the `+` at the trailing edge of the session-tab strip (or
+`⌘⇧T`) — always "another session on the project's **main** checkout," regardless
+of which worktree the active tab is on (revised from "current root" in the
+refinement pass: worktree sessions should only come from deliberate acts — the
+fan or the CLI).
 
 **Storage:** worktrees live at `~/.local/share/worktrees/<repo>/<safe-branch>/`,
 anchored to the **primary** working tree (resolved via `git rev-parse
@@ -199,31 +212,34 @@ underneath.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ ⎇ main │ Fix copy bug · Wire palette  ┃  ⎇ Refactor auth  +    42:7  12:34·Jun09  ⊞ │
+│ atelier │ Fix copy bug · Wire palette  ┃  ⎇ Refactor auth  +     12:34·Jun09  ⊞ │
 └──────────────────────────────────────────────────────────────────────────────┘
-  pill        main group (shared)         feat-x group     +   line   clock      toggle
- (switch →)                                                    :col  (blink :)  (corner)
+   pill        main group (shared)         feat-x group     +     clock      toggle
+ (fan →)                                                        (blink :)  (corner)
 ```
 
-**Left — the worktree pill: `⎇ <branch>`.** Shows the active session's live HEAD
-branch, which (per §2's one-to-one property) *is* the codebase identity. Clicking
-it opens the worktree fan (§6). This is the single home for branch — branch is
-**not** repeated in the right cluster.
+**Left — the project pill (static).** The project's name, unchanged across
+session switches — the original `⎇ branch` design reflowed the whole bar every
+time you clicked a tab on a different worktree, so the pill was made static in
+the refinement pass. Branch/worktree identity lives in the tabs (`⎇` glyph +
+grouping) and the fan. Clicking the pill opens the worktree fan (§6); before a
+window is anchored to a project it shows where a Landing would open.
 
 **Center — session tabs.**
 - **Text = the Claude session title** (the same summary `/resume` shows), read live
   from the transcript (`~/.claude/projects/...`) — the M0 transcript-reading path,
-  reused. Falls back to the worktree name while a session is still untitled, and is
-  **user-renamable** as a hard override.
-- **Grouped by worktree** with separators (`┃`); the grouping *is* how codebase
-  sharing is shown — we do **not** also append the worktree name to each tab.
-- A `·2`/`·3` **counter** appears only as the fallback when two same-root sessions
-  are both still untitled.
-- **Max-width + ellipsis** per tab (full title on hover) — bounds any one title and
-  stabilizes widths so live title changes don't cause jittery reflow.
+  reused, against each session's *pinned* `--session-id` so same-root sessions
+  never collide. Falls back to the folder name while a session is untitled, and is
+  **user-renamable** (double-click) as a hard override. Titles are **uncapped** —
+  full text, no ellipsis; the wrap and overflow absorb long ones. (The planned
+  `·2` untitled-collision counter was dropped as unneeded — pinned ids + live
+  titles disambiguate.)
+- **Grouped by worktree** with separators (`┃`), main checkout first; worktree
+  tabs carry a `⎇` glyph. The grouping *is* how codebase sharing is shown — we do
+  **not** also append the worktree name to each tab.
 - **Two-row, group-aware wrap** when the strip fills: whole groups flow to row two,
   never split mid-group; `+` rides the trailing edge of the last row. Hard ceiling
-  of two rows — beyond that a `»` overflow affordance, so the bar can't grow into a
+  of two rows — beyond that a `»` overflow menu, so the bar can't grow into a
   third pane.
 
 **Right cluster** (left→right): `line:col` (editor focus only) · `clock · date`
@@ -339,7 +355,10 @@ feels too lossy — but not built up front for an edge this rare.
 
 ## 10. Build sequence
 
-Dependency-ordered; each sub-step is independently useful.
+Dependency-ordered; each sub-step is independently useful. **All landed**
+(commits `202ac7c` → `4a65cdf`), plus a refinement pass after M1.6: static
+project pill, `+`-from-main, close-to-Launch-view, the exact-state attention
+model, and uncapped tab titles.
 
 - **M1.1 — Three-pane shell + layout system.** Nested `NSSplitView` (Triptych),
   Split mode, `⌘\` + corner toggle, per-`(session, mode)` divider persistence. Get
@@ -359,8 +378,9 @@ Dependency-ordered; each sub-step is independently useful.
 - **M1.6 — Command palette.** Centered overlay, the §8 command set, keybinding
   display.
 
-**Deferred within/after M1:** per-session attention state (§7.1) — reuses the M0
-hook plumbing; sequence whenever notifications-to-tabs is wanted.
+**Initially deferred, since built:** per-session attention state (§7.1), worktree
+grouping + two-row wrap + rename in the strip, and notification click-to-focus
+(the TECHNICAL_PLAN §4 M3 affordance, pulled forward).
 
 ---
 
@@ -387,8 +407,10 @@ No Milestone 1 open questions remain.
    state — if you `/resume` inside the pane, the session id changes. Heuristic:
    most-recently-modified `.jsonl` for the cwd (the same lookup truthful copy
    needs). Confirm the transcript's title field during M1.2.
-2. **Live title churn** — Claude rewrites summaries mid-work; tabs need a debounce
-   plus the max-width cap (§7) so the strip doesn't twitch or reflow.
+2. **Live title churn** — Claude rewrites summaries mid-work, and titles are
+   deliberately uncapped (§7), so a tab can change width mid-session and shift
+   its neighbors. Accepted trade at 2–4 sessions; a generous cap is the fallback
+   if the strip feels twitchy in practice.
 3. **Multi-window state coherence** — N windows sharing one process and one
    persistence store; validate that close/restore/worktree-removal stay consistent
    across windows (M1.5).
