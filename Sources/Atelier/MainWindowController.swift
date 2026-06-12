@@ -566,23 +566,27 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         }
     }
 
-    // MARK: Worktree fan (MILESTONE_1 §6)
+    // MARK: Worktree fan (MILESTONE_1 §6, physiology per POLISH_PLAN §6)
 
-    private var fanPopover: NSPopover?
+    private var fanOverlay: WorktreeFanOverlay?
 
     func showWorktreeFan(from anchor: NSView? = nil, prefill: String? = nil) {
-        guard let session = activeSession,
+        guard fanOverlay == nil else { return }
+        guard let session = activeSession, let container = window?.contentView,
               let repoRoot = WorktreeManager.repoRoot(for: session.cwd) else {
             NSSound.beep() // landing on a non-repo: nothing to fan
             return
         }
         let anchor = anchor ?? bottomBar.pillAnchor
 
-        let rows = WorktreeManager.list(repoRoot: repoRoot).map { worktree in
+        // The fan opens next frame (§1.5): one fast `git worktree list` now;
+        // the per-tree dirty sweep (a subprocess per worktree) lands async.
+        let worktrees = WorktreeManager.list(repoRoot: repoRoot)
+        let rows = worktrees.map { worktree in
             WorktreeFanRow(
                 worktree: worktree,
                 isOpen: sessions.contains { $0.cwd == worktree.path },
-                isDirty: WorktreeManager.isDirty(worktree.path)
+                isDirty: false
             )
         }
 
@@ -600,18 +604,34 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             self?.dismissFan()
             self?.confirmRemoveWorktree(row, repoRoot: repoRoot)
         }
+        fan.onDismiss = { [weak self] in self?.dismissFan() }
 
-        let popover = NSPopover()
-        popover.contentViewController = fan
-        popover.behavior = .transient
-        popover.appearance = NSAppearance(named: .darkAqua)
-        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
-        fanPopover = popover
+        let overlay = WorktreeFanOverlay(controller: fan) { [weak self] in self?.dismissFan() }
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(overlay)
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: container.topAnchor),
+            overlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            overlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+        ])
+        container.layoutSubtreeIfNeeded()
+        overlay.present(abovePillFrame: anchor.convert(anchor.bounds, to: container))
+        fanOverlay = overlay
+        window?.makeFirstResponder(overlay.focusField)
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak fan] in
+            let dirty = Dictionary(uniqueKeysWithValues: worktrees.map {
+                ($0.path, WorktreeManager.isDirty($0.path))
+            })
+            DispatchQueue.main.async { fan?.updateDirty(dirty) }
+        }
     }
 
     private func dismissFan() {
-        fanPopover?.close()
-        fanPopover = nil
+        fanOverlay?.removeFromSuperview()
+        fanOverlay = nil
+        window?.makeFirstResponder(activeSession?.defaultFocusView)
     }
 
     /// Return-to: focus the worktree's session if one is open, else open one.
@@ -661,9 +681,12 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     private func confirmRemoveWorktree(_ row: WorktreeFanRow, repoRoot: String) {
         let branch = row.worktree.branch
         let openSessions = sessions.filter { $0.cwd == row.worktree.path }
+        // The fan's dirty marker is an async hint; the *refusal* re-checks the
+        // truth at decision time.
+        let isDirty = WorktreeManager.isDirty(row.worktree.path)
 
         let alert = NSAlert()
-        if row.isDirty {
+        if isDirty {
             alert.alertStyle = .critical
             alert.messageText = "⎇ \(branch) has uncommitted changes"
             alert.informativeText = "Removing this worktree will permanently discard them."
@@ -709,7 +732,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
                     self.showSession(at: min(self.activeIndex, self.sessions.count - 1))
                     self.updateBottomBar()
                 }
-                try WorktreeManager.remove(path: row.worktree.path, repoRoot: repoRoot, force: row.isDirty)
+                try WorktreeManager.remove(path: row.worktree.path, repoRoot: repoRoot, force: isDirty)
             } catch {
                 self.presentError(title: "Couldn't remove worktree", error: error)
             }
@@ -737,6 +760,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         ])
         palette = overlay
         window?.makeFirstResponder(overlay.focusField)
+        overlay.animateIn()
     }
 
     private func dismissPalette() {

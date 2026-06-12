@@ -14,11 +14,17 @@ final class WorktreeFanController: NSViewController, NSTableViewDataSource, NSTa
     var onOpen: ((Worktree) -> Void)?
     var onCreate: ((String) -> Void)?
     var onRemove: ((WorktreeFanRow) -> Void)?
+    var onDismiss: (() -> Void)?
 
-    private let allRows: [WorktreeFanRow]
+    /// First-responder target for the overlay host.
+    var filterField: NSView { field }
+
+    private var allRows: [WorktreeFanRow]
     private var filtered: [WorktreeFanRow]
     private let field = NSTextField()
     private let table = FanTableView()
+    private let highlight = SlidingSelectionHighlight()
+    private var rootHeight: NSLayoutConstraint?
 
     /// Pre-filled filter text — the orphan-restore notice opens the fan aimed
     /// at recreating a named worktree (POLISH_PLAN §5).
@@ -65,6 +71,7 @@ final class WorktreeFanController: NSViewController, NSTableViewDataSource, NSTa
         table.target = self
         table.action = #selector(rowClicked)
         table.onReturn = { [weak self] in self?.activateSelection() }
+        table.onEscape = { [weak self] in self?.onDismiss?() }
         let column = NSTableColumn(identifier: .init("worktree"))
         table.addTableColumn(column)
 
@@ -75,10 +82,11 @@ final class WorktreeFanController: NSViewController, NSTableViewDataSource, NSTa
         scroll.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(scroll)
 
-        let height = min(CGFloat(max(filtered.count, 1)) * 26 + 46, 320)
+        let height = root.heightAnchor.constraint(equalToConstant: Self.contentHeight(forRows: filtered.count))
+        rootHeight = height
         NSLayoutConstraint.activate([
             root.widthAnchor.constraint(equalToConstant: 320),
-            root.heightAnchor.constraint(equalToConstant: height),
+            height,
             field.topAnchor.constraint(equalTo: root.topAnchor, constant: 8),
             field.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 8),
             field.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
@@ -88,20 +96,59 @@ final class WorktreeFanController: NSViewController, NSTableViewDataSource, NSTa
             scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -4),
         ])
         view = root
+        highlight.attach(to: table)
         if let prefill {
             field.stringValue = prefill
         }
         reload()
     }
 
-    private func reload() {
+    private static func contentHeight(forRows rows: Int) -> CGFloat {
+        min(CGFloat(max(rows, 1)) * 26 + 46, 320)
+    }
+
+    /// Refresh the dirty markers once the off-main `git status` sweep lands
+    /// (§6: the fan opens next frame; truth arrives a beat later).
+    func updateDirty(_ dirtyByPath: [String: Bool]) {
+        allRows = allRows.map { row in
+            WorktreeFanRow(
+                worktree: row.worktree,
+                isOpen: row.isOpen,
+                isDirty: dirtyByPath[row.worktree.path] ?? row.isDirty
+            )
+        }
+        let selected = table.selectedRow
+        reload(keepingSelection: selected)
+    }
+
+    private func reload(keepingSelection: Int? = nil) {
         let query = trimmedQuery.lowercased()
         filtered = query.isEmpty
             ? allRows
             : allRows.filter { $0.worktree.branch.lowercased().contains(query) }
         table.reloadData()
         if numberOfRows(in: table) > 0 {
-            table.selectRowIndexes([0], byExtendingSelection: false)
+            let row = min(keepingSelection ?? 0, numberOfRows(in: table) - 1)
+            table.selectRowIndexes([max(row, 0)], byExtendingSelection: false)
+        }
+        table.layoutSubtreeIfNeeded()
+        highlight.update(for: table, animated: false)
+
+        // Panel height tracks the filtered results (§6) — animated once the
+        // fan is on screen, instant during loadView.
+        let newHeight = Self.contentHeight(forRows: numberOfRows(in: table))
+        if let rootHeight, rootHeight.constant != newHeight {
+            if view.superview == nil || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                rootHeight.constant = newHeight
+            } else {
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.15
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    ctx.allowsImplicitAnimation = true
+                    rootHeight.animator().constant = newHeight
+                    view.superview?.layoutSubtreeIfNeeded()
+                }
+            }
         }
     }
 
@@ -131,11 +178,16 @@ final class WorktreeFanController: NSViewController, NSTableViewDataSource, NSTa
         case #selector(NSResponder.insertNewline(_:)):
             activateSelection()
             return true
+        case #selector(NSResponder.cancelOperation(_:)):
+            onDismiss?()
+            return true
         case #selector(NSResponder.moveDown(_:)):
             table.selectRowIndexes([min(table.selectedRow + 1, numberOfRows(in: table) - 1)], byExtendingSelection: false)
+            highlight.update(for: table, animated: true)
             return true
         case #selector(NSResponder.moveUp(_:)):
             table.selectRowIndexes([max(table.selectedRow - 1, 0)], byExtendingSelection: false)
+            highlight.update(for: table, animated: true)
             return true
         default:
             return false
@@ -231,15 +283,117 @@ final class WorktreeFanController: NSViewController, NSTableViewDataSource, NSTa
     }
 }
 
-/// Table that reports Return instead of beeping (same idiom as the Landing list).
+/// Table that reports Return/Escape instead of beeping (same idiom as the
+/// Landing list).
 private final class FanTableView: NSTableView {
     var onReturn: (() -> Void)?
+    var onEscape: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 36 {
-            onReturn?()
-            return
+        switch event.keyCode {
+        case 36: onReturn?()
+        case 53: onEscape?()
+        default: super.keyDown(with: event)
         }
-        super.keyDown(with: event)
+    }
+}
+
+/// The fan's host (§6): a transparent in-window overlay whose card *rises from
+/// the pill* — scale from 0.96 anchored at its bottom-left, settling in
+/// ≤150 ms — wearing the lighting model (top hairline, the floating shadow).
+/// No scrim: the fan is a speed surface, not a modal. Replaces the NSPopover,
+/// whose stock chrome and appear animation belonged to a different app.
+final class WorktreeFanOverlay: NSView {
+    private let controller: WorktreeFanController
+    private let cardHost = NSView()
+    private let card = NSVisualEffectView()
+    private let onDismiss: () -> Void
+
+    /// The view to focus once presented.
+    var focusField: NSView { controller.filterField }
+
+    init(controller: WorktreeFanController, onDismiss: @escaping () -> Void) {
+        self.controller = controller
+        self.onDismiss = onDismiss
+        super.init(frame: .zero)
+
+        cardHost.wantsLayer = true
+        cardHost.shadow = Theme.Elevation.floatingShadow
+        cardHost.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(cardHost)
+
+        card.material = .hudWindow
+        card.blendingMode = .withinWindow
+        card.state = .active
+        card.wantsLayer = true
+        card.layer?.cornerRadius = Theme.Elevation.radiusLarge
+        card.layer?.masksToBounds = true
+        card.translatesAutoresizingMaskIntoConstraints = false
+        cardHost.addSubview(card)
+
+        let topHairline = NSView()
+        topHairline.wantsLayer = true
+        topHairline.layer?.backgroundColor = Theme.Elevation.hairline.cgColor
+        topHairline.translatesAutoresizingMaskIntoConstraints = false
+
+        let content = controller.view
+        content.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(content)
+        card.addSubview(topHairline)
+
+        NSLayoutConstraint.activate([
+            card.topAnchor.constraint(equalTo: cardHost.topAnchor),
+            card.bottomAnchor.constraint(equalTo: cardHost.bottomAnchor),
+            card.leadingAnchor.constraint(equalTo: cardHost.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: cardHost.trailingAnchor),
+            content.topAnchor.constraint(equalTo: card.topAnchor),
+            content.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+            content.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            topHairline.topAnchor.constraint(equalTo: card.topAnchor),
+            topHairline.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            topHairline.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            topHairline.heightAnchor.constraint(equalToConstant: 1),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Pin the card just above the pill (frames in this overlay's coordinate
+    /// space) and rise. The card grows upward from the pill as results change,
+    /// so the *bottom* edge is the anchored one.
+    func present(abovePillFrame pill: CGRect) {
+        // `pill` is in this overlay's (y-up) coordinates: pill.maxY is the
+        // pill's top measured from the bottom edge — a negative bottom-anchor
+        // constant raises the card that far.
+        NSLayoutConstraint.activate([
+            cardHost.leadingAnchor.constraint(equalTo: leadingAnchor, constant: max(8, pill.minX - 4)),
+            cardHost.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -(pill.maxY + 8)),
+        ])
+        layoutSubtreeIfNeeded()
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        let target = cardHost.frame
+        // Scale 0.96 anchored at the bottom-left corner (the pill's corner).
+        cardHost.frame = CGRect(
+            x: target.minX,
+            y: target.minY,
+            width: target.width * 0.96,
+            height: target.height * 0.96
+        )
+        cardHost.alphaValue = 0
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.15
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            ctx.allowsImplicitAnimation = true
+            cardHost.animator().frame = target
+            cardHost.animator().alphaValue = 1
+        }
+    }
+
+    /// Click outside the card dismisses; the fan swallows nothing else.
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if !cardHost.frame.contains(point) { onDismiss() }
     }
 }

@@ -37,6 +37,8 @@ final class CommandPalette: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     private let card = NSVisualEffectView()
     private let field = NSTextField()
     private let table = PaletteTableView()
+    private let highlight = SlidingSelectionHighlight()
+    private var listHeight: NSLayoutConstraint?
 
     init(commands: [PaletteCommand], onDismiss: @escaping () -> Void) {
         let recents = RecentCommands.all()
@@ -149,11 +151,37 @@ final class CommandPalette: NSView, NSTableViewDataSource, NSTableViewDelegate, 
             scroll.leadingAnchor.constraint(equalTo: card.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: card.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -6),
-            scroll.heightAnchor.constraint(equalToConstant: min(CGFloat(filtered.count) * 28 + 8, 300)),
         ])
+        let height = scroll.heightAnchor.constraint(equalToConstant: Self.listHeight(for: filtered.count))
+        height.isActive = true
+        listHeight = height
 
+        highlight.attach(to: table)
         table.reloadData()
         if !filtered.isEmpty { table.selectRowIndexes([0], byExtendingSelection: false) }
+        table.layoutSubtreeIfNeeded()
+        highlight.update(for: table, animated: false)
+    }
+
+    private static func listHeight(for rows: Int) -> CGFloat {
+        min(CGFloat(rows) * 28 + 8, 300)
+    }
+
+    /// The Spotlight descent (§6): the card drops in from the titlebar edge,
+    /// settling in ~180 ms. Reduce Motion gets a plain appear.
+    func animateIn() {
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        layoutSubtreeIfNeeded()
+        let target = cardHost.frame
+        cardHost.frame = target.offsetBy(dx: 0, dy: 10) // AppKit y-up: start higher
+        cardHost.alphaValue = 0
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.18
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            ctx.allowsImplicitAnimation = true
+            cardHost.animator().frame = target
+            cardHost.animator().alphaValue = 1
+        }
     }
 
     /// The view to focus once presented.
@@ -173,6 +201,26 @@ final class CommandPalette: NSView, NSTableViewDataSource, NSTableViewDelegate, 
             : commands.filter { fuzzyMatches(query: query, candidate: $0.title.lowercased()) }
         table.reloadData()
         if !filtered.isEmpty { table.selectRowIndexes([0], byExtendingSelection: false) }
+
+        // The panel height tracks the results as you type (§6 — the single
+        // biggest "native" tell). The row set changed, so the highlight jumps
+        // rather than gliding to an unrelated row.
+        table.layoutSubtreeIfNeeded()
+        highlight.update(for: table, animated: false)
+        let newHeight = Self.listHeight(for: filtered.count)
+        if let listHeight, listHeight.constant != newHeight {
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                listHeight.constant = newHeight
+            } else {
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.15
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    ctx.allowsImplicitAnimation = true
+                    listHeight.animator().constant = newHeight
+                    self.layoutSubtreeIfNeeded()
+                }
+            }
+        }
     }
 
     /// Subsequence match — `wt` finds "Worktree: …", `tl` finds "Toggle Layout".
@@ -210,10 +258,12 @@ final class CommandPalette: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         case #selector(NSResponder.moveDown(_:)):
             table.selectRowIndexes([min(table.selectedRow + 1, filtered.count - 1)], byExtendingSelection: false)
             table.scrollRowToVisible(table.selectedRow)
+            highlight.update(for: table, animated: true)
             return true
         case #selector(NSResponder.moveUp(_:)):
             table.selectRowIndexes([max(table.selectedRow - 1, 0)], byExtendingSelection: false)
             table.scrollRowToVisible(table.selectedRow)
+            highlight.update(for: table, animated: true)
             return true
         default:
             return false
@@ -242,10 +292,8 @@ final class CommandPalette: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         ])
 
         if let key = command.key {
-            let chord = NSTextField(labelWithString: key)
-            chord.font = Theme.Typography.mono(Theme.Typography.small)
-            chord.textColor = Theme.chromeMutedText
-            chord.translatesAutoresizingMaskIntoConstraints = false
+            // Chords as keycap chips (§6), per Theme.Typography.Keycap.
+            let chord = KeycapChipView(chord: key)
             cell.addSubview(chord)
             NSLayoutConstraint.activate([
                 chord.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -14),

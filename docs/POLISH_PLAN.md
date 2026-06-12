@@ -16,9 +16,11 @@ kept as the plan's compass:
 > *Build the system the user lives in at every distance, and light it with
 > pixel-level craft — and let the transition set-pieces go.*
 
-**Status: Phases 0–3 built (2026-06-11); Phase 4 not started.** Phases are
-dependency-ordered; each is independently shippable. Nothing here blocks
-Milestone 2 — Phase 0 actively accelerates it.
+**Status: Phases 0–4 built (2026-06-11).** The palette physiology is
+visually verified; the fan's new overlay (popover replaced) builds and is
+code-complete but still needs one live look — open the pill fan and judge
+the rise, the height tracking, and the sliding highlight before calling the
+pass closed. Nothing here blocks Milestone 2.
 
 ---
 
@@ -275,6 +277,21 @@ into Milestone 2.
   rows, not discrete repaints.
 - Chords as keycap chips per `Theme.Type`, obeying the lighting model.
 - Both overlays pre-built and shown next frame (§1.5).
+
+**As built (2026-06-11):** shared physiology lives in `OverlayChrome.swift` —
+`SlidingSelectionHighlight` (one surface0 rounded rect gliding 120 ms between
+rows; tables' own selection drawing off) and `KeycapChipView` (mono glyph,
+surface0, 4 pt radius, hairline top edge), both already shaped for the M2
+`⌘P` picker. The palette descends ~10 pt over 180 ms and its list height
+animates to fit results (150 ms); chords are keycap chips. The fan left its
+NSPopover for `WorktreeFanOverlay`: an in-window transparent overlay (no
+scrim — it's a speed surface) whose hud-material card wears the top hairline
+and the floating shadow, rises from the pill (scale 0.96 anchored at its
+bottom-left corner, 150 ms), tracks its filtered height, and dismisses on
+Esc/click-out. The per-worktree dirty sweep moved off the open path: the fan
+opens on one `git worktree list`, dirty markers land async, and the remove
+refusal re-checks dirtiness at decision time. No row stagger anywhere, per
+the dropped-items list. Reduce Motion: every one of these is a plain appear.
 
 ---
 
