@@ -74,6 +74,14 @@ enum WorktreeManager {
         return result.status == 0 && !result.out.isEmpty
     }
 
+    /// The actual `git status --short` lines — what a refusal names as the loss
+    /// (POLISH_PLAN §5: refusals as designed objects).
+    static func statusLines(_ path: String) -> [String] {
+        let result = git(["-C", path, "status", "--short"])
+        guard result.status == 0 else { return [] }
+        return result.out.split(separator: "\n").map(String.init)
+    }
+
     /// `feature/foo` → `feature-foo`, for the on-disk directory name.
     static func safeBranch(_ branch: String) -> String {
         branch.replacingOccurrences(of: "/", with: "-")

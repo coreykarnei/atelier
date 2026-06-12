@@ -20,6 +20,10 @@ final class WorktreeFanController: NSViewController, NSTableViewDataSource, NSTa
     private let field = NSTextField()
     private let table = FanTableView()
 
+    /// Pre-filled filter text — the orphan-restore notice opens the fan aimed
+    /// at recreating a named worktree (POLISH_PLAN §5).
+    var prefill: String?
+
     /// True when the typed text names no existing branch — the first row becomes
     /// "create …".
     private var showsCreateRow: Bool {
@@ -84,6 +88,9 @@ final class WorktreeFanController: NSViewController, NSTableViewDataSource, NSTa
             scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -4),
         ])
         view = root
+        if let prefill {
+            field.stringValue = prefill
+        }
         reload()
     }
 

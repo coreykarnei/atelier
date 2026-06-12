@@ -16,7 +16,7 @@ kept as the plan's compass:
 > *Build the system the user lives in at every distance, and light it with
 > pixel-level craft — and let the transition set-pieces go.*
 
-**Status: Phases 0–2 built (2026-06-11); Phases 3–4 not started.** Phases are
+**Status: Phases 0–3 built (2026-06-11); Phase 4 not started.** Phases are
 dependency-ordered; each is independently shippable. Nothing here blocks
 Milestone 2 — Phase 0 actively accelerates it.
 
@@ -246,6 +246,20 @@ morning open is the first impression of every single day.
   subtlest tone (not a gray rect); first-launch empty recents gets one
   designed line ("Nothing yet — `cd` into a repo and `⌘↩`", two-voice).
 - **Quit stays instant** — `⌘Q` is the snapshot point; no exit choreography.
+
+**As built (2026-06-11):** the placard hooks the literal first PTY byte
+(`FreezableTerminalView.dataReceived` override → one-shot callback) and shows
+only on the true resume path (restored session *with* a surviving
+transcript); it cross-fades out in 250 ms, instantly under Reduce Motion. The
+restore stagger lives in the bottom bar's first `place()` per launch
+(40 ms/tab, capped 100 ms). Notification permission moved out of
+`NotificationServer.start()` into `NotificationPermission.requestOnce()`,
+fired from `Session.startAgent` — promote or restore, never bare launch. The
+dirty-delete modal shows up to 8 real `git status --short` lines in mono with
+an "… and N more" tail; the orphan notice names dead worktrees in mono
+(`⎇ branch`) and its "Recreate…" button opens the fan pre-filled with the
+first orphan's branch. Empty recents gets the two-voice line ("Nothing yet —
+`cd` into a repo and `⌘↩`"). Quit untouched.
 
 ## 6. Phase 4 — Overlay physiology (~1–2 days)
 

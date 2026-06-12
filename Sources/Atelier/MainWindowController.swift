@@ -570,12 +570,13 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
 
     private var fanPopover: NSPopover?
 
-    private func showWorktreeFan(from anchor: NSView) {
+    func showWorktreeFan(from anchor: NSView? = nil, prefill: String? = nil) {
         guard let session = activeSession,
               let repoRoot = WorktreeManager.repoRoot(for: session.cwd) else {
             NSSound.beep() // landing on a non-repo: nothing to fan
             return
         }
+        let anchor = anchor ?? bottomBar.pillAnchor
 
         let rows = WorktreeManager.list(repoRoot: repoRoot).map { worktree in
             WorktreeFanRow(
@@ -586,6 +587,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         }
 
         let fan = WorktreeFanController(rows: rows)
+        fan.prefill = prefill
         fan.onOpen = { [weak self] worktree in
             self?.dismissFan()
             self?.openWorktree(at: worktree.path)
@@ -666,6 +668,20 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             alert.messageText = "⎇ \(branch) has uncommitted changes"
             alert.informativeText = "Removing this worktree will permanently discard them."
                 + (openSessions.isEmpty ? "" : " Its \(openSessions.count) open session(s) will close.")
+            // The refusal names the actual loss (§5): the real `git status
+            // --short` lines, in mono — not a vague "changes exist".
+            let lines = WorktreeManager.statusLines(row.worktree.path)
+            if !lines.isEmpty {
+                let shown = lines.prefix(8)
+                var text = shown.joined(separator: "\n")
+                if lines.count > shown.count { text += "\n… and \(lines.count - shown.count) more" }
+                let label = NSTextField(labelWithString: text)
+                label.font = Theme.Typography.mono(Theme.Typography.small)
+                label.textColor = Theme.chromeText
+                label.lineBreakMode = .byTruncatingTail
+                label.frame = NSRect(x: 0, y: 0, width: 360, height: label.fittingSize.height)
+                alert.accessoryView = label
+            }
             alert.addButton(withTitle: "Force Remove")
         } else {
             alert.messageText = "Remove worktree ⎇ \(branch)?"

@@ -203,12 +203,16 @@ final class Session: NSObject, NSSplitViewDelegate {
     private func startAgent() {
         guard !agentStarted else { return }
         agentStarted = true
+        // §5: the notification-permission prompt fires the moment the first
+        // agent exists — promote or restore — not at app launch.
+        NotificationPermission.requestOnce()
         let claude = Session.resolveClaudeBinary()
         // A restored session resumes its previous conversation — provided its
         // transcript still exists; otherwise start fresh under the same id.
         let args: [String]
         if isRestored, Self.transcriptExists(sessionId: claudeSessionId, cwd: cwd) {
             args = ["--resume", claudeSessionId]
+            agentPane.showResumingPlacard(title: displayTitle)
         } else {
             args = ["--session-id", claudeSessionId]
         }

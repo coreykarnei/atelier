@@ -110,7 +110,30 @@ final class LandingView: NSView, WorkspacePane, NSTableViewDataSource, NSTableVi
             scroll.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
         ])
 
-        if !entries.isEmpty {
+        if entries.isEmpty {
+            // First-launch empty state (§5): one designed two-voice line, not
+            // a blank list. Atelier speaks SF Pro; `cd` and the chord are mono.
+            let line = NSMutableAttributedString()
+            func ui(_ s: String) { line.append(NSAttributedString(string: s, attributes: [
+                .font: Theme.Typography.ui(Theme.Typography.body),
+                .foregroundColor: Theme.chromeMutedText,
+            ])) }
+            func mono(_ s: String) { line.append(NSAttributedString(string: s, attributes: [
+                .font: Theme.Typography.mono(Theme.Typography.body),
+                .foregroundColor: Theme.chromeText,
+            ])) }
+            ui("Nothing yet — ")
+            mono("cd")
+            ui(" into a repo and ")
+            mono("⌘↩")
+            let hint = NSTextField(labelWithAttributedString: line)
+            hint.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(hint)
+            NSLayoutConstraint.activate([
+                hint.centerXAnchor.constraint(equalTo: centerXAnchor),
+                hint.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+        } else {
             table.selectRowIndexes([0], byExtendingSelection: false)
         }
     }

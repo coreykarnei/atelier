@@ -70,6 +70,9 @@ final class BottomBar: NSView {
     private var separatorPool: [NSView] = []
     private var lastFlowWidth: CGFloat = 0
     private var lastFlowHeight: CGFloat = 0
+    /// First population per launch gets the restore stagger (§5); afterwards
+    /// arrivals appear with a plain fade, never again.
+    private var hasRevealed = false
 
     private var clockTimer: Timer?
 
@@ -400,6 +403,9 @@ final class BottomBar: NSView {
                 view.isHidden = false
             }
         }
+        let stagger = !hasRevealed && arrivals.count > 1
+        if !placements.isEmpty { hasRevealed = true }
+
         if animated {
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = 0.2
@@ -407,11 +413,22 @@ final class BottomBar: NSView {
                 ctx.allowsImplicitAnimation = true
                 apply()
             }
-            for view in arrivals {
+            // Restore stagger (§5): once per launch, tabs fade-and-settle
+            // left-to-right, ~40 ms apart, sub-300 ms total. Never again.
+            for (index, view) in arrivals.enumerated() {
                 view.alphaValue = 0
-                NSAnimationContext.runAnimationGroup { ctx in
-                    ctx.duration = 0.2
-                    view.animator().alphaValue = 1
+                let settle = {
+                    NSAnimationContext.runAnimationGroup { ctx in
+                        ctx.duration = 0.2
+                        ctx.allowsImplicitAnimation = true
+                        view.animator().alphaValue = 1
+                    }
+                }
+                if stagger, index > 0 {
+                    let delay = min(Double(index) * 0.04, 0.1)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: settle)
+                } else {
+                    settle()
                 }
             }
         } else {

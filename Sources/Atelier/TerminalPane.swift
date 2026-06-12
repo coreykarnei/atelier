@@ -23,6 +23,18 @@ class FreezableTerminalView: LocalProcessTerminalView {
             super.setFrameSize(newSize)
         }
     }
+
+    /// Fires once, on the first byte the hosted process writes — the resuming
+    /// placard's cross-fade-out cue (POLISH_PLAN §5).
+    var onFirstData: (() -> Void)?
+
+    override func dataReceived(slice: ArraySlice<UInt8>) {
+        if let callback = onFirstData {
+            onFirstData = nil
+            DispatchQueue.main.async(execute: callback)
+        }
+        super.dataReceived(slice: slice)
+    }
 }
 
 /// One PTY-backed terminal pane. Wraps SwiftTerm's `LocalProcessTerminalView`,
@@ -126,6 +138,58 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
     var hostedPid: pid_t? {
         guard let process = terminal.process, process.shellPid != 0 else { return nil }
         return process.shellPid
+    }
+
+    // MARK: Resuming placard (POLISH_PLAN §5)
+
+    /// Kill the morning dead-terminal flash: until the first PTY byte, a
+    /// restoring agent pane shows base material with two muted centered lines —
+    /// the session title in mono, `resuming…` in SF Pro — cross-fading out on
+    /// first paint. No spinner (§1.1).
+    func showResumingPlacard(title: String) {
+        let placard = NSView()
+        placard.wantsLayer = true
+        placard.layer?.backgroundColor = Theme.Elevation.base.cgColor
+        placard.translatesAutoresizingMaskIntoConstraints = false
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = Theme.Typography.mono(Theme.Typography.body, weight: .medium)
+        titleLabel.textColor = Theme.chromeText
+        titleLabel.lineBreakMode = .byTruncatingMiddle
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        placard.addSubview(titleLabel)
+
+        let resuming = NSTextField(labelWithString: "resuming…")
+        resuming.font = Theme.Typography.ui(Theme.Typography.small)
+        resuming.textColor = Theme.chromeMutedText
+        resuming.translatesAutoresizingMaskIntoConstraints = false
+        placard.addSubview(resuming)
+
+        addSubview(placard)
+        NSLayoutConstraint.activate([
+            placard.topAnchor.constraint(equalTo: topAnchor),
+            placard.bottomAnchor.constraint(equalTo: bottomAnchor),
+            placard.leadingAnchor.constraint(equalTo: leadingAnchor),
+            placard.trailingAnchor.constraint(equalTo: trailingAnchor),
+            titleLabel.centerXAnchor.constraint(equalTo: placard.centerXAnchor),
+            titleLabel.centerYAnchor.constraint(equalTo: placard.centerYAnchor, constant: -10),
+            titleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: placard.leadingAnchor, constant: 20),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: placard.trailingAnchor, constant: -20),
+            resuming.centerXAnchor.constraint(equalTo: placard.centerXAnchor),
+            resuming.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 6),
+        ])
+
+        terminal.onFirstData = { [weak placard] in
+            guard let placard else { return }
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                placard.removeFromSuperview()
+                return
+            }
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.25
+                placard.animator().alphaValue = 0
+            }, completionHandler: { placard.removeFromSuperview() })
+        }
     }
 
     // MARK: LocalProcessTerminalViewDelegate

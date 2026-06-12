@@ -2,6 +2,22 @@ import AppKit
 import UserNotifications
 import AtelierIPC
 
+/// The one-time notification-permission ask (POLISH_PLAN §5): fires the moment
+/// the first agent exists — a promote or a restore — never at bare launch. A
+/// fresh Landing asks for nothing.
+enum NotificationPermission {
+    private static var requested = false
+
+    static func requestOnce() {
+        guard !requested else { return }
+        requested = true
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+            if let error { NSLog("Atelier: notification auth error: \(error)") }
+            else { NSLog("Atelier: notification auth granted=\(granted)") }
+        }
+    }
+}
+
 /// Listens on Atelier's unix domain socket for `NotifyMessage`s sent by the
 /// `atelier-notify` CLI (invoked from Claude Code's Stop / Notification hooks) and
 /// posts them as real macOS notifications.
@@ -31,14 +47,12 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
     /// loop). Main thread.
     var onDebug: ((DebugMessage) -> Void)?
 
-    /// Request authorization and begin listening. Safe to call once at launch.
+    /// Begin listening and take the notification-center delegate. Deliberately
+    /// does NOT request authorization — that prompt fires on first promote
+    /// (the moment the first agent exists; POLISH_PLAN §5), via
+    /// `NotificationPermission.requestOnce()`.
     func start() {
-        let center = UNUserNotificationCenter.current()
-        center.delegate = self
-        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
-            if let error { NSLog("Atelier: notification auth error: \(error)") }
-            else { NSLog("Atelier: notification auth granted=\(granted)") }
-        }
+        UNUserNotificationCenter.current().delegate = self
         bind()
     }
 

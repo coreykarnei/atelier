@@ -66,13 +66,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        var orphans: [String] = []
+        var orphans: [(title: String, branch: String)] = []
         var restoredAny = false
         for window in state.windows {
             let valid = window.sessions.filter { session in
                 var isDir: ObjCBool = false
                 let ok = FileManager.default.fileExists(atPath: session.cwd, isDirectory: &isDir) && isDir.boolValue
-                if !ok { orphans.append(session.title) }
+                if !ok { orphans.append((session.title, (session.cwd as NSString).lastPathComponent)) }
                 return ok
             }
             guard !valid.isEmpty else { continue }
@@ -85,18 +85,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !restoredAny { openProjectWindow() }
 
         if !orphans.isEmpty {
+            // A designed refusal (§5): Atelier speaks the sentence, the dead
+            // worktrees are named in mono, and one button opens the fan aimed
+            // at recreating the first of them.
             let alert = NSAlert()
             alert.messageText = orphans.count == 1
                 ? "1 session wasn't restored"
                 : "\(orphans.count) sessions weren't restored"
-            alert.informativeText = "Their worktrees no longer exist: "
-                + orphans.joined(separator: ", ")
-                + ". Recreate a worktree from the project pill if you need one back."
+            alert.informativeText = "Their worktrees no longer exist. Recreating one starts that branch fresh — the old checkout is gone."
+            let label = NSTextField(labelWithString: orphans.map { "⎇ \($0.branch)" }.joined(separator: "\n"))
+            label.font = Theme.Typography.mono(Theme.Typography.small)
+            label.textColor = Theme.chromeText
+            label.frame = NSRect(x: 0, y: 0, width: 320, height: label.fittingSize.height)
+            alert.accessoryView = label
             alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: "Recreate…")
+            let recreate = { [weak self] (response: NSApplication.ModalResponse) in
+                guard response == .alertSecondButtonReturn, let self else { return }
+                self.keyController?.showWorktreeFan(prefill: orphans.first?.branch)
+            }
             if let window = NSApp.keyWindow {
-                alert.beginSheetModal(for: window)
+                alert.beginSheetModal(for: window, completionHandler: recreate)
             } else {
-                alert.runModal()
+                recreate(alert.runModal())
             }
         }
     }
