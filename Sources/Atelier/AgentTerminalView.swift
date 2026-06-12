@@ -11,7 +11,7 @@ import SwiftTerm
 /// is a consistent leading-whitespace prefix, and stripping it is lossless and safe.
 /// This is the in-bounds half of truthful agent-pane copy; the lossless rest needs a
 /// transcript side-channel (a TECHNICAL_PLAN §2.2 decision).
-final class AgentTerminalView: LocalProcessTerminalView {
+final class AgentTerminalView: FreezableTerminalView {
     /// The agent process's working directory — used to locate Claude's transcript.
     var transcriptCwd: String?
 

@@ -45,4 +45,18 @@ enum LayoutSlots {
 /// can save/restore and constrain it without tracking identity separately.
 final class LayoutSplitView: NSSplitView {
     var slot: LayoutSlot!
+
+    /// Brackets a divider drag: `true` on mouse-down, `false` when the drag's
+    /// tracking loop returns. The session freezes terminal PTY resizes between
+    /// the two (§1.5: PTY resize is debounced to drag-end).
+    var onDividerDrag: ((Bool) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        // NSSplitView runs the entire divider-drag tracking loop synchronously
+        // inside mouseDown, so this brackets exactly one drag. Subview clicks
+        // never reach here (the panes swallow them).
+        onDividerDrag?(true)
+        super.mouseDown(with: event)
+        onDividerDrag?(false)
+    }
 }

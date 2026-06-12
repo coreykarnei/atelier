@@ -9,9 +9,11 @@ protocol BottomBarDelegate: AnyObject {
     func bottomBarDidClickPill(anchor: NSView)
 }
 
-/// Everything one session tab needs to draw. `index` is the session's index in the
-/// window's session list (display order may differ — tabs are grouped by root).
+/// Everything one session tab needs to draw. `id` is the session's stable
+/// identity (tab views persist across updates so state changes can animate);
+/// `index` is its position in the window's session list at this instant.
 struct SessionTabInfo {
+    let id: UUID
     let index: Int
     let title: String
     let isWorktree: Bool
@@ -21,16 +23,23 @@ struct SessionTabInfo {
     let attention: Session.Attention
 }
 
-/// The bottom bar (MILESTONE_1 §7). Static project pill on the left (the worktree
-/// fan's trigger), session tabs grouped by root in the middle — wrapping to a
-/// second row group-aware when full, with a `»` overflow menu as the hard ceiling —
-/// and the clock + layout toggle on the right. Styling follows the tmux status bar
-/// this app succeeds: blue pill, green active tab, dark text on both.
+/// The bottom bar (MILESTONE_1 §7, polished per POLISH_PLAN §3). Static project
+/// pill on the left (the worktree fan's trigger), session tabs grouped by root
+/// in the middle — wrapping to a second row group-aware when full, with a `»`
+/// overflow menu as the hard ceiling — and the clock + layout toggle on the
+/// right. Styling follows the tmux status bar this app succeeds: blue pill,
+/// green active tab, dark text on both.
+///
+/// Tab views are *persistent* (keyed by session id) and laid out by hand, so
+/// width changes glide (a Claude title rewrite slides neighbors instead of
+/// twitching them) and attention changes cross-fade in place.
 final class BottomBar: NSView {
     weak var delegate: BottomBarDelegate?
 
     static let rowHeight: CGFloat = 30
     static let twoRowHeight: CGFloat = 54
+    private static let tabHeight: CGFloat = 20
+    private static let rowGap: CGFloat = 4
 
     /// The bar's current natural height (one or two tab rows).
     private(set) var desiredHeight: CGFloat = BottomBar.rowHeight
@@ -42,19 +51,24 @@ final class BottomBar: NSView {
 
     private let pillView = NSView()
     private let pillLabel = NSTextField(labelWithString: "")
-    private let rowsStack = NSStackView()
+    /// Manual-layout home of the tab views; sits between pill and clock.
+    private let tabsArea = NSView()
     private let addButton = NSButton()
     private let overflowButton = NSButton()
-    private let clockLabel = NSTextField(labelWithString: "")
+    private let clockPrefixLabel = NSTextField(labelWithString: "")
+    private let clockColonLabel = BreathingColonLabel(labelWithString: ":")
+    private let clockSuffixLabel = NSTextField(labelWithString: "")
     private let layoutButton = NSButton()
     private let topBorder = NSBox()
 
     private var tabs: [SessionTabInfo] = []
     private var activeIndex = 0
+    private var tabViews: [UUID: SessionTabView] = [:]
+    private var separatorPool: [NSView] = []
     private var lastFlowWidth: CGFloat = 0
+    private var lastFlowHeight: CGFloat = 0
 
     private var clockTimer: Timer?
-    private var colonVisible = true
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -107,22 +121,28 @@ final class BottomBar: NSView {
         pillLabel.translatesAutoresizingMaskIntoConstraints = false
         pillView.addSubview(pillLabel)
 
-        rowsStack.orientation = .vertical
-        rowsStack.alignment = .leading
-        rowsStack.spacing = 2
-        rowsStack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(rowsStack)
+        tabsArea.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(tabsArea)
 
         configureIconButton(addButton, symbol: "plus", action: #selector(addTapped))
+        tabsArea.addSubview(addButton)
         configureIconButton(overflowButton, symbol: "chevron.right.2", action: nil)
         overflowButton.isHidden = true
+        tabsArea.addSubview(overflowButton)
 
-        clockLabel.font = Theme.Typography.mono(Theme.Typography.small)
-        clockLabel.textColor = Theme.chromeMutedText
-        clockLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(clockLabel)
-
+        // The clock is mono (§1.4) with the colon split out so it can breathe
+        // (§1.1 motion inventory item 3: ~1 Hz opacity ease — a breath, not a
+        // blink). JetBrains Mono keeps the line from shifting under it.
+        for label in [clockPrefixLabel, clockColonLabel, clockSuffixLabel] {
+            label.font = Theme.Typography.mono(Theme.Typography.small)
+            label.textColor = Theme.chromeMutedText
+            label.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(label)
+        }
         configureIconButton(layoutButton, symbol: "rectangle.split.3x1", action: #selector(layoutTapped))
+        // The toggle is constraint-anchored (unlike the flow-placed buttons,
+        // which are positioned by frame inside tabsArea).
+        layoutButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(layoutButton)
 
         NSLayoutConstraint.activate([
@@ -133,7 +153,7 @@ final class BottomBar: NSView {
 
             pillView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             pillView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            pillView.heightAnchor.constraint(equalToConstant: 20),
+            pillView.heightAnchor.constraint(equalToConstant: Self.tabHeight),
             pillLabel.leadingAnchor.constraint(equalTo: pillView.leadingAnchor, constant: 8),
             pillLabel.trailingAnchor.constraint(equalTo: pillView.trailingAnchor, constant: -8),
             pillLabel.centerYAnchor.constraint(equalTo: pillView.centerYAnchor),
@@ -144,13 +164,31 @@ final class BottomBar: NSView {
             layoutButton.widthAnchor.constraint(equalToConstant: 22),
             layoutButton.heightAnchor.constraint(equalToConstant: 22),
 
-            clockLabel.trailingAnchor.constraint(equalTo: layoutButton.leadingAnchor, constant: -12),
-            clockLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            // One cap-height (§3 micro-pass): same mono face and size as the
+            // pill label, centered on the same axis — identical baselines
+            // without cross-branch baseline constraints (which AppKit's
+            // window-sizing pass mishandles; see the tabsArea note below).
+            clockSuffixLabel.trailingAnchor.constraint(equalTo: layoutButton.leadingAnchor, constant: -12),
+            clockSuffixLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            clockColonLabel.trailingAnchor.constraint(equalTo: clockSuffixLabel.leadingAnchor),
+            clockColonLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            clockPrefixLabel.trailingAnchor.constraint(equalTo: clockColonLabel.leadingAnchor),
+            clockPrefixLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
 
-            rowsStack.leadingAnchor.constraint(equalTo: pillView.trailingAnchor, constant: 14),
-            rowsStack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            rowsStack.trailingAnchor.constraint(lessThanOrEqualTo: clockLabel.leadingAnchor, constant: -12),
+            tabsArea.leadingAnchor.constraint(equalTo: pillView.trailingAnchor, constant: 14),
+            tabsArea.trailingAnchor.constraint(lessThanOrEqualTo: clockPrefixLabel.leadingAnchor, constant: -12),
         ])
+        // The trailing equality must NOT be required: a closed required chain
+        // from leading to trailing lets AppKit "resolve" the window width from
+        // constraints (it collapsed the window to ~10 pt). Stretch by desire.
+        let stretch = tabsArea.trailingAnchor.constraint(equalTo: clockPrefixLabel.leadingAnchor, constant: -12)
+        stretch.priority = .defaultLow
+        // And the vertical pins yield while the bar is hidden at height 0.
+        let top = tabsArea.topAnchor.constraint(equalTo: topAnchor, constant: 1)
+        top.priority = NSLayoutConstraint.Priority(999)
+        let bottom = tabsArea.bottomAnchor.constraint(equalTo: bottomAnchor)
+        bottom.priority = NSLayoutConstraint.Priority(999)
+        NSLayoutConstraint.activate([stretch, top, bottom])
     }
 
     private func configureIconButton(_ button: NSButton, symbol: String, action: Selector?) {
@@ -161,11 +199,6 @@ final class BottomBar: NSView {
         button.contentTintColor = Theme.chromeMutedText
         button.target = self
         button.action = action
-        button.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            button.widthAnchor.constraint(equalToConstant: 22),
-            button.heightAnchor.constraint(equalToConstant: 22),
-        ])
     }
 
     // MARK: Update
@@ -181,21 +214,46 @@ final class BottomBar: NSView {
         let symbol = mode == .triptych ? "rectangle.split.3x1" : "rectangle.split.1x2"
         layoutButton.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Toggle layout")
 
-        flowTabs()
+        flowTabs(animated: true)
     }
 
     override func layout() {
         super.layout()
-        // Re-flow when the bar is resized enough to change what fits.
-        if abs(bounds.width - lastFlowWidth) > 40 { flowTabs() }
+        // Re-flow when the bar is resized enough to change what fits — a window
+        // resize is continuous, so this pass doesn't animate. Height changes
+        // (one row ↔ two) re-place too: row y-positions depend on it.
+        if abs(tabsArea.bounds.width - lastFlowWidth) > 40 || tabsArea.bounds.height != lastFlowHeight {
+            flowTabs(animated: false)
+        }
+    }
+
+    /// One item the flow can place: a tab, a group separator, or a button.
+    private enum FlowItem {
+        case tab(SessionTabInfo)
+        case separator
+        case overflow
+        case add
+
+        func width(of bar: BottomBar) -> CGFloat {
+            switch self {
+            case .tab(let info): return SessionTabView.desiredWidth(for: info)
+            case .separator: return 9
+            case .overflow, .add: return 26
+            }
+        }
     }
 
     /// Lay tabs into one or two rows, never splitting a root group across rows
     /// unless the group alone exceeds a full row. Beyond two rows, the remainder
     /// collapses into a `»` menu — the bar must not grow into a third pane.
-    private func flowTabs() {
-        lastFlowWidth = bounds.width
-        for view in rowsStack.arrangedSubviews { view.removeFromSuperview() }
+    ///
+    /// Tab views are reused by session id: frame changes glide (~200 ms) when
+    /// `animated`, so a title rewrite slides neighbors instead of snapping them
+    /// (MILESTONE_1 §12 risk 2, retired here).
+    private func flowTabs(animated: Bool) {
+        lastFlowWidth = tabsArea.bounds.width
+        lastFlowHeight = tabsArea.bounds.height
+        let rowWidth = max(240, tabsArea.bounds.width)
 
         // Group chunks: runs of consecutive tabs sharing a root.
         var chunks: [[SessionTabInfo]] = []
@@ -207,41 +265,36 @@ final class BottomBar: NSView {
             }
         }
 
-        let reservedRight: CGFloat = 170 // clock + toggle + spacing
-        let reservedLeft = pillView.isHidden ? 24 : pillLabel.intrinsicContentSize.width + 16 + 24
-        let rowWidth = max(240, bounds.width - reservedLeft - reservedRight)
-
-        var rows: [[NSView]] = [[]]
+        // Pack into at most two rows.
+        var rows: [[FlowItem]] = [[]]
         var widths: [CGFloat] = [0]
         var overflow: [SessionTabInfo] = []
 
-        func append(_ view: NSView, width: CGFloat, breakable: Bool) -> Bool {
-            let row = rows.count - 1
-            if widths[row] + width > rowWidth, !rows[row].isEmpty {
+        func tryAppend(_ item: FlowItem) -> Bool {
+            let w = item.width(of: self) + (rows[rows.count - 1].isEmpty ? 0 : 4)
+            if widths[rows.count - 1] + w > rowWidth, !rows[rows.count - 1].isEmpty {
                 guard rows.count < 2 else { return false }
                 rows.append([])
                 widths.append(0)
             }
-            rows[rows.count - 1].append(view)
-            widths[rows.count - 1] += width
+            rows[rows.count - 1].append(item)
+            widths[rows.count - 1] += w
             return true
         }
 
         outer: for (chunkIndex, chunk) in chunks.enumerated() {
-            let chunkWidth = chunk.reduce(0) { $0 + tabWidth($1) } + (chunkIndex > 0 ? 9 : 0)
-            let fitsAsGroup = chunkWidth <= rowWidth
+            let chunkWidth = chunk.reduce(0) { $0 + SessionTabView.desiredWidth(for: $1) + 4 }
             // Try to keep the whole group on one row: jump rows if it won't fit here.
-            if fitsAsGroup, widths[rows.count - 1] + chunkWidth > rowWidth, !rows[rows.count - 1].isEmpty, rows.count < 2 {
+            if chunkWidth <= rowWidth, widths[rows.count - 1] + chunkWidth > rowWidth,
+               !rows[rows.count - 1].isEmpty, rows.count < 2 {
                 rows.append([])
                 widths.append(0)
             }
             for (i, tab) in chunk.enumerated() {
                 if chunkIndex > 0 && i == 0 {
-                    _ = append(makeSeparator(), width: 9, breakable: true)
+                    _ = tryAppend(.separator)
                 }
-                let view = SessionTabView(info: tab, isActive: tab.index == activeIndex)
-                wire(view)
-                if !append(view, width: tabWidth(tab), breakable: true) {
+                if !tryAppend(.tab(tab)) {
                     overflow.append(contentsOf: chunk[i...])
                     for rest in chunks[(chunkIndex + 1)...] { overflow.append(contentsOf: rest) }
                     break outer
@@ -249,24 +302,17 @@ final class BottomBar: NSView {
             }
         }
 
-        // Overflow menu, then the trailing `+`.
         if overflow.isEmpty {
             overflowButton.isHidden = true
         } else {
             overflowButton.isHidden = false
             overflowButton.menu = overflowMenu(for: overflow)
             overflowButton.action = #selector(overflowTapped)
-            _ = append(overflowButton, width: 26, breakable: true)
+            _ = tryAppend(.overflow)
         }
-        _ = append(addButton, width: 26, breakable: true)
+        _ = tryAppend(.add)
 
-        for row in rows where !row.isEmpty {
-            let rowStack = NSStackView(views: row)
-            rowStack.orientation = .horizontal
-            rowStack.spacing = 4
-            rowStack.alignment = .centerY
-            rowsStack.addArrangedSubview(rowStack)
-        }
+        place(rows: rows, animated: animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
 
         let newHeight = rows.count > 1 ? Self.twoRowHeight : Self.rowHeight
         if newHeight != desiredHeight {
@@ -275,33 +321,118 @@ final class BottomBar: NSView {
         }
     }
 
+    /// Materialize the flow: persistent views move to their new frames (gliding
+    /// when animated), departed tabs fade out, arrivals fade in in place.
+    private func place(rows: [[FlowItem]], animated: Bool) {
+        var seen = Set<UUID>()
+        var separatorsUsed = 0
+        var placements: [(NSView, CGRect)] = []
+        var arrivals: [NSView] = []
+
+        let areaHeight = tabsArea.bounds.height
+        let contentHeight = rows.count > 1
+            ? Self.tabHeight * 2 + Self.rowGap
+            : Self.tabHeight
+        let topY = (areaHeight + contentHeight) / 2 - Self.tabHeight
+
+        for (rowIndex, row) in rows.enumerated() {
+            var x: CGFloat = 0
+            let y = topY - CGFloat(rowIndex) * (Self.tabHeight + Self.rowGap)
+            for item in row {
+                let width = item.width(of: self)
+                switch item {
+                case .tab(let info):
+                    seen.insert(info.id)
+                    let view: SessionTabView
+                    if let existing = tabViews[info.id] {
+                        view = existing
+                    } else {
+                        view = SessionTabView(sessionId: info.id)
+                        wire(view)
+                        tabViews[info.id] = view
+                        tabsArea.addSubview(view)
+                        arrivals.append(view)
+                    }
+                    view.apply(info: info, isActive: info.index == activeIndex)
+                    placements.append((view, CGRect(x: x, y: y, width: width, height: Self.tabHeight)))
+                case .separator:
+                    let line = dequeueSeparator(at: separatorsUsed)
+                    separatorsUsed += 1
+                    placements.append((line, CGRect(x: x + 4, y: y + 3, width: 1, height: 14)))
+                case .overflow:
+                    placements.append((overflowButton, CGRect(x: x + 2, y: y, width: 22, height: Self.tabHeight)))
+                case .add:
+                    placements.append((addButton, CGRect(x: x + 2, y: y, width: 22, height: Self.tabHeight)))
+                }
+                x += width + 4
+            }
+        }
+
+        // Departed tabs (closed, or pushed into the overflow menu).
+        for (id, view) in tabViews where !seen.contains(id) {
+            tabViews[id] = nil
+            if animated {
+                NSAnimationContext.runAnimationGroup({ ctx in
+                    ctx.duration = 0.15
+                    view.animator().alphaValue = 0
+                }, completionHandler: { view.removeFromSuperview() })
+            } else {
+                view.removeFromSuperview()
+            }
+        }
+        for index in separatorsUsed..<separatorPool.count {
+            separatorPool[index].isHidden = true
+        }
+
+        let apply = {
+            for (view, frame) in placements {
+                // New arrivals appear in place — only *moves* glide.
+                if arrivals.contains(where: { $0 === view }) {
+                    view.frame = frame
+                } else if animated {
+                    view.animator().frame = frame
+                } else {
+                    view.frame = frame
+                }
+                view.isHidden = false
+            }
+        }
+        if animated {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.2
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                ctx.allowsImplicitAnimation = true
+                apply()
+            }
+            for view in arrivals {
+                view.alphaValue = 0
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.2
+                    view.animator().alphaValue = 1
+                }
+            }
+        } else {
+            apply()
+        }
+    }
+
+    private func dequeueSeparator(at index: Int) -> NSView {
+        if index < separatorPool.count {
+            separatorPool[index].isHidden = false
+            return separatorPool[index]
+        }
+        let line = NSView()
+        line.wantsLayer = true
+        line.layer?.backgroundColor = Theme.Elevation.frameLine.cgColor
+        separatorPool.append(line)
+        tabsArea.addSubview(line)
+        return line
+    }
+
     private func wire(_ view: SessionTabView) {
         view.onSelect = { [weak self] idx in self?.delegate?.bottomBarDidSelectSession(at: idx) }
         view.onClose = { [weak self] idx in self?.delegate?.bottomBarDidRequestCloseSession(at: idx) }
         view.onRename = { [weak self] idx in self?.delegate?.bottomBarDidRequestRenameSession(at: idx) }
-    }
-
-    /// Estimated width: full label + glyphs + close + padding. Titles are uncapped —
-    /// the two-row wrap and the `»` overflow absorb long ones.
-    private func tabWidth(_ tab: SessionTabInfo) -> CGFloat {
-        let label = (tab.isWorktree ? "⎇ " : "") + tab.title
-        let font = Theme.Typography.mono(Theme.Typography.small)
-        let textWidth = (label as NSString).size(withAttributes: [.font: font]).width
-        let badge: CGFloat = tab.attention == .none ? 0 : 10
-        return textWidth + badge + 38
-    }
-
-    private func makeSeparator() -> NSView {
-        let line = NSBox()
-        line.boxType = .custom
-        line.fillColor = Theme.Elevation.frameLine
-        line.borderWidth = 0
-        line.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            line.widthAnchor.constraint(equalToConstant: 1),
-            line.heightAnchor.constraint(equalToConstant: 14),
-        ])
-        return line
     }
 
     private func overflowMenu(for tabs: [SessionTabInfo]) -> NSMenu {
@@ -325,12 +456,10 @@ final class BottomBar: NSView {
     }
 
     private func tickClock() {
-        colonVisible.toggle()
         let now = Date()
-        let time = DateFormatter.cached("HH:mm").string(from: now)
-        let date = DateFormatter.cached("MMM dd").string(from: now)
-        let shownTime = colonVisible ? time : time.replacingOccurrences(of: ":", with: " ")
-        clockLabel.stringValue = "\(shownTime) · \(date)"
+        clockPrefixLabel.stringValue = DateFormatter.cached("HH").string(from: now)
+        clockSuffixLabel.stringValue = DateFormatter.cached("mm").string(from: now)
+            + " · " + DateFormatter.cached("MMM dd").string(from: now)
     }
 
     // MARK: Actions
@@ -346,102 +475,190 @@ final class BottomBar: NSView {
     }
 }
 
-/// A single session tab: optional attention dot, ⎇ glyph for worktree sessions,
-/// ellipsized title, close affordance. Click selects; double-click renames.
+/// A single session tab: optional attention badge, ⎇ glyph for worktree
+/// sessions, ellipsized title, close affordance. Click selects; double-click
+/// renames. Persistent across bar updates so its state changes can animate:
+/// attention cross-fades (~250 ms), a green arrival does one soft scale-in,
+/// the working blue carries the ~4 s subliminal pulse, and the peach `!`
+/// **never** animates — urgency reads as stillness (§1.3).
 private final class SessionTabView: NSView {
-    let index: Int
+    let sessionId: UUID
+    private(set) var index: Int = -1
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
     var onRename: ((Int) -> Void)?
 
-    init(info: SessionTabInfo, isActive: Bool) {
-        self.index = info.index
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let closeButton = NSButton()
+    private var badgeView: NSView?
+    private var attention: Session.Attention = .none
+    private var isActive = false
+    private var applied = false
+
+    init(sessionId: UUID) {
+        self.sessionId = sessionId
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = Theme.Elevation.radiusSmall
-        // Active tab wears the tmux green; inactive tabs stay quiet.
-        layer?.backgroundColor = (isActive ? Theme.accentGreen : .clear).cgColor
 
-        var leading: NSLayoutXAxisAnchor = leadingAnchor
-        var leadingPad: CGFloat = 8
-
-        // Attention badge (MILESTONE_1 §7.1) — always visible: the agent's exact
-        // state, read peripherally. Dots for working/waiting/done-unseen; a `!`
-        // when the agent is explicitly blocked on you.
-        if info.attention != .none {
-            let badge: NSView
-            if info.attention == .needsInput {
-                let mark = NSTextField(labelWithString: "!")
-                mark.font = Theme.Typography.ui(Theme.Typography.small, weight: .heavy)
-                mark.textColor = Theme.accentPeach
-                badge = mark
-            } else {
-                let dot = NSView()
-                dot.wantsLayer = true
-                dot.layer?.cornerRadius = 3
-                dot.layer?.backgroundColor = Self.badgeColor(info.attention).cgColor
-                NSLayoutConstraint.activate([
-                    dot.widthAnchor.constraint(equalToConstant: 6),
-                    dot.heightAnchor.constraint(equalToConstant: 6),
-                ])
-                badge = dot
-            }
-            badge.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(badge)
-            NSLayoutConstraint.activate([
-                badge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-                badge.centerYAnchor.constraint(equalTo: centerYAnchor),
-            ])
-            leading = badge.trailingAnchor
-            leadingPad = 5
-        }
-
-        let text = (info.isWorktree ? "⎇ " : "") + (info.title.isEmpty ? "untitled" : info.title)
-        let titleLabel = NSTextField(labelWithString: text)
-        // Session titles are mono — the tmux-status idiom, a written-down
-        // exception in §1.4.
-        titleLabel.font = Theme.Typography.mono(Theme.Typography.small, weight: isActive ? .semibold : .regular)
-        titleLabel.textColor = isActive ? Theme.accentTextDark : Theme.chromeMutedText
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.cell?.usesSingleLineMode = true
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
-        let closeButton = NSButton()
         closeButton.bezelStyle = .regularSquare
         closeButton.isBordered = false
         closeButton.imagePosition = .imageOnly
         closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close session")
-        closeButton.contentTintColor = isActive ? Theme.accentTextDark : Theme.chromeMutedText
         closeButton.symbolConfiguration = .init(pointSize: 8, weight: .medium)
         closeButton.target = self
         closeButton.action = #selector(closeTapped)
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(closeButton)
-
-        NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 22),
-            titleLabel.leadingAnchor.constraint(equalTo: leading, constant: leadingPad),
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            closeButton.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 4),
-            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-            closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: 12),
-            closeButton.heightAnchor.constraint(equalToConstant: 12),
-        ])
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    private static func badgeColor(_ attention: Session.Attention) -> NSColor {
-        switch attention {
-        case .none: return .clear
-        case .working: return Theme.accentBlue
-        case .waiting: return Theme.accentPeach
-        case .needsInput: return Theme.accentPeach // rendered as `!`, not a dot
-        case .doneUnseen: return Theme.accentGreen
+    /// Estimated width for the flow: full label + glyphs + close + padding.
+    /// Titles are uncapped — the two-row wrap and the `»` overflow absorb long
+    /// ones. Mono is width-stable across the regular/semibold active swap.
+    static func desiredWidth(for info: SessionTabInfo) -> CGFloat {
+        let label = (info.isWorktree ? "⎇ " : "") + (info.title.isEmpty ? "untitled" : info.title)
+        let font = Theme.Typography.mono(Theme.Typography.small)
+        let textWidth = (label as NSString).size(withAttributes: [.font: font]).width
+        let badge: CGFloat = info.attention == .none ? 0 : 11
+        return ceil(textWidth) + badge + 38
+    }
+
+    func apply(info: SessionTabInfo, isActive: Bool) {
+        index = info.index
+        let text = (info.isWorktree ? "⎇ " : "") + (info.title.isEmpty ? "untitled" : info.title)
+        if titleLabel.stringValue != text { titleLabel.stringValue = text }
+
+        if self.isActive != isActive || !applied {
+            self.isActive = isActive
+            // Active tab wears the tmux green; inactive tabs stay quiet.
+            layer?.backgroundColor = (isActive ? Theme.accentGreen : .clear).cgColor
+            titleLabel.font = Theme.Typography.mono(Theme.Typography.small, weight: isActive ? .semibold : .regular)
+            titleLabel.textColor = isActive ? Theme.accentTextDark : Theme.chromeMutedText
+            closeButton.contentTintColor = isActive ? Theme.accentTextDark : Theme.chromeMutedText
         }
+        setAttention(info.attention, animated: applied)
+        applied = true
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        let hasBadge = badgeView != nil
+        if let badge = badgeView {
+            let size = badge.frame.size == .zero ? badge.fittingSize : badge.frame.size
+            badge.frame = CGRect(
+                x: 8,
+                y: (bounds.height - size.height) / 2,
+                width: size.width,
+                height: size.height
+            )
+        }
+        let titleX: CGFloat = hasBadge ? 19 : 8
+        let closeWidth: CGFloat = 12
+        closeButton.frame = CGRect(
+            x: bounds.width - closeWidth - 6,
+            y: (bounds.height - closeWidth) / 2,
+            width: closeWidth,
+            height: closeWidth
+        )
+        let titleHeight = titleLabel.fittingSize.height
+        titleLabel.frame = CGRect(
+            x: titleX,
+            y: (bounds.height - titleHeight) / 2,
+            width: max(0, closeButton.frame.minX - titleX - 4),
+            height: titleHeight
+        )
+    }
+
+    // MARK: Attention badge (MILESTONE_1 §7.1 + POLISH_PLAN §3)
+
+    /// No escalation (§1.3, rule standing): states swap by ~250 ms cross-fade;
+    /// the only other motions are the green arrival's single scale-in and the
+    /// working blue's subliminal pulse. Nothing here ever raises its voice
+    /// with age, and the peach `!` is deliberately inanimate.
+    private func setAttention(_ newAttention: Session.Attention, animated: Bool) {
+        guard newAttention != attention || !applied else { return }
+        attention = newAttention
+
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let fade = animated && !reduceMotion
+
+        if let old = badgeView {
+            badgeView = nil
+            if fade {
+                NSAnimationContext.runAnimationGroup({ ctx in
+                    ctx.duration = 0.25
+                    old.animator().alphaValue = 0
+                }, completionHandler: { old.removeFromSuperview() })
+            } else {
+                old.removeFromSuperview()
+            }
+        }
+
+        guard newAttention != .none else { return }
+        let badge = Self.makeBadge(for: newAttention)
+        addSubview(badge)
+        badgeView = badge
+        layout()
+
+        if fade {
+            badge.alphaValue = 0
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.25
+                badge.animator().alphaValue = 1
+            }
+        }
+        guard !reduceMotion else { return }
+
+        switch newAttention {
+        case .doneUnseen:
+            // One soft scale-in (1.0 → 1.3 → 1.0), then stillness.
+            if let dot = (badge as? BadgeDotView)?.dotLayer {
+                let arrival = CAKeyframeAnimation(keyPath: "transform.scale")
+                arrival.values = [1.0, 1.3, 1.0]
+                arrival.keyTimes = [0, 0.5, 1]
+                arrival.duration = 0.3
+                arrival.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                dot.add(arrival, forKey: "arrival")
+            }
+        case .working:
+            // The ~4 s subliminal pulse (§1.1 item 4): ±10% opacity, forever.
+            if let dot = (badge as? BadgeDotView)?.dotLayer {
+                let pulse = CABasicAnimation(keyPath: "opacity")
+                pulse.fromValue = 1.0
+                pulse.toValue = 0.8
+                pulse.duration = 2.0
+                pulse.autoreverses = true
+                pulse.repeatCount = .infinity
+                pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                dot.add(pulse, forKey: "workingPulse")
+            }
+        case .waiting, .needsInput, .none:
+            break // still — the peach states never animate (§1.3)
+        }
+    }
+
+    private static func makeBadge(for attention: Session.Attention) -> NSView {
+        if attention == .needsInput {
+            let mark = NSTextField(labelWithString: "!")
+            mark.font = Theme.Typography.ui(Theme.Typography.small, weight: .heavy)
+            mark.textColor = Theme.accentPeach
+            mark.sizeToFit()
+            return mark
+        }
+        let color: NSColor
+        switch attention {
+        case .working: color = Theme.accentBlue
+        case .doneUnseen: color = Theme.accentGreen
+        default: color = Theme.accentPeach
+        }
+        return BadgeDotView(color: color)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -453,6 +670,49 @@ private final class SessionTabView: NSView {
     }
 
     @objc private func closeTapped() { onClose?(index) }
+}
+
+/// A 6 pt attention dot drawn as a centered sublayer, so scale animations
+/// (the green arrival) grow from the dot's middle rather than a view corner.
+private final class BadgeDotView: NSView {
+    let dotLayer = CALayer()
+
+    init(color: NSColor) {
+        super.init(frame: CGRect(x: 0, y: 0, width: 6, height: 6))
+        wantsLayer = true
+        dotLayer.backgroundColor = color.cgColor
+        dotLayer.cornerRadius = 3
+        dotLayer.bounds = CGRect(x: 0, y: 0, width: 6, height: 6)
+        dotLayer.position = CGPoint(x: 3, y: 3)
+        layer?.addSublayer(dotLayer)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var fittingSize: NSSize { NSSize(width: 6, height: 6) }
+}
+
+/// The clock colon's sine breath (§1.1 motion inventory item 3): ~1 Hz opacity
+/// ease — a breath, not a blink. The animation must be (re)installed whenever
+/// the backing layer joins a layer tree; animations added before the view is
+/// in a window are silently dropped by AppKit's layer management.
+private final class BreathingColonLabel: NSTextField {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        wantsLayer = true
+        guard window != nil,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              layer?.animation(forKey: "colonBreath") == nil else { return }
+        let breath = CABasicAnimation(keyPath: "opacity")
+        breath.fromValue = 1.0
+        breath.toValue = 0.45
+        breath.duration = 0.5
+        breath.autoreverses = true
+        breath.repeatCount = .infinity
+        breath.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer?.add(breath, forKey: "colonBreath")
+    }
 }
 
 private extension DateFormatter {

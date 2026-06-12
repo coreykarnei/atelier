@@ -159,6 +159,17 @@ enum Theme {
     /// Dark text on accent fills — the tmux status-bar look (blue/green pill, base text).
     static let accentTextDark = nsColor(0x1E1E2E)  // base
 
+    // MARK: Focus articulation (POLISH_PLAN Phase 1)
+
+    /// "Which pane has focus" is a literal sentence in VISION's definition of
+    /// done. The focused pane wears a 1 px lavender hairline along its divider
+    /// edges; a focus jump glows it briefly, then it settles and is *still*.
+    enum Focus {
+        static let hairline = nsColor(0xB4BEFE)   // lavender
+        static let restingOpacity: Float = 0.55
+        static let glowDuration: TimeInterval = 0.15
+    }
+
     /// AppKit chrome color from a 0xRRGGBB hex.
     private static func nsColor(_ hex: UInt32) -> NSColor {
         NSColor(

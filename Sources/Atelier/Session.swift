@@ -243,6 +243,122 @@ final class Session: NSObject, NSSplitViewDelegate {
         }
     }
 
+    // MARK: Focus articulation (POLISH_PLAN Phase 1)
+
+    /// Hairline views along the focused pane's divider edges. Constraint-pinned
+    /// to the pane, so they ride divider drags for free.
+    private var focusLines: [NSView] = []
+    private weak var focusArticulatedPane: WorkspacePane?
+
+    /// Re-aim the focus hairline at whichever pane owns the first responder.
+    /// Non-key windows drop the hairline (§3 "the window as an object") — the
+    /// truth of *which pane* returns with key status. Never dims anything.
+    func updateFocusArticulation(firstResponder: NSResponder?, windowIsKey: Bool) {
+        let pane = visiblePanes.first { pane in
+            guard let fr = firstResponder as? NSView else { return false }
+            return fr === pane.focusView || fr.isDescendant(of: pane)
+        }
+        guard windowIsKey, let pane else {
+            clearFocusLines()
+            return
+        }
+        if pane !== focusArticulatedPane || focusLines.isEmpty {
+            layFocusLines(around: pane)
+            focusArticulatedPane = pane
+        }
+    }
+
+    /// Make both terminals' carets truthful about window key status: SwiftTerm
+    /// hollows the caret on resignFirstResponder but doesn't watch the window,
+    /// so a background window would keep a solid block. Solid means "typing
+    /// goes here", and in a non-key window it doesn't.
+    func syncCaretFocus(firstResponder: NSResponder?, windowIsKey: Bool) {
+        for pane in [shellPane, agentPane] {
+            let isFocused = (firstResponder as? NSView) === pane.terminal
+            pane.terminal.hasFocus = windowIsKey && isFocused
+        }
+    }
+
+    /// The ~150 ms glow-then-settle when focus jumps via `⌃⌘+hjkl` (§3). One
+    /// event, one motion, then stillness. Reduce Motion: no glow, just the line.
+    func glowFocus() {
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        for line in focusLines {
+            guard let layer = line.layer else { continue }
+            let glow = CABasicAnimation(keyPath: "opacity")
+            glow.fromValue = 1.0
+            glow.toValue = Theme.Focus.restingOpacity
+            glow.duration = Theme.Focus.glowDuration
+            glow.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            layer.add(glow, forKey: "focusGlow")
+        }
+    }
+
+    private func clearFocusLines() {
+        for line in focusLines { line.removeFromSuperview() }
+        focusLines.removeAll()
+        focusArticulatedPane = nil
+    }
+
+    /// Pin 1 px lavender lines along the pane's *interior* edges — the ones that
+    /// face a divider. Edges flush with the session container are window edges
+    /// and stay unmarked.
+    private func layFocusLines(around pane: WorkspacePane) {
+        clearFocusLines()
+        container.layoutSubtreeIfNeeded()
+        let frame = pane.convert(pane.bounds, to: container)
+        guard frame.width > 1, frame.height > 1 else { return }
+        let bounds = container.bounds
+
+        func line() -> NSView {
+            let view = NSView()
+            view.wantsLayer = true
+            view.translatesAutoresizingMaskIntoConstraints = false
+            view.layer?.backgroundColor = Theme.Focus.hairline.cgColor
+            view.layer?.opacity = Theme.Focus.restingOpacity
+            container.addSubview(view)
+            focusLines.append(view)
+            return view
+        }
+
+        if frame.minX > 1 { // divider to the left
+            let v = line()
+            NSLayoutConstraint.activate([
+                v.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
+                v.topAnchor.constraint(equalTo: pane.topAnchor),
+                v.bottomAnchor.constraint(equalTo: pane.bottomAnchor),
+                v.widthAnchor.constraint(equalToConstant: 1),
+            ])
+        }
+        if frame.maxX < bounds.maxX - 1 { // divider to the right
+            let v = line()
+            NSLayoutConstraint.activate([
+                v.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
+                v.topAnchor.constraint(equalTo: pane.topAnchor),
+                v.bottomAnchor.constraint(equalTo: pane.bottomAnchor),
+                v.widthAnchor.constraint(equalToConstant: 1),
+            ])
+        }
+        if frame.maxY < bounds.maxY - 1 { // divider above (AppKit y grows upward)
+            let v = line()
+            NSLayoutConstraint.activate([
+                v.topAnchor.constraint(equalTo: pane.topAnchor),
+                v.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
+                v.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
+                v.heightAnchor.constraint(equalToConstant: 1),
+            ])
+        }
+        if frame.minY > 1 { // divider below
+            let v = line()
+            NSLayoutConstraint.activate([
+                v.bottomAnchor.constraint(equalTo: pane.bottomAnchor),
+                v.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
+                v.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
+                v.heightAnchor.constraint(equalToConstant: 1),
+            ])
+        }
+    }
+
     // MARK: Layout
 
     /// Toggle Triptych/Split. Meaningless for a Landing, so a no-op there.
@@ -293,6 +409,7 @@ final class Session: NSObject, NSSplitViewDelegate {
     }
 
     private func tearDownCurrentLayout() {
+        clearFocusLines()
         for split in liveSplits {
             NotificationCenter.default.removeObserver(self, name: NSSplitView.didResizeSubviewsNotification, object: split)
         }
@@ -310,6 +427,13 @@ final class Session: NSObject, NSSplitViewDelegate {
         split.isVertical = vertical
         split.dividerStyle = .thin
         split.delegate = self
+        split.onDividerDrag = { [weak self] dragging in
+            guard let self else { return }
+            // §1.5: the PTYs hold their size for the duration of the drag and
+            // resize exactly once, at drag end.
+            self.shellPane.terminal.resizeFrozen = dragging
+            self.agentPane.terminal.resizeFrozen = dragging
+        }
         first.translatesAutoresizingMaskIntoConstraints = false
         second.translatesAutoresizingMaskIntoConstraints = false
         split.addArrangedSubview(first)

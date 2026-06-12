@@ -4,6 +4,50 @@ import AtelierIPC
 /// Direction for the `⌃⌘+hjkl` focus manager.
 enum FocusDirection { case left, right, up, down }
 
+/// The mantle wash under the titlebar / native project tab strip (§3.1).
+/// Mirrors the field surfaces' translucency handling.
+private final class TitlebarWashView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(accessibilityDisplayChanged),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil
+        )
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    deinit {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+    }
+
+    override func updateLayer() {
+        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+    }
+
+    @objc private func accessibilityDisplayChanged() {
+        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+    }
+}
+
+/// The app's window class: reports first-responder changes so the focus
+/// articulation (hairline + caret truth) can track clicks as well as chords.
+final class AtelierWindow: NSWindow {
+    var onFirstResponderChange: (() -> Void)?
+
+    override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
+        let accepted = super.makeFirstResponder(responder)
+        if accepted { onFirstResponderChange?() }
+        return accepted
+    }
+
+}
+
 /// The single Atelier window. Milestone 1.2 makes it host *sessions*: it owns a list
 /// of `Session`s (each an instance of the fixed pane shape), shows one at a time, and
 /// carries a bottom bar with a tab strip to switch between them (MILESTONE_1 §2, §7).
@@ -54,7 +98,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
 
     /// Shared window + chrome setup; sessions are the caller's job.
     private convenience init(chrome: Void) {
-        let window = NSWindow(
+        let window = AtelierWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
@@ -64,6 +108,12 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
+        // §3.1 titlebar unification, rung (b): the native tab strip composites
+        // over the window's backing — tint it mantle so the strip sits in the
+        // app's material language instead of stock dark-aqua gray. The tabs
+        // themselves stay native (MILESTONE_1 §2 is locked).
+        window.backgroundColor = NSColor(srgbRed: 0x18/255.0, green: 0x18/255.0, blue: 0x25/255.0, alpha: 1.0)
+        window.titlebarSeparatorStyle = .none
         // Projects are native window tabs (MILESTONE_1 §2): the OS draws the
         // always-visible project strip in the titlebar.
         window.tabbingMode = .preferred
@@ -71,7 +121,10 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         let blur = NSVisualEffectView()
         blur.material = .sidebar
         blur.blendingMode = .behindWindow
-        blur.state = .active
+        // Follows key status deliberately (§3 "the window as an object"): the
+        // material desaturates when you leave — the window exhales — and
+        // sharpens on return. Terminal content itself never dims.
+        blur.state = .followsWindowActiveState
         window.contentView = blur
         window.appearance = NSAppearance(named: .darkAqua)
 
@@ -79,6 +132,33 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         window.center()
         window.setFrameAutosaveName("AtelierMainWindow")
         buildChrome(in: blur)
+        observeFocus(of: window)
+    }
+
+    // MARK: Focus articulation (POLISH_PLAN Phase 1)
+
+    private func observeFocus(of window: NSWindow) {
+        // Every focus change funnels through makeFirstResponder — ours and
+        // AppKit's (clicks) — so the subclass hook is the one reliable signal.
+        (window as? AtelierWindow)?.onFirstResponderChange = { [weak self] in
+            self?.refreshFocusArticulation()
+        }
+        let center = NotificationCenter.default
+        center.addObserver(self, selector: #selector(windowKeyDidChange),
+                           name: NSWindow.didBecomeKeyNotification, object: window)
+        center.addObserver(self, selector: #selector(windowKeyDidChange),
+                           name: NSWindow.didResignKeyNotification, object: window)
+    }
+
+    @objc private func windowKeyDidChange() {
+        refreshFocusArticulation()
+    }
+
+    /// Re-aim the hairline and caret truth at the current first responder.
+    private func refreshFocusArticulation() {
+        guard let window, let session = activeSession else { return }
+        session.updateFocusArticulation(firstResponder: window.firstResponder, windowIsKey: window.isKeyWindow)
+        session.syncCaretFocus(firstResponder: window.firstResponder, windowIsKey: window.isKeyWindow)
     }
 
     /// Snapshot for the session store.
@@ -88,6 +168,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
 
     deinit {
         titleTimer?.invalidate()
+        NotificationCenter.default.removeObserver(self)
     }
 
     private func buildChrome(in container: NSView) {
@@ -101,6 +182,19 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         // .fullSizeContentView the contentView extends under the chrome, and the
         // panes would draw straight through the project tab strip.
         let contentTop = (window?.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? container.topAnchor
+
+        // §3.1: the titlebar/tab-strip region gets the same mantle-over-blur
+        // wash as the bottom bar — one material language from the top edge
+        // down. The native tab chrome draws above this, on our material.
+        let titlebarWash = TitlebarWashView()
+        titlebarWash.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(titlebarWash)
+        NSLayoutConstraint.activate([
+            titlebarWash.topAnchor.constraint(equalTo: container.topAnchor),
+            titlebarWash.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            titlebarWash.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            titlebarWash.bottomAnchor.constraint(equalTo: contentTop),
+        ])
 
         NSLayoutConstraint.activate([
             sessionArea.topAnchor.constraint(equalTo: contentTop),
@@ -239,6 +333,9 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     func toggleLayout() {
         activeSession?.toggleLayout()
         updateBottomBar()
+        // The first responder usually survives the toggle, so the KVO won't
+        // fire — re-lay the hairline against the new pane tree explicitly.
+        refreshFocusArticulation()
     }
 
     func focusPane(_ direction: FocusDirection) {
@@ -270,7 +367,12 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             let distance = hypot(center.x - curCenter.x, center.y - curCenter.y)
             if distance < bestDistance { bestDistance = distance; best = pane }
         }
-        if let best { window.makeFirstResponder(best.focusView) }
+        if let best {
+            window.makeFirstResponder(best.focusView)
+            // A directional jump earns the ~150 ms glow-then-settle (§3); the
+            // KVO has already re-laid the hairline by the time we get here.
+            activeSession?.glowFocus()
+        }
     }
 
     // MARK: Bottom bar
@@ -322,6 +424,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             (groups[key] ?? []).map { index in
                 let session = sessions[index]
                 return SessionTabInfo(
+                    id: session.id,
                     index: index,
                     title: session.displayTitle,
                     isWorktree: session.isWorktree,

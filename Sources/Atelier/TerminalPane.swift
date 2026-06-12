@@ -1,13 +1,37 @@
 import AppKit
 import SwiftTerm
 
+/// A terminal view whose resizes can be frozen during continuous divider drags
+/// (§1.5 latency budget: "PTY resize is debounced to drag-end"). While frozen,
+/// frame changes are deferred — the PTY keeps its size and SwiftTerm skips its
+/// per-tick reflow; the last deferred size applies once on thaw.
+class FreezableTerminalView: LocalProcessTerminalView {
+    private var deferredSize: NSSize?
+
+    var resizeFrozen = false {
+        didSet {
+            guard !resizeFrozen, let size = deferredSize else { return }
+            deferredSize = nil
+            super.setFrameSize(size)
+        }
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        if resizeFrozen {
+            deferredSize = newSize
+        } else {
+            super.setFrameSize(newSize)
+        }
+    }
+}
+
 /// One PTY-backed terminal pane. Wraps SwiftTerm's `LocalProcessTerminalView`,
 /// applies the Catppuccin Mocha palette, and spawns a process in a pseudo-terminal.
 ///
 /// Both the shell pane and the agent (Claude Code) pane are instances of this —
 /// per TECHNICAL_PLAN §1, both are terminal programs and Atelier owns the emulator.
 final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePane {
-    let terminal: LocalProcessTerminalView
+    let terminal: FreezableTerminalView
 
     /// Focus target for the window's `⌃⌘+hjkl` focus manager.
     var focusView: NSView { terminal }
@@ -19,7 +43,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
     /// - Parameter deguttersCopy: use the agent-pane view that strips Claude's gutter
     ///   from copied text. Off for the shell (its copy is already truthful).
     init(deguttersCopy: Bool = false) {
-        terminal = deguttersCopy ? AgentTerminalView(frame: .zero) : LocalProcessTerminalView(frame: .zero)
+        terminal = deguttersCopy ? AgentTerminalView(frame: .zero) : FreezableTerminalView(frame: .zero)
         super.init(frame: .zero)
 
         translatesAutoresizingMaskIntoConstraints = false

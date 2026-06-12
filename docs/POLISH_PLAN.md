@@ -16,9 +16,9 @@ kept as the plan's compass:
 > *Build the system the user lives in at every distance, and light it with
 > pixel-level craft — and let the transition set-pieces go.*
 
-**Status: Phase 0 (Foundations) built (2026-06-10); Phases 1–4 not started.**
-Phases are dependency-ordered; each is independently shippable. Nothing here
-blocks Milestone 2 — Phase 0 actively accelerates it.
+**Status: Phases 0 (Foundations) and 1 (Cockpit) built (2026-06-11); Phases
+2–4 not started.** Phases are dependency-ordered; each is independently
+shippable. Nothing here blocks Milestone 2 — Phase 0 actively accelerates it.
 
 ---
 
@@ -159,6 +159,30 @@ highest.
   **animated tab-width changes** so neighbors glide when Claude rewrites a
   title (retires MILESTONE_1 §12 risk #2, uncapped-title twitchiness).
 - **The latency budget (§1.5) enforced** across existing surfaces.
+
+**As built (2026-06-11):** focus articulation — lavender `Theme.Focus`
+hairline constraint-pinned to the focused pane's divider edges (rides drags
+free), 150 ms glow-then-settle on `⌃⌘hjkl`, solid/hollow carets synced to
+window key status (SwiftTerm doesn't watch the window itself); first-responder
+changes tracked via an `AtelierWindow.makeFirstResponder` override (NSWindow's
+`firstResponder` KVO proved unreliable). Non-key: hairline drops, carets
+hollow, `NSVisualEffectView` on `.followsWindowActiveState`. §3.1 landed as
+rung (b)+: window backing tinted mantle, `titlebarSeparatorStyle = .none`, and
+a mantle-over-blur **wash view** under the titlebar/tab-strip region — the
+strip now shares the app's material; residual gap: the native tabs' own
+selected/unselected fills remain stock dark-aqua (acceptable; the OS owns the
+control). Bottom bar rebuilt on persistent per-session tab views with manual
+flow layout: width changes glide (~200 ms), attention badges cross-fade
+(250 ms), green arrival scale-in, working pulse (2 s out, 2 s back), peach `!`
+inert, colon breath via a label subclass that (re)installs its animation in
+`viewDidMoveToWindow` (AppKit drops animations added before the layer joins a
+tree). PTY resize debounced to drag-end by bracketing NSSplitView's
+synchronous drag loop (`LayoutSplitView.mouseDown`) and freezing terminal
+`setFrameSize` for the duration. Reduce Motion is honored at every animation
+site. One AppKit lesson recorded: never close a required horizontal equality
+chain across the bar — AppKit then "resolves" the window's width from
+constraints (it collapsed the window to 10 pt); keep one link an inequality
+with a low-priority stretch.
 
 ## 4. Phase 2 — The distances (~1–2 days)
 
