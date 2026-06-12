@@ -5,8 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project state
 
 **Milestones 0 and 1 built (M1.1–M1.6 landed); polish pass underway — Phases
-0 (foundation tokens) and 1 (cockpit: focus articulation, titlebar
-unification, bottom-bar motion, drag-end PTY resize) built, Phases 2–4
+0 (foundation tokens), 1 (cockpit: focus articulation, titlebar unification,
+bottom-bar motion, drag-end PTY resize), and 2 (distances: app icon, Dock
+badge, repo—branch window titles, elapsed-time tooltips) built; Phases 3–4
 pending.** Read `VISION.md` (the
 authoritative *what*), `TECHNICAL_PLAN.md` (the *how* and the milestone
 sequence), and `docs/MILESTONE_1.md` (the workspace/layout/keymap/worktree/

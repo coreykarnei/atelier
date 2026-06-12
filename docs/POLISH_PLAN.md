@@ -16,9 +16,9 @@ kept as the plan's compass:
 > *Build the system the user lives in at every distance, and light it with
 > pixel-level craft — and let the transition set-pieces go.*
 
-**Status: Phases 0 (Foundations) and 1 (Cockpit) built (2026-06-11); Phases
-2–4 not started.** Phases are dependency-ordered; each is independently
-shippable. Nothing here blocks Milestone 2 — Phase 0 actively accelerates it.
+**Status: Phases 0–2 built (2026-06-11); Phases 3–4 not started.** Phases are
+dependency-ordered; each is independently shippable. Nothing here blocks
+Milestone 2 — Phase 0 actively accelerates it.
 
 ---
 
@@ -206,6 +206,22 @@ deferred (§7).
   timestamps. Answers the one question dots can't, with zero always-on pixels.
 - **No-escalation (§1.3) written into the attention-state code** as a comment
   with rule standing.
+
+**As built (2026-06-11):** the icon is generated, not commissioned —
+`Scripts/generate-icon.swift` draws the triptych mark (crust plate, two base
+panes, lavender agent pane) into `Resources/AppIcon.icns`; regenerate by
+re-running the script. Dock badge counts `doneUnseen + needsInput` across all
+windows via `AppDelegate.refreshDockBadge()`, riding every `updateBottomBar()`.
+**Caveat:** the Dock renders the badge only when the app has notification
+authorization including `.badge` (now requested) — with notifications denied
+for the dev bundle the label is set but not drawn. Window titles are
+`repo — branch` for worktree-active sessions (branch from the worktree
+directory name — no subprocess on the title path). Elapsed-time tooltips sit
+on the badge dot via a dynamic NSToolTipOwner (`working · 4m`, computed at
+hover time); the tip region is rebuilt only when its rect moves, because
+layout passes run every bar refresh and a teardown-per-pass silently resets
+the hover timer forever. §1.3 has rule standing as a comment on
+`Session.Attention`.
 
 ## 5. Phase 3 — Arrivals (~1–2 days)
 

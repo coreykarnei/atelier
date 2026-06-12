@@ -21,6 +21,9 @@ struct SessionTabInfo {
     /// the grouping *is* how codebase sharing is shown.
     let groupKey: String
     let attention: Session.Attention
+    /// When the attention state began — surfaced only in the hover tooltip
+    /// (§1.3: time on inquiry, never pushed).
+    let attentionSince: Date?
 }
 
 /// The bottom bar (MILESTONE_1 §7, polished per POLISH_PLAN §3). Static project
@@ -492,8 +495,10 @@ private final class SessionTabView: NSView {
     private let closeButton = NSButton()
     private var badgeView: NSView?
     private var attention: Session.Attention = .none
+    private var attentionSince: Date?
     private var isActive = false
     private var applied = false
+    private var toolTipRect: CGRect = .null
 
     init(sessionId: UUID) {
         self.sessionId = sessionId
@@ -542,6 +547,7 @@ private final class SessionTabView: NSView {
             titleLabel.textColor = isActive ? Theme.accentTextDark : Theme.chromeMutedText
             closeButton.contentTintColor = isActive ? Theme.accentTextDark : Theme.chromeMutedText
         }
+        attentionSince = info.attentionSince
         setAttention(info.attention, animated: applied)
         applied = true
         needsLayout = true
@@ -558,6 +564,19 @@ private final class SessionTabView: NSView {
                 width: size.width,
                 height: size.height
             )
+        }
+        // Elapsed time on inquiry (§4): hovering the dot answers the one
+        // question it can't show; the string is computed at hover-time via the
+        // owner callback so it's never stale. Rebuild the tip region only when
+        // it moves — layout() runs every bar refresh, and tearing the tip down
+        // each pass perpetually resets the hover timer (it would never show).
+        let tipRect = badgeView.map { $0.frame.insetBy(dx: -4, dy: -4) } ?? .null
+        if tipRect != toolTipRect {
+            toolTipRect = tipRect
+            removeAllToolTips()
+            if !tipRect.isNull {
+                addToolTip(tipRect, owner: self, userData: nil)
+            }
         }
         let titleX: CGFloat = hasBadge ? 19 : 8
         let closeWidth: CGFloat = 12
@@ -670,6 +689,29 @@ private final class SessionTabView: NSView {
     }
 
     @objc private func closeTapped() { onClose?(index) }
+
+    /// One muted line — `working · 4m` — computed when asked, never shown
+    /// unasked (§1.3). NSToolTipOwner callback (informal protocol, not an
+    /// override).
+    @objc func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData: UnsafeMutableRawPointer?) -> String {
+        let word: String
+        switch attention {
+        case .working: word = "working"
+        case .waiting: word = "waiting"
+        case .needsInput: word = "blocked"
+        case .doneUnseen: word = "done"
+        case .none: return ""
+        }
+        guard let since = attentionSince else { return word }
+        let seconds = max(0, Int(Date().timeIntervalSince(since)))
+        let elapsed: String
+        switch seconds {
+        case ..<60: elapsed = "\(seconds)s"
+        case ..<3600: elapsed = "\(seconds / 60)m"
+        default: elapsed = "\(seconds / 3600)h \((seconds % 3600) / 60)m"
+        }
+        return "\(word) · \(elapsed)"
+    }
 }
 
 /// A 6 pt attention dot drawn as a centered sublayer, so scale animations

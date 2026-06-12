@@ -140,6 +140,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// The Dock badge (§4): the count of sessions across all windows whose
+    /// state means *your move is the bottleneck* — unseen completions and
+    /// explicit blocks only. Not blue (the agent is fine without you), not
+    /// plain peach (you saw it finish). Zero shows no badge.
+    func refreshDockBadge() {
+        let count = controllers.reduce(0) { $0 + $1.actionableSessionCount }
+        NSApp.dockTile.badgeLabel = count == 0 ? nil : String(count)
+    }
+
     /// Dev-only (`DebugMessage`): self-capture every visible window to PNGs.
     /// Renders the app's own view tree, so it needs no Screen Recording grant;
     /// note the behind-window blur is composited by the WindowServer and won't

@@ -26,6 +26,13 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// Per-tab attention (MILESTONE_1 §7.1): the agent's exact state, always
     /// visible on the tab. Once a session has run, it is essentially always
     /// either working or waiting — `none` is the never-prompted state.
+    ///
+    /// RULE — no escalation (POLISH_PLAN §1.3, same standing as the keymap):
+    /// a waiting session never pulses harder, never re-notifies, never changes
+    /// color with age. The truth is always available at every distance and it
+    /// never raises its voice. Elapsed time is available **on inquiry** (the
+    /// tab tooltip), never pushed. Any change that makes one of these states
+    /// loudness-vary over time is wrong by rule, not by taste.
     enum Attention {
         case none
         case working      // agent mid-turn (blue dot)
@@ -60,7 +67,13 @@ final class Session: NSObject, NSSplitViewDelegate {
     var customTitle: String?
 
     /// Current attention badge for this session's tab.
-    var attention: Attention = .none
+    var attention: Attention = .none {
+        didSet { if oldValue != attention { attentionSince = Date() } }
+    }
+
+    /// When the current attention state began — the tooltip's "working · 4m"
+    /// (§4: time on inquiry, zero always-on pixels).
+    private(set) var attentionSince: Date?
 
     /// The label the tab actually shows.
     var displayTitle: String { customTitle ?? title }

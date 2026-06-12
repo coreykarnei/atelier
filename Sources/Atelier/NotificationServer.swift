@@ -35,7 +35,7 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
     func start() {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
             if let error { NSLog("Atelier: notification auth error: \(error)") }
             else { NSLog("Atelier: notification auth granted=\(granted)") }
         }

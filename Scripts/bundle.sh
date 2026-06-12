@@ -19,6 +19,11 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/Atelier" "$APP/Contents/MacOS/Atelier"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 
+# The app icon (regenerate with: swift Scripts/generate-icon.swift).
+if [[ -f "$ROOT/Resources/AppIcon.icns" ]]; then
+  cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+fi
+
 # Ship the hook helper inside the bundle so Claude Code hooks reference one stable
 # path (Contents/MacOS/atelier-notify) regardless of where the .app lives.
 if [[ -x "$BIN_DIR/atelier-notify" ]]; then

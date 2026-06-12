@@ -266,7 +266,24 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         if projectRepoRoot == nil {
             projectRepoRoot = WorktreeManager.repoRoot(for: session.cwd) ?? session.cwd
         }
-        window?.title = ((projectRepoRoot ?? session.cwd) as NSString).lastPathComponent
+        refreshWindowTitle()
+    }
+
+    /// `repo — branch` (§4): Mission Control thumbnails legible at a glance.
+    /// The branch appears when the active session lives on a worktree; the
+    /// worktree directory is named for its branch (slashes dashed), which
+    /// keeps this off the subprocess path.
+    private func refreshWindowTitle() {
+        guard let root = projectRepoRoot else {
+            window?.title = "New Tab"
+            return
+        }
+        let repo = (root as NSString).lastPathComponent
+        if let session = activeSession, session.isWorktree {
+            window?.title = "\(repo) — \((session.cwd as NSString).lastPathComponent)"
+        } else {
+            window?.title = repo
+        }
     }
 
     /// Kill every session's hosted processes (window closing / app quitting).
@@ -325,7 +342,15 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             session.container.trailingAnchor.constraint(equalTo: sessionArea.trailingAnchor),
         ])
         window?.makeFirstResponder(session.defaultFocusView)
+        refreshWindowTitle()
         updateBottomBar()
+    }
+
+    /// Sessions whose state means "your move is the bottleneck" — unseen
+    /// completions and explicit blocks. Feeds the Dock badge (§4); plain
+    /// peach waiting and working deliberately don't count.
+    var actionableSessionCount: Int {
+        sessions.filter { $0.attention == .doneUnseen || $0.attention == .needsInput }.count
     }
 
     // MARK: Layout & focus
@@ -402,6 +427,8 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             pill: pill,
             mode: mode
         )
+        // Every attention change passes through here — the Dock badge rides along.
+        (NSApp.delegate as? AppDelegate)?.refreshDockBadge()
     }
 
     /// Display order for the strip: tabs grouped by root, the project's main
@@ -429,7 +456,8 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
                     title: session.displayTitle,
                     isWorktree: session.isWorktree,
                     groupKey: key,
-                    attention: session.attention
+                    attention: session.attention,
+                    attentionSince: session.attentionSince
                 )
             }
         }
