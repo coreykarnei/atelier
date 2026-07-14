@@ -69,9 +69,19 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     private var titleTimer: Timer?
 
     /// Sessions closed from this window, oldest → newest — `⌘⇧T` reopens the
-    /// most recent (the agent resumes its conversation via `--resume`).
-    /// In-memory by design: the stack dies with the window, like a browser's.
-    private var recentlyClosed: [(session: PersistedSession, index: Int)] = []
+    /// most recent. A close keeps the session *alive but hidden* for a grace
+    /// window: reopening inside it re-adopts the exact session (shell state
+    /// and all, and no race against the dying claude process, which
+    /// otherwise rejects `--resume` with "session already in use"; owner-hit
+    /// bug 2026-07-13). After the grace it's terminated and downgraded to a
+    /// snapshot that resumes via `--resume`. In-memory by design: the stack
+    /// dies with the window, like a browser's.
+    private enum ClosedEntry {
+        case live(Session, index: Int)
+        case snapshot(PersistedSession, index: Int)
+    }
+    private var recentlyClosed: [ClosedEntry] = []
+    private static let closeGrace: TimeInterval = 60
     /// The Landing auto-created when the last session closed. If it's still the
     /// only tab when a reopen lands, the reopen replaces it — the gesture is an
     /// undo, and undo restores the exact prior state.
@@ -131,12 +141,14 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         window.tabbingMode = .preferred
 
         let blur = NSVisualEffectView()
-        blur.material = .sidebar
+        // hudWindow is the most translucent dark material; sidebar read as
+        // near-opaque under the 0.85 fields (owner call 2026-07-13: the
+        // transparency must be *visible* next to Ghostty's). Always active —
+        // the Phase-3 "exhale on deactivation" muted the blur exactly when
+        // comparing windows side by side, which is when it matters.
+        blur.material = .hudWindow
         blur.blendingMode = .behindWindow
-        // Follows key status deliberately (§3 "the window as an object"): the
-        // material desaturates when you leave — the window exhales — and
-        // sharpens on return. Terminal content itself never dims.
-        blur.state = .followsWindowActiveState
+        blur.state = .active
         window.contentView = blur
         window.appearance = NSAppearance(named: .darkAqua)
 
@@ -309,9 +321,12 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         }
     }
 
-    /// Kill every session's hosted processes (window closing / app quitting).
+    /// Kill every session's hosted processes (window closing / app quitting) —
+    /// including closed-but-alive ones still in their reopen grace window.
     func terminateAllSessions() {
         for session in sessions { session.terminate() }
+        for entry in recentlyClosed { evict(entry: entry) }
+        recentlyClosed.removeAll()
     }
 
     /// `⌘↩` — promote the active Landing to an IDE session rooted at the landing
@@ -375,12 +390,17 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         guard sessions.indices.contains(activeIndex) else { return }
         let session = sessions.remove(at: activeIndex)
         // Only promoted sessions are worth resurrecting — a Landing is just a
-        // shell. Snapshot before teardown; `⌘⇧T` brings it back.
+        // shell and dies now. IDE sessions go into the grace window alive.
         if session.state == .ide {
-            recentlyClosed.append((session.persisted(), activeIndex))
-            if recentlyClosed.count > 10 { recentlyClosed.removeFirst() }
+            recentlyClosed.append(.live(session, index: activeIndex))
+            if recentlyClosed.count > 10 { evict(entry: recentlyClosed.removeFirst()) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.closeGrace) { [weak self, weak session] in
+                guard let self, let session else { return }
+                self.expireGrace(for: session)
+            }
+        } else {
+            session.terminate()
         }
-        session.terminate()
         session.container.removeFromSuperview()
 
         if sessions.isEmpty {
@@ -401,25 +421,72 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     }
 
     /// `⌘⇧T` — bring back the most recently closed session whose root still
-    /// exists (a root can vanish under the stack: worktree removed). The agent
-    /// resumes the same conversation; the tab returns to its old position.
+    /// exists (a root can vanish under the stack: worktree removed). Inside
+    /// the grace window the exact live session returns; past it the agent
+    /// resumes the same conversation from disk. Old position either way.
     func reopenClosedSession() {
         while let entry = recentlyClosed.popLast() {
+            let (cwd, index) = entryLocation(entry)
             var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: entry.session.cwd, isDirectory: &isDir),
-                  isDir.boolValue else { continue }
+            guard FileManager.default.fileExists(atPath: cwd, isDirectory: &isDir), isDir.boolValue else {
+                evict(entry: entry)
+                continue
+            }
             if let auto = landingFromRevert, sessions.count == 1, sessions[0] === auto,
                auto.state == .landing {
                 auto.terminate()
                 auto.container.removeFromSuperview()
                 sessions.removeAll()
             }
-            adopt(Session(restored: entry.session), at: min(entry.index, sessions.count))
+            switch entry {
+            case .live(let session, _):
+                adopt(session, at: min(index, sessions.count))
+            case .snapshot(let persisted, _):
+                adopt(Session(restored: persisted), at: min(index, sessions.count))
+            }
             return
         }
     }
 
     var canReopenClosedSession: Bool { !recentlyClosed.isEmpty }
+
+    private func entryLocation(_ entry: ClosedEntry) -> (cwd: String, index: Int) {
+        switch entry {
+        case .live(let session, let index): return (session.cwd, index)
+        case .snapshot(let persisted, let index): return (persisted.cwd, index)
+        }
+    }
+
+    /// Grace over: the hidden session's processes die and the entry becomes
+    /// a `--resume` snapshot.
+    private func expireGrace(for session: Session) {
+        guard let slot = recentlyClosed.firstIndex(where: {
+            if case .live(let live, _) = $0 { return live === session }
+            return false
+        }) else { return }
+        guard case .live(_, let index) = recentlyClosed[slot] else { return }
+        session.terminate()
+        recentlyClosed[slot] = .snapshot(session.persisted(), index: index)
+    }
+
+    private func evict(entry: ClosedEntry) {
+        if case .live(let session, _) = entry { session.terminate() }
+    }
+
+    /// Hidden-but-alive closed sessions on `path` (worktree removal must not
+    /// leave PTYs holding a tree that's being deleted).
+    func purgeClosedSessions(under path: String) {
+        recentlyClosed.removeAll { entry in
+            if case .live(let session, _) = entry, session.cwd == path {
+                session.terminate()
+                return true
+            }
+            if case .snapshot(let persisted, _) = entry, persisted.cwd == path {
+                return true
+            }
+            return false
+        }
+    }
 
     // MARK: Editor (M2.1)
 
@@ -973,6 +1040,9 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
                     self.showSession(at: min(self.activeIndex, self.sessions.count - 1))
                     self.updateBottomBar()
                 }
+                // Closed-but-alive sessions in the reopen grace also hold PTYs
+                // on this tree — release them before git deletes it.
+                self.purgeClosedSessions(under: row.worktree.path)
                 try WorktreeManager.remove(path: row.worktree.path, repoRoot: repoRoot, force: isDirty)
             } catch {
                 self.presentError(title: "Couldn't remove worktree", error: error)

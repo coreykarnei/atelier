@@ -630,11 +630,11 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         return ceil(textWidth) + badge + (isActive ? 34 : 20)
     }
 
-    /// The tab's label: `index:name` — the tmux `#I:#W` anatomy this bar
-    /// succeeds (owner call 2026-07-13), 1-based like tmux, ⎇ marking
-    /// worktree sessions.
+    /// The tab's label: ⎇ marks worktree sessions, then the title. (Index
+    /// numbering was tried and dropped same day — the tmux reference was
+    /// about presentation, not anatomy; owner call 2026-07-13.)
     static func label(for info: SessionTabInfo) -> String {
-        "\(info.index + 1):" + (info.isWorktree ? "⎇ " : "") + (info.title.isEmpty ? "untitled" : info.title)
+        (info.isWorktree ? "⎇ " : "") + (info.title.isEmpty ? "untitled" : info.title)
     }
 
     func apply(info: SessionTabInfo, isActive: Bool) {
@@ -651,7 +651,9 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
             titleLabel.textColor = isActive ? Theme.accentTextDark : Theme.chromeMutedText
             closeButton.contentTintColor = Theme.accentTextDark
             closeButton.isHidden = !isActive
-            closeButton.alphaValue = HoverFadeButton.restingAlpha
+            // Invisible until the pointer is over the tab (owner call
+            // 2026-07-13); the slot stays reserved so nothing shifts on hover.
+            closeButton.alphaValue = 0
         }
         attentionSince = info.attentionSince
         setAttention(info.attention, animated: applied)
@@ -670,8 +672,9 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
                 height: closeWidth
             )
         }
-        // Everything else flows after the close `×` when it's present.
-        let leading: CGFloat = closeButton.isHidden ? 8 : 22
+        // Everything else flows after the close `×` slot — reserved by
+        // activeness, not visibility, so the hover reveal never shifts text.
+        let leading: CGFloat = isActive ? 22 : 8
         let hasBadge = badgeView != nil
         if let badge = badgeView {
             let size = badge.frame.size == .zero ? badge.fittingSize : badge.frame.size
@@ -857,6 +860,31 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         } else {
             onSelect?(index)
         }
+    }
+
+    // The close `×` reveals on tab hover (its own HoverFadeButton tracking
+    // then takes it to full strength under the pointer).
+    private var tabTracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tabTracking { removeTrackingArea(tabTracking) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        tabTracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        if !closeButton.isHidden { closeButton.alphaValue = HoverFadeButton.restingAlpha }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        closeButton.alphaValue = 0
     }
 
     @objc private func closeTapped() { onClose?(index) }
