@@ -66,6 +66,9 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
     /// Externally-filtered surfaces only (`filtersLocally: false`): the query
     /// changed — go produce a new offer.
     var onQueryChange: ((String) -> Void)?
+    /// Optional match ranking for locally-filtered hosts (⌘P: basename hits
+    /// outrank path-scatter hits). Higher wins; ties keep provider order.
+    var rank: ((SummonItem, String) -> Int)?
 
     var focusField: NSView { field }
     private(set) var query = ""
@@ -190,6 +193,14 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
         filtered = (q.isEmpty || !style.filtersLocally)
             ? items
             : items.filter { fuzzyMatches(query: q, candidate: $0.matchText) }
+        if let rank, !q.isEmpty, style.filtersLocally {
+            filtered = filtered.enumerated()
+                .sorted { a, b in
+                    let ra = rank(a.element, q), rb = rank(b.element, q)
+                    return ra != rb ? ra > rb : a.offset < b.offset
+                }
+                .map(\.element)
+        }
         table.reloadData()
         noMatchLabel.isHidden = !(filtered.isEmpty && !q.isEmpty)
         if let keepId, let row = filtered.firstIndex(where: { $0.id == keepId }) {

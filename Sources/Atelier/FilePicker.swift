@@ -56,6 +56,14 @@ final class FilePicker: SummonCardOverlay {
             self.dismiss()
             self.onOpen(URL(fileURLWithPath: item.id))
         }
+        // `theme` should find Theme.swift before a path that merely scatters
+        // t-h-e-m-e: substring-in-name > fuzzy-in-name > path-only match.
+        summon.rank = { item, query in
+            let name = (item.id as NSString).lastPathComponent.lowercased()
+            if name.contains(query) { return 3 }
+            if fuzzyMatches(query: query, candidate: name) { return 2 }
+            return 1
+        }
         offerRecents()
         gatherFiles()
     }

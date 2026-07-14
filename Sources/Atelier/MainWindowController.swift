@@ -48,12 +48,12 @@ final class AtelierWindow: NSWindow {
 
 }
 
-/// The single Atelier window. Milestone 1.2 makes it host *sessions*: it owns a list
-/// of `Session`s (each an instance of the fixed pane shape), shows one at a time, and
-/// carries a bottom bar with a tab strip to switch between them (MILESTONE_1 §2, §7).
-///
-/// Projects-as-windows and session persistence are later milestones; for now this is
-/// one window hosting N sessions on a shared default root.
+/// One project window: hosts *sessions* (each an instance of the fixed pane
+/// shape), shows one at a time, and carries the bottom bar with the session
+/// tab strip (MILESTONE_1 §2, §7). Projects are native tabbed windows
+/// (`tabbingMode = .preferred`); persistence snapshots/restores the whole
+/// window → session tree (§9); overlays (fan, palette, ⌘P, ⌘⇧F) mount on the
+/// content view and restore pre-overlay focus on dismissal.
 final class MainWindowController: NSWindowController, BottomBarDelegate {
     private var sessions: [Session] = []
     private var activeIndex = 0
