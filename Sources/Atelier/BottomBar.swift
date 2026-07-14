@@ -19,6 +19,9 @@ struct SessionTabInfo {
     let index: Int
     let title: String
     let isWorktree: Bool
+    /// Set for remote sessions: the ssh host, worn on the tab (`@host`) the
+    /// way ⎇ marks a worktree — where the work lives, always visible.
+    let remoteHost: String?
     /// Group boundary marker — tabs sharing a root sit together (MILESTONE_1 §7);
     /// the grouping *is* how codebase sharing is shown.
     let groupKey: String
@@ -630,11 +633,15 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         return ceil(textWidth) + badge + (isActive ? 34 : 20)
     }
 
-    /// The tab's label: ⎇ marks worktree sessions, then the title. (Index
-    /// numbering was tried and dropped same day — the tmux reference was
-    /// about presentation, not anatomy; owner call 2026-07-13.)
+    /// The tab's label: ⎇ marks worktree sessions, then the title, then the
+    /// `@host` mark for remote sessions — dropped when the title *is* the
+    /// host ("jarvis @jarvis" says it once). (Index numbering was tried and
+    /// dropped same day — the tmux reference was about presentation, not
+    /// anatomy; owner call 2026-07-13.)
     static func label(for info: SessionTabInfo) -> String {
-        (info.isWorktree ? "⎇ " : "") + (info.title.isEmpty ? "untitled" : info.title)
+        let title = info.title.isEmpty ? "untitled" : info.title
+        let host = info.remoteHost.flatMap { $0 == info.title ? nil : " @\($0)" } ?? ""
+        return (info.isWorktree ? "⎇ " : "") + title + host
     }
 
     func apply(info: SessionTabInfo, isActive: Bool) {

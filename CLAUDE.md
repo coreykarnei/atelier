@@ -80,6 +80,20 @@ buffers only): F12 go-to-definition (same-file reveals, cross-file rides the
 (multi-cursor/find-panel polish) is library-native and awaits an owner
 feel-check.
 
+Also landed 2026-07-14: **remote sessions** — the native successor of the
+dotfiles' `ide-pi` (see `docs/devlog/2026-07-14-remote-sessions.md`). A
+session can live on an ssh host (`Remote.swift`): both panes ride
+`ssh -t … tmux new -A` into a host-side `-L atelier` server, so the work
+survives link death and app quits; link death (ssh 255) auto-reattaches on
+backoff behind the reconnecting placard, ⌘W kills the host-side pair, quit
+leaves it running and relaunch reattaches mid-conversation. Entry: hosts
+from `~/.ssh/config` in the Landing offer (`host:dir` typed queries inject
+a synthetic row). Remote sessions pin Split, skip editor/⌘P/⌘⇧F/worktrees,
+wear `@host` on the tab, and group by host. Attention dots cross the wire:
+`RemoteLink` provisions a python `atelier-notify` + hook entries onto the
+host and holds a dedicated single-flight `ssh -N -R` socket forward (never
+through the ControlMaster mux — it reports success and never binds).
+
 Also landed 2026-07-14: the **transparency pipeline** (the owner-reported
 opaque-window bug was compositing arithmetic — see
 `docs/devlog/2026-07-14-transparency-pipeline.md`; WindowServer blur via CGS

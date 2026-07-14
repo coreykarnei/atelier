@@ -875,11 +875,14 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         var groupOrder: [String] = []
         var groups: [String: [Int]] = [:]
         for (index, session) in sessions.enumerated() {
-            if groups[session.cwd] == nil {
-                groups[session.cwd] = []
-                groupOrder.append(session.cwd)
+            // Remote sessions group by host — every jarvis tab sits together
+            // regardless of remote dir, like worktree tabs share their root.
+            let key = session.location.host.map { "ssh://\($0)" } ?? session.cwd
+            if groups[key] == nil {
+                groups[key] = []
+                groupOrder.append(key)
             }
-            groups[session.cwd]?.append(index)
+            groups[key]?.append(index)
         }
         if let root = projectRepoRoot, let mainIndex = groupOrder.firstIndex(of: root), mainIndex != 0 {
             groupOrder.remove(at: mainIndex)
@@ -893,6 +896,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
                     index: index,
                     title: session.displayTitle,
                     isWorktree: session.isWorktree,
+                    remoteHost: session.location.host,
                     groupKey: key,
                     attention: session.attention,
                     attentionSince: session.attentionSince
