@@ -1199,6 +1199,15 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
                 self?.toggleLayout()
             })
         }
+        commands.append(PaletteCommand(id: "view.text.bigger", title: "View: Bigger Text", key: "⌘+") {
+            Theme.TypeScale.bump(1)
+        })
+        commands.append(PaletteCommand(id: "view.text.smaller", title: "View: Smaller Text", key: "⌘-") {
+            Theme.TypeScale.bump(-1)
+        })
+        commands.append(PaletteCommand(id: "view.text.reset", title: "View: Reset Text Size", key: "⌘0") {
+            Theme.TypeScale.reset()
+        })
         let focusTargets: [(String, WorkspacePane?)] = [
             ("Editor", activeSession?.editorPane),
             ("Shell", activeSession?.shellPane),

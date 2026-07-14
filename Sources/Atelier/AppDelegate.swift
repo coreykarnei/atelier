@@ -306,6 +306,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func saveFile(_ sender: Any?) { keyController?.saveEditor() }
     @objc func goToFile(_ sender: Any?) { keyController?.showFilePicker() }
     @objc func searchRepo(_ sender: Any?) { keyController?.showRepoSearch() }
+
+    // Content type scale: app-global by design — every terminal and editor
+    // in every window observes the token, so the chords never need a target.
+    @objc func biggerText(_ sender: Any?) { Theme.TypeScale.bump(1) }
+    @objc func smallerText(_ sender: Any?) { Theme.TypeScale.bump(-1) }
+    @objc func resetTextSize(_ sender: Any?) { Theme.TypeScale.reset() }
     @objc func nextSession(_ sender: Any?) { keyController?.selectNext() }
     @objc func prevSession(_ sender: Any?) { keyController?.selectPrev() }
 

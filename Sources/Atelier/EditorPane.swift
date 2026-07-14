@@ -39,6 +39,12 @@ final class EditorPane: NSView, WorkspacePane {
             name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(typeScaleChanged),
+            name: Theme.TypeScale.didChange,
+            object: nil
+        )
     }
 
     @available(*, unavailable)
@@ -46,6 +52,12 @@ final class EditorPane: NSView, WorkspacePane {
 
     deinit {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    /// ⌘+/⌘−/⌘0 — the buffer rides the same content scale as the terminals.
+    @objc private func typeScaleChanged() {
+        controller?.configuration = Self.configuration()
     }
 
     override func updateLayer() {
@@ -153,7 +165,7 @@ final class EditorPane: NSView, WorkspacePane {
                     characters: .init(color: Theme.Editor.character),
                     comments: .init(color: Theme.Editor.comment, italic: true)
                 ),
-                font: Theme.Typography.mono(Theme.Typography.body),
+                font: Theme.Typography.mono(Theme.TypeScale.current),
                 wrapLines: false,
                 tabWidth: 4,
                 bracketPairEmphasis: nil

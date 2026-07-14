@@ -29,6 +29,33 @@ enum Theme {
     /// Behind-window blur radius — dotfiles Ghostty `background-blur-radius`.
     static let backgroundBlurRadius = 20
 
+    // MARK: Content type scale (⌘+ / ⌘− / ⌘0)
+
+    /// The one *content* type size: terminals and the editor, every window at
+    /// once. Chrome never scales — bars, tabs, and overlays keep their own
+    /// voice sizes. Defaults to the owner's Ghostty `font-size` (14); the
+    /// zoom chords move it and it persists across launches.
+    enum TypeScale {
+        static let base: CGFloat = 14
+        private static let key = "type.scale"
+        static let didChange = Notification.Name("atelier.typeScale.didChange")
+
+        static var current: CGFloat {
+            let stored = UserDefaults.standard.double(forKey: key)
+            return stored == 0 ? base : CGFloat(stored)
+        }
+
+        static func bump(_ delta: CGFloat) { apply(current + delta) }
+        static func reset() { apply(base) }
+
+        private static func apply(_ size: CGFloat) {
+            let clamped = min(max(size, 9), 24)
+            guard clamped != current else { return }
+            UserDefaults.standard.set(Double(clamped), forKey: key)
+            NotificationCenter.default.post(name: didChange, object: nil)
+        }
+    }
+
     /// `fieldAlpha`, collapsed to opaque when the user asks for Reduce
     /// Transparency (§1.5). Read at apply-time, not cached.
     static var effectiveFieldAlpha: CGFloat {

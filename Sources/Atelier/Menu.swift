@@ -76,6 +76,18 @@ enum Menu {
         viewMenu.addItem(chord("Focus Down", #selector(AppDelegate.focusDown(_:)), "j", [.command, .control]))
         viewMenu.addItem(chord("Focus Up", #selector(AppDelegate.focusUp(_:)), "k", [.command, .control]))
         viewMenu.addItem(chord("Focus Right", #selector(AppDelegate.focusRight(_:)), "l", [.command, .control]))
+        viewMenu.addItem(.separator())
+
+        // Content type scale — terminals + editor, every window (chrome
+        // doesn't scale). ⌘= is the unshifted twin of ⌘+, hidden but live,
+        // so the chord works without reaching for shift.
+        viewMenu.addItem(withTitle: "Bigger Text", action: #selector(AppDelegate.biggerText(_:)), keyEquivalent: "+")
+        let plusTwin = NSMenuItem(title: "Bigger Text", action: #selector(AppDelegate.biggerText(_:)), keyEquivalent: "=")
+        plusTwin.isHidden = true
+        plusTwin.allowsKeyEquivalentWhenHidden = true
+        viewMenu.addItem(plusTwin)
+        viewMenu.addItem(withTitle: "Smaller Text", action: #selector(AppDelegate.smallerText(_:)), keyEquivalent: "-")
+        viewMenu.addItem(withTitle: "Reset Text Size", action: #selector(AppDelegate.resetTextSize(_:)), keyEquivalent: "0")
 
         // Window menu. AppKit auto-inserts the native tab commands (Show Next Tab,
         // Merge All Windows, …) once this is registered as NSApp.windowsMenu.

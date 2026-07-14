@@ -81,7 +81,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
             terminal.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
 
-        applyTheme()
+        applyScale()
         terminal.processDelegate = self
 
         // The translucency token reads Reduce Transparency at apply-time (§1.5);
@@ -92,6 +92,12 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
             name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(typeScaleChanged),
+            name: Theme.TypeScale.didChange,
+            object: nil
+        )
     }
 
     @available(*, unavailable)
@@ -99,6 +105,24 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
 
     deinit {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    /// The terminal face is the *same* face and size as the owner's Ghostty —
+    /// JetBrains Mono at the content scale (SwiftTerm's default is the system
+    /// mono at 13, which is what made Atelier read subtly denser than the
+    /// reference). Setting the font runs SwiftTerm's setupOptions, which
+    /// re-copies the wash into the layer — applyTheme must follow to keep the
+    /// layer clear (single-wash rule).
+    private func applyScale() {
+        terminal.font = Theme.Typography.mono(Theme.TypeScale.current)
+        applyTheme()
+        positionWash()
+    }
+
+    @objc private func typeScaleChanged() {
+        applyScale()
+        terminal.needsDisplay = true
     }
 
     private func applyTheme() {
