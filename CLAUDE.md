@@ -54,8 +54,11 @@ Also built: per-tab attention state (§7.1 — the agent's exact state, always
 visible: blue dot working, peach dot waiting-on-you, peach `!` explicitly
 blocked, green dot unseen-completion → waiting on focus; fed by hooks carrying
 `session_id`, banner clicks focus the exact session), worktree grouping +
-two-row group-aware wrap + `»` overflow in the tab strip, and tab rename
-(double-click; hard override of the live Claude title; titles uncapped).
+two-row group-aware wrap + `»` overflow in the tab strip (overflowed tabs keep
+their ⎇/attention marks in the menu, and the `»` wears the loudest overflowed
+state), and inline tab rename (double-click edits the title in place — ↩
+commits a hard override of the live Claude title, Esc cancels, empty reverts;
+titles uncapped).
 
 Not yet built: the code editor (and `⌘P`/`⌘⇧F`) — a placeholder until Milestone 2.
 

@@ -4,7 +4,9 @@ protocol BottomBarDelegate: AnyObject {
     func bottomBarDidSelectSession(at index: Int)
     func bottomBarDidRequestNewSession()
     func bottomBarDidRequestCloseSession(at index: Int)
-    func bottomBarDidRequestRenameSession(at index: Int)
+    /// Inline rename finished. `title` is the committed text (nil = revert to
+    /// the live auto title); a cancelled rename never reaches this.
+    func bottomBarDidRenameSession(at index: Int, title: String?)
     func bottomBarDidToggleLayout()
     func bottomBarDidClickPill(anchor: NSView)
 }
@@ -314,6 +316,16 @@ final class BottomBar: NSView {
             overflowButton.isHidden = false
             overflowButton.menu = overflowMenu(for: overflow)
             overflowButton.action = #selector(overflowTapped)
+            // The `»` itself wears the loudest overflowed state (§7.1): peach
+            // for a block, green for an unseen completion, else muted. Still —
+            // no motion, no escalation.
+            if overflow.contains(where: { $0.attention == .needsInput }) {
+                overflowButton.contentTintColor = Theme.accentPeach
+            } else if overflow.contains(where: { $0.attention == .doneUnseen }) {
+                overflowButton.contentTintColor = Theme.accentGreen
+            } else {
+                overflowButton.contentTintColor = Theme.chromeMutedText
+            }
             _ = tryAppend(.overflow)
         }
         _ = tryAppend(.add)
@@ -452,18 +464,67 @@ final class BottomBar: NSView {
     private func wire(_ view: SessionTabView) {
         view.onSelect = { [weak self] idx in self?.delegate?.bottomBarDidSelectSession(at: idx) }
         view.onClose = { [weak self] idx in self?.delegate?.bottomBarDidRequestCloseSession(at: idx) }
-        view.onRename = { [weak self] idx in self?.delegate?.bottomBarDidRequestRenameSession(at: idx) }
+        view.onRenameCommit = { [weak self] idx, title in self?.delegate?.bottomBarDidRenameSession(at: idx, title: title) }
+        view.onRenameEnd = { [weak self] in self?.renameDidEnd() }
     }
 
+    /// Start the inline rename on a session's tab (double-click does this
+    /// directly; the palette's "Session: Rename…" routes here).
+    func beginRename(at index: Int) {
+        guard let view = tabViews.values.first(where: { $0.index == index }) else { return }
+        view.beginRename()
+    }
+
+    /// Fired after an inline rename ends however it ends — the owner restores
+    /// keyboard focus to the session.
+    var onRenameDidEnd: (() -> Void)?
+    private func renameDidEnd() { onRenameDidEnd?() }
+
+    /// §7.1 — the agent's exact state, always visible: overflowed tabs keep
+    /// their ⎇ and attention marks inside the `»` menu.
     private func overflowMenu(for tabs: [SessionTabInfo]) -> NSMenu {
         let menu = NSMenu()
         for tab in tabs {
-            let item = NSMenuItem(title: tab.title, action: #selector(overflowItemSelected(_:)), keyEquivalent: "")
+            let title = (tab.isWorktree ? "⎇ " : "") + (tab.title.isEmpty ? "untitled" : tab.title)
+            let item = NSMenuItem(title: title, action: #selector(overflowItemSelected(_:)), keyEquivalent: "")
             item.target = self
             item.tag = tab.index
+            item.image = Self.menuBadgeImage(for: tab.attention)
             menu.addItem(item)
         }
         return menu
+    }
+
+    /// The tab badges, translated to menu-item images: the same 6 pt dot, the
+    /// same inanimate peach `!`. `none` gets a clear placeholder so titles
+    /// align whether or not a session has state.
+    private static func menuBadgeImage(for attention: Session.Attention) -> NSImage {
+        let size = NSSize(width: 10, height: 10)
+        let image = NSImage(size: size, flipped: false) { rect in
+            switch attention {
+            case .none:
+                break
+            case .needsInput:
+                let mark = NSAttributedString(string: "!", attributes: [
+                    .font: Theme.Typography.ui(Theme.Typography.small, weight: .heavy),
+                    .foregroundColor: Theme.accentPeach,
+                ])
+                let markSize = mark.size()
+                mark.draw(at: NSPoint(x: (rect.width - markSize.width) / 2, y: (rect.height - markSize.height) / 2))
+            case .working, .waiting, .doneUnseen:
+                let color: NSColor
+                switch attention {
+                case .working: color = Theme.accentBlue
+                case .doneUnseen: color = Theme.accentGreen
+                default: color = Theme.accentPeach
+                }
+                color.setFill()
+                NSBezierPath(ovalIn: NSRect(x: 2, y: 2, width: 6, height: 6)).fill()
+            }
+            return true
+        }
+        image.isTemplate = false
+        return image
     }
 
     // MARK: Clock
@@ -499,17 +560,20 @@ final class BottomBar: NSView {
 /// sessions, ellipsized title. The active tab — and only the active tab —
 /// carries a close `×` at its leading edge, before the title: the tab you can
 /// close is the one you're looking at, and inactive tabs stay quiet. Click
-/// selects; double-click renames. Persistent across bar updates so its state
-/// changes can animate:
+/// selects; double-click renames **in place** — the title becomes an editable
+/// field under the cursor (Finder's gesture), `↩` commits, `Esc` cancels,
+/// empty reverts to the live auto title. Persistent across bar updates so its
+/// state changes can animate:
 /// attention cross-fades (~250 ms), a green arrival does one soft scale-in,
 /// the working blue carries the ~4 s subliminal pulse, and the peach `!`
 /// **never** animates — urgency reads as stillness (§1.3).
-private final class SessionTabView: NSView {
+private final class SessionTabView: NSView, NSTextFieldDelegate {
     let sessionId: UUID
     private(set) var index: Int = -1
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
-    var onRename: ((Int) -> Void)?
+    var onRenameCommit: ((Int, String?) -> Void)?
+    var onRenameEnd: (() -> Void)?
 
     private let titleLabel = NSTextField(labelWithString: "")
     private let closeButton = HoverFadeButton()
@@ -519,6 +583,10 @@ private final class SessionTabView: NSView {
     private var isActive = false
     private var applied = false
     private var toolTipRect: CGRect = .null
+    /// The unadorned display title (no ⎇), for seeding the rename field.
+    private var rawTitle = ""
+    private var editField: NSTextField?
+    private var renameCancelled = false
 
     init(sessionId: UUID) {
         self.sessionId = sessionId
@@ -561,6 +629,7 @@ private final class SessionTabView: NSView {
 
     func apply(info: SessionTabInfo, isActive: Bool) {
         index = info.index
+        rawTitle = info.title
         let text = (info.isWorktree ? "⎇ " : "") + (info.title.isEmpty ? "untitled" : info.title)
         if titleLabel.stringValue != text { titleLabel.stringValue = text }
 
@@ -624,6 +693,66 @@ private final class SessionTabView: NSView {
             width: max(0, bounds.width - titleX - 8),
             height: titleHeight
         )
+        editField?.frame = editFieldFrame()
+    }
+
+    // MARK: Inline rename
+
+    private func editFieldFrame() -> CGRect {
+        CGRect(
+            x: titleLabel.frame.minX - 2,
+            y: (bounds.height - 16) / 2,
+            width: max(40, bounds.width - titleLabel.frame.minX - 6),
+            height: 16
+        )
+    }
+
+    /// Swap the title for an editable field in place. Select-all seeded with
+    /// the current name, like Finder; `↩`/click-away commits, `Esc` cancels.
+    func beginRename() {
+        guard editField == nil else { return }
+        let field = NSTextField(string: rawTitle)
+        field.font = Theme.Typography.mono(Theme.Typography.small, weight: isActive ? .semibold : .regular)
+        field.textColor = isActive ? Theme.accentTextDark : Theme.chromeText
+        field.isBezeled = false
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.cell?.usesSingleLineMode = true
+        field.delegate = self
+        addSubview(field)
+        field.frame = editFieldFrame()
+        titleLabel.isHidden = true
+        editField = field
+        window?.makeFirstResponder(field)
+        field.currentEditor()?.selectAll(nil)
+    }
+
+    private func endRename() {
+        guard let field = editField else { return }
+        editField = nil
+        field.removeFromSuperview()
+        titleLabel.isHidden = false
+        onRenameEnd?()
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        guard let field = editField else { return }
+        if !renameCancelled {
+            let text = field.stringValue.trimmingCharacters(in: .whitespaces)
+            onRenameCommit?(index, text.isEmpty ? nil : text)
+        }
+        renameCancelled = false
+        endRename()
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            renameCancelled = true
+            window?.makeFirstResponder(nil) // resigns the editor → didEndEditing
+            return true
+        }
+        return false
     }
 
     // MARK: Attention badge (MILESTONE_1 §7.1 + POLISH_PLAN §3)
@@ -712,8 +841,9 @@ private final class SessionTabView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        guard editField == nil else { return } // clicks during a rename belong to the editor
         if event.clickCount == 2 {
-            onRename?(index)
+            beginRename()
         } else {
             onSelect?(index)
         }

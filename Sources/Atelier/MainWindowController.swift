@@ -221,6 +221,16 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         bottomBar.onDesiredHeightChange = { [weak self] newHeight in
             self?.bottomBarHeight?.constant = newHeight
         }
+        // After an inline tab rename ends (commit or cancel), typing belongs
+        // to the session again — but only when focus fell into limbo (↩/Esc
+        // leave it on the window). A click-away commit already put focus
+        // exactly where the user aimed; don't second-guess it.
+        bottomBar.onRenameDidEnd = { [weak self] in
+            guard let self, let window = self.window else { return }
+            if window.firstResponder == nil || window.firstResponder === window {
+                window.makeFirstResponder(self.activeSession?.defaultFocusView)
+            }
+        }
     }
 
     /// Start the hosted processes for every session. Called once the window is on
@@ -580,29 +590,18 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     }
     func bottomBarDidToggleLayout() { toggleLayout() }
     func bottomBarDidClickPill(anchor: NSView) { showWorktreeFan(from: anchor) }
-    func bottomBarDidRequestRenameSession(at index: Int) { renameSession(at: index) }
 
-    /// Double-click a tab (or the palette command): set a custom name that the
-    /// live Claude title never overwrites. Empty input reverts to the auto title.
+    /// Inline rename committed on a tab: set a custom name that the live
+    /// Claude title never overwrites; nil (empty input) reverts to auto.
+    func bottomBarDidRenameSession(at index: Int, title: String?) {
+        guard sessions.indices.contains(index) else { return }
+        sessions[index].customTitle = title
+        updateBottomBar()
+    }
+
+    /// The palette's "Session: Rename…": same in-place edit the double-click does.
     func renameSession(at index: Int) {
-        guard sessions.indices.contains(index), let window else { return }
-        let session = sessions[index]
-
-        let alert = NSAlert()
-        alert.messageText = "Rename session"
-        alert.informativeText = "Leave empty to follow Claude's live title again."
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
-        field.stringValue = session.customTitle ?? session.displayTitle
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { [weak self] response in
-            guard let self, response == .alertFirstButtonReturn else { return }
-            let text = field.stringValue.trimmingCharacters(in: .whitespaces)
-            session.customTitle = text.isEmpty ? nil : text
-            self.updateBottomBar()
-        }
+        bottomBar.beginRename(at: index)
     }
 
     // MARK: Worktree fan (MILESTONE_1 §6, physiology per POLISH_PLAN §6)

@@ -75,6 +75,25 @@ live AppKit harnesses) confirmed and I fixed:
 - Refresh-on-key-return reset the arrow selection to row 0 (fixed by the
   preserve-by-id above); refilter selected row 0 without scrolling to it.
 
+## 4. Inline tab rename
+
+The NSAlert rename sheet is gone — it was the one blocking modal in a flow
+that deserved Finder's gesture. Double-click a tab and the title becomes an
+editable field in place (select-all seeded with the current name): `↩`
+commits, empty reverts to the live auto title, `Esc` cancels, click-away
+commits like Finder. The palette's "Session: Rename…" routes to the same
+in-place edit. Focus returns to the session when the edit ends — unless a
+click-away already aimed it somewhere, which is respected.
+
+## 5. Overflow parity (§7.1 kept honest)
+
+Tabs pushed into the `»` menu no longer lose their state: menu items carry
+the same 6 pt dots (blue/peach/green) and the inanimate peach `!`, plus the
+`⎇` prefix for worktree sessions. The `»` button itself wears the loudest
+overflowed state — peach if anything's blocked, green for an unseen
+completion, muted otherwise. No motion, no escalation; the states just stop
+vanishing at the overflow boundary.
+
 ## Residual
 
 - The summon field's caret is the system insertion point; the terminal panes'
