@@ -128,11 +128,9 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
         // §2.9: transparent, native blur — the aesthetic is a spec
-        // requirement, and an opaque window never lets the behind-window
-        // material reach the desktop (owner call 2026-07-13: "still not
-        // semi transparent" — it wasn't; the backing was opaque). The
-        // titlebar region still reads mantle via TitlebarWashView, which is
-        // translucent over the blur like every field surface.
+        // requirement. The titlebar region still reads mantle via
+        // TitlebarWashView, translucent over the blur like every field
+        // surface.
         window.isOpaque = false
         window.backgroundColor = .clear
         window.titlebarSeparatorStyle = .none
@@ -140,22 +138,39 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         // always-visible project strip in the titlebar.
         window.tabbingMode = .preferred
 
-        let blur = NSVisualEffectView()
-        // hudWindow is the most translucent dark material; sidebar read as
-        // near-opaque under the 0.85 fields (owner call 2026-07-13: the
-        // transparency must be *visible* next to Ghostty's). Always active —
-        // the Phase-3 "exhale on deactivation" muted the blur exactly when
-        // comparing windows side by side, which is when it matters.
-        blur.material = .hudWindow
-        blur.blendingMode = .behindWindow
-        blur.state = .active
-        window.contentView = blur
+        // The blur is the WindowServer's, not a material (see
+        // WindowBlur.swift): NSVisualEffectView materials carry their own
+        // near-opaque tint, and two attempts at "more translucent" materials
+        // still compounded to a window the owner read as fully opaque. The
+        // content view is a bare clear container; the fields' fieldAlpha
+        // wash over the blurred desktop is the whole look — Ghostty's
+        // pipeline, which is the target feel.
+        let container = NSView()
+        container.wantsLayer = true
+        window.contentView = container
         window.appearance = NSAppearance(named: .darkAqua)
 
         self.init(window: window)
         window.center()
         window.setFrameAutosaveName("AtelierMainWindow")
-        buildChrome(in: blur)
+        if !WindowBackgroundBlur.apply(to: window, radius: Theme.backgroundBlurRadius) {
+            // No CGS symbols (future-macOS insurance): fall back to the
+            // material blur rather than a raw see-through window.
+            NSLog("Atelier: CGS window blur unavailable; falling back to NSVisualEffectView")
+            let blur = NSVisualEffectView()
+            blur.material = .hudWindow
+            blur.blendingMode = .behindWindow
+            blur.state = .active
+            blur.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(blur, positioned: .below, relativeTo: nil)
+            NSLayoutConstraint.activate([
+                blur.topAnchor.constraint(equalTo: container.topAnchor),
+                blur.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+                blur.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                blur.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            ])
+        }
+        buildChrome(in: container)
         observeFocus(of: window)
     }
 
@@ -188,6 +203,25 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     /// Snapshot for the session store.
     func persisted() -> PersistedWindow {
         PersistedWindow(sessions: sessions.map { $0.persisted() }, activeIndex: activeIndex)
+    }
+
+    /// Dev-only (snapshot debug dump): the active session's shell wash
+    /// geometry plus every translucent-painting view in the window, for
+    /// reconciling snapshot alpha probes with the live tree.
+    var debugWashState: String {
+        var lines = [activeSession.map { "\(window?.title ?? "?"): \($0.shellPane.debugWashState)" } ?? "no session"]
+        func walk(_ view: NSView, depth: Int) {
+            let bg = view.layer?.backgroundColor
+            let alpha = bg?.alpha ?? 0
+            if alpha > 0, let root = window?.contentView {
+                let frame = view.convert(view.bounds, to: root)
+                let comps = bg?.components?.map { String(format: "%.2f", $0) }.joined(separator: ",") ?? "?"
+                lines.append("\(String(repeating: "  ", count: depth))\(type(of: view)) frame=\(frame) bg=(\(comps)) hidden=\(view.isHiddenOrHasHiddenAncestor)")
+            }
+            for sub in view.subviews { walk(sub, depth: depth + 1) }
+        }
+        if let root = window?.contentView { walk(root, depth: 0) }
+        return lines.joined(separator: "\n")
     }
 
     deinit {

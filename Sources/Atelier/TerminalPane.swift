@@ -13,6 +13,9 @@ class FreezableTerminalView: LocalProcessTerminalView {
             guard !resizeFrozen, let size = deferredSize else { return }
             deferredSize = nil
             super.setFrameSize(size)
+            // The pane's sliver wash tracks the cell grid; re-lay it out now
+            // that the deferred size (and thus the grid) has applied.
+            superview?.needsLayout = true
         }
     }
 
@@ -45,6 +48,14 @@ class FreezableTerminalView: LocalProcessTerminalView {
 final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePane {
     let terminal: FreezableTerminalView
 
+    /// The cell grid covers `rows × cellHeight` from the top of the terminal
+    /// view; the sub-cell remainder strip at the bottom is painted by no cell.
+    /// With the terminal's layer clear (the wash lives in the cell fills —
+    /// see `applyTheme`), that strip would show raw blur, so this view washes
+    /// it from behind, matched to the default-background cells. Behind, not
+    /// over: the grid never reaches it, so the wash still paints exactly once.
+    private let sliverWash = NSView()
+
     /// Focus target for the window's `⌃⌘+hjkl` focus manager.
     var focusView: NSView { terminal }
 
@@ -60,6 +71,8 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
 
         translatesAutoresizingMaskIntoConstraints = false
         terminal.translatesAutoresizingMaskIntoConstraints = false
+        sliverWash.wantsLayer = true
+        addSubview(sliverWash)
         addSubview(terminal)
         NSLayoutConstraint.activate([
             terminal.topAnchor.constraint(equalTo: topAnchor),
@@ -91,14 +104,62 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
     private func applyTheme() {
         terminal.installColors(Theme.ansi)
         // §2.1: the field is translucent over the behind-window blur — glyphs
-        // stay full-contrast. SwiftTerm copies this into its layer background
-        // only at setup, so set the layer directly too.
+        // stay full-contrast. The wash must be painted exactly *once*:
+        // SwiftTerm fills every cell's background (default cells use
+        // nativeBackgroundColor, alpha'd here), so the view's layer stays
+        // clear — layer wash + cell fills would stack to ~2× the token,
+        // which is what made the window read as opaque. (SwiftTerm only
+        // copies nativeBackgroundColor into the layer during setupOptions —
+        // init/font changes — so clearing it here holds.)
         let background = NSColor(swiftTerm: Theme.terminalBackground)
             .withAlphaComponent(Theme.effectiveFieldAlpha)
         terminal.nativeBackgroundColor = background
-        terminal.layer?.backgroundColor = background.cgColor
+        terminal.layer?.backgroundColor = NSColor.clear.cgColor
+        sliverWash.layer?.backgroundColor = background.cgColor
         terminal.nativeForegroundColor = NSColor(swiftTerm: Theme.terminalForeground)
         terminal.caretColor = NSColor(swiftTerm: Theme.terminalCursor)
+    }
+
+    /// Size the wash strip to exactly the height the grid leaves uncovered,
+    /// and clip the terminal to the grid so the two can never overlap. The
+    /// clip matters because SwiftTerm sometimes paints the sub-cell strip
+    /// itself (a partial scrollback row in the normal buffer) and sometimes
+    /// cannot (alt-screen TUIs — Claude, hx — have no scrollback): translucent
+    /// washes may be painted exactly once, so the strip has exactly one owner.
+    /// Frame-set (not constrained): the split positions panes imperatively,
+    /// and the grid can move without a pane-frame change, so this is
+    /// recomputed from every authority that can move it — pane resize,
+    /// layout, and SwiftTerm's own grid resize (`sizeChanged`).
+    private func positionWash() {
+        let sliver = max(0, terminal.frame.height - terminal.getOptimalFrameSize().height)
+        let target = NSRect(x: 0, y: 0, width: bounds.width, height: sliver)
+        if sliverWash.frame != target { sliverWash.frame = target }
+        guard let layer = terminal.layer else { return }
+        let grid = CGRect(x: 0, y: sliver, width: bounds.width, height: max(0, terminal.frame.height - sliver))
+        let mask = layer.mask as? CAShapeLayer ?? CAShapeLayer()
+        mask.frame = CGRect(origin: .zero, size: terminal.frame.size)
+        mask.path = CGPath(rect: grid, transform: nil)
+        if layer.mask !== mask { layer.mask = mask }
+    }
+
+    override func layout() {
+        super.layout()
+        positionWash()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        needsLayout = true
+    }
+
+    /// Dev-only (the snapshot debug's state dump): the live wash geometry, so
+    /// alpha-channel probes of snapshots can be reconciled with what the view
+    /// tree actually holds.
+    var debugWashState: String {
+        let layerAlpha = terminal.layer.map { String(format: "%.3f", $0.backgroundColor?.alpha ?? -1) } ?? "nil-layer"
+        return "terminal bounds=\(terminal.bounds) optimal=\(terminal.getOptimalFrameSize())"
+            + " layerBGAlpha=\(layerAlpha) sliverWash=\(sliverWash.frame)"
+            + " nativeBGAlpha=\(String(format: "%.3f", terminal.nativeBackgroundColor.alphaComponent))"
     }
 
     @objc private func accessibilityDisplayChanged() {
@@ -194,7 +255,9 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
 
     // MARK: LocalProcessTerminalViewDelegate
 
-    func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
+    func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {
+        positionWash()
+    }
 
     func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}
 

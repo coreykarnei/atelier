@@ -12,7 +12,22 @@ enum Theme {
     /// are over the behind-window blur. Applies to fields, never text — glyphs
     /// stay full-contrast per §1.2. Tune against a busy desktop: the test is
     /// "depth without noise"; if wallpaper detail competes with text, raise it.
-    static let fieldAlpha: CGFloat = 0.85
+    ///
+    /// 0.75 is the owner's own tuned value — dotfiles Ghostty
+    /// `background-opacity` — and with the WindowServer blur pipeline
+    /// (WindowBlur.swift) it *is* the net opacity, not an input to material
+    /// stacking. `ATELIER_FIELD_ALPHA` overrides it for live bisecting
+    /// (dev-only; run the bundle binary directly to inherit the shell env).
+    static let fieldAlpha: CGFloat = {
+        if let raw = ProcessInfo.processInfo.environment["ATELIER_FIELD_ALPHA"],
+           let value = Double(raw), (0.0...1.0).contains(value) {
+            return CGFloat(value)
+        }
+        return 0.75
+    }()
+
+    /// Behind-window blur radius — dotfiles Ghostty `background-blur-radius`.
+    static let backgroundBlurRadius = 20
 
     /// `fieldAlpha`, collapsed to opaque when the user asks for Reduce
     /// Transparency (§1.5). Read at apply-time, not cached.

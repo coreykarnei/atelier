@@ -215,6 +215,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let name = "atelier-\(index)-\(window.title.isEmpty ? "untitled" : window.title).png"
             try? png.write(to: dir.appendingPathComponent(name))
         }
+        let state = controllers.map(\.debugWashState).joined(separator: "\n")
+        try? state.write(to: dir.appendingPathComponent("state.txt"), atomically: true, encoding: .utf8)
         NSLog("Atelier: debug snapshot written to \(debug.path)")
     }
 
