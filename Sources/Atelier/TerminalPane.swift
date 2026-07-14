@@ -227,11 +227,27 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
 
     // MARK: Resuming placard (POLISH_PLAN §5)
 
+    /// The placard currently covering this pane, if any — reconnect retries
+    /// must re-arm the existing one, not stack a second.
+    private weak var currentPlacard: NSView?
+
     /// Kill the morning dead-terminal flash: until the first PTY byte, a
-    /// restoring agent pane shows base material with two muted centered lines —
-    /// the session title in mono, `resuming…` in SF Pro — cross-fading out on
-    /// first paint. No spinner (§1.1).
-    func showResumingPlacard(title: String) {
+    /// restoring (or reconnecting) pane shows base material with two muted
+    /// centered lines — the session title in mono, the state in SF Pro —
+    /// cross-fading out on first paint. No spinner (§1.1).
+    ///
+    /// `onFirstData` (optional) also runs on that first byte — the reattach
+    /// loop uses it to reset its backoff. Idempotent while a placard is up:
+    /// repeated calls only re-arm the first-data hook.
+    func showResumingPlacard(
+        title: String,
+        subtitle: String = "resuming…",
+        onFirstData extra: (() -> Void)? = nil
+    ) {
+        if let placard = currentPlacard {
+            armPlacardDismissal(placard, extra: extra)
+            return
+        }
         let placard = NSView()
         placard.wantsLayer = true
         placard.layer?.backgroundColor = Theme.Elevation.base.cgColor
@@ -244,7 +260,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         placard.addSubview(titleLabel)
 
-        let resuming = NSTextField(labelWithString: "resuming…")
+        let resuming = NSTextField(labelWithString: subtitle)
         resuming.font = Theme.Typography.ui(Theme.Typography.small)
         resuming.textColor = Theme.chromeMutedText
         resuming.translatesAutoresizingMaskIntoConstraints = false
@@ -264,7 +280,13 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
             resuming.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 6),
         ])
 
+        currentPlacard = placard
+        armPlacardDismissal(placard, extra: extra)
+    }
+
+    private func armPlacardDismissal(_ placard: NSView, extra: (() -> Void)?) {
         terminal.onFirstData = { [weak placard] in
+            extra?()
             guard let placard else { return }
             if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
                 placard.removeFromSuperview()

@@ -295,6 +295,18 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
 
     /// `⌘T` — a new Landing tab (a terminal, promotable to an IDE).
     func addSession() {
+        // Dev-only entry for the remote-session work (phase 1): with
+        // ATELIER_REMOTE_DEV=host[:dir] set, ⌘T opens a remote session
+        // directly. The Landing grows real host rows in phase 2.
+        if let spec = ProcessInfo.processInfo.environment["ATELIER_REMOTE_DEV"], !spec.isEmpty {
+            let parts = spec.split(separator: ":", maxSplits: 1)
+            let host = String(parts[0])
+            let dir = parts.count > 1
+                ? (parts[1].hasPrefix("/") ? String(parts[1]) : "~/\(parts[1])")
+                : "~"
+            adopt(Session(remoteHost: host, remoteDir: dir))
+            return
+        }
         adopt(Session(cwd: Self.defaultWorkdir()))
     }
 
@@ -357,8 +369,12 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
 
     /// Kill every session's hosted processes (window closing / app quitting) —
     /// including closed-but-alive ones still in their reopen grace window.
-    func terminateAllSessions() {
-        for session in sessions { session.terminate() }
+    ///
+    /// `killRemote: false` (the quit path) leaves remote sessions' tmux'd work
+    /// running on their hosts for relaunch to reattach to. Sessions in the
+    /// reopen grace were already deliberately closed, so they always kill.
+    func terminateAllSessions(killRemote: Bool = true) {
+        for session in sessions { session.terminate(killRemote: killRemote) }
         for entry in recentlyClosed { evict(entry: entry) }
         recentlyClosed.removeAll()
     }
@@ -913,9 +929,12 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     }
 
     /// Re-read each session's title from its transcript; rebuild tabs if any changed.
+    /// Remote sessions keep their seeded title — their transcript lives on the
+    /// remote host, not under the local `~/.claude/projects/`. (Reading the
+    /// ai-title over the shared ssh link is a possible follow-up.)
     private func refreshTitles() {
         var changed = false
-        for session in sessions {
+        for session in sessions where !session.isRemote {
             let seed = (session.cwd as NSString).lastPathComponent
             let resolved = TranscriptTitle.title(sessionId: session.claudeSessionId, cwd: session.cwd) ?? seed
             if session.title != resolved {

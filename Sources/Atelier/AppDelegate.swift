@@ -233,7 +233,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        for controller in controllers { controller.terminateAllSessions() }
+        // Quitting: remote work stays alive on its hosts (reattach on relaunch).
+        for controller in controllers { controller.terminateAllSessions(killRemote: false) }
         LSPRegistry.terminateAll()
         notificationServer.stop()
     }
@@ -274,7 +275,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let window = note.object as? NSWindow else { return }
         NotificationCenter.default.removeObserver(self, name: NSWindow.willCloseNotification, object: window)
         if let index = controllers.firstIndex(where: { $0.window === window }) {
-            controllers[index].terminateAllSessions()
+            // A by-hand window close is deliberate ("I closed my projects") and
+            // kills remote work too; during quit the snapshot already promised
+            // these sessions back, so their remote side must survive.
+            controllers[index].terminateAllSessions(killRemote: !isTerminating)
             controllers.remove(at: index)
         }
         // Last project tab closed → back to the Launch view (a fresh Landing),
