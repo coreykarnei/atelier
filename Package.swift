@@ -7,7 +7,14 @@ let package = Package(
         .macOS(.v14)
     ],
     dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.13.0")
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.13.0"),
+        // The M2 editor base (TECHNICAL_PLAN §3.3): TextKit-2 source editor
+        // with incremental tree-sitter highlighting and multi-cursor support.
+        .package(url: "https://github.com/CodeEditApp/CodeEditSourceEditor.git", from: "0.11.0"),
+        .package(url: "https://github.com/CodeEditApp/CodeEditLanguages.git", from: "0.1.20"),
+        // Local override (by package identity) of CodeEditSourceEditor's
+        // CodeEditSymbols dependency — see Vendor/CodeEditSymbols/Package.swift.
+        .package(path: "Vendor/CodeEditSymbols"),
     ],
     targets: [
         // Shared IPC contract: socket path + the message both ends encode/decode.
@@ -19,7 +26,12 @@ let package = Package(
         // The app.
         .executableTarget(
             name: "Atelier",
-            dependencies: ["SwiftTerm", "AtelierIPC"],
+            dependencies: [
+                "SwiftTerm",
+                "AtelierIPC",
+                .product(name: "CodeEditSourceEditor", package: "CodeEditSourceEditor"),
+                .product(name: "CodeEditLanguages", package: "CodeEditLanguages"),
+            ],
             path: "Sources/Atelier",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),

@@ -319,7 +319,39 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         session.promote(to: root)
     }
 
+    /// `⌘W`. A dirty editor buffer gets the informative refusal first (§5):
+    /// the file is named, the loss is stated, saving is one button away.
     func closeActiveSession() {
+        guard let session = activeSession, let window else { return }
+        guard session.editorPane.isDirty, let path = session.editorPane.filePath else {
+            forceCloseActiveSession()
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "\((path as NSString).lastPathComponent) has unsaved changes"
+        alert.informativeText = "Closing this session will discard them."
+        alert.addButton(withTitle: "Save and Close")
+        alert.addButton(withTitle: "Discard")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self else { return }
+            switch response {
+            case .alertFirstButtonReturn:
+                do {
+                    try session.editorPane.save()
+                    self.forceCloseActiveSession()
+                } catch {
+                    self.presentError(title: "Couldn't save \((path as NSString).lastPathComponent)", error: error)
+                }
+            case .alertSecondButtonReturn:
+                self.forceCloseActiveSession()
+            default:
+                break
+            }
+        }
+    }
+
+    private func forceCloseActiveSession() {
         guard sessions.indices.contains(activeIndex) else { return }
         let session = sessions.remove(at: activeIndex)
         // Only promoted sessions are worth resurrecting — a Landing is just a
@@ -368,6 +400,49 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     }
 
     var canReopenClosedSession: Bool { !recentlyClosed.isEmpty }
+
+    // MARK: Editor (M2.1)
+
+    var canUseEditor: Bool { activeSession?.state == .ide }
+    var editorHasFile: Bool { activeSession?.editorPane.filePath != nil }
+
+    /// `⌘O` — open a file into the editor pane. The panel roots at the
+    /// session's cwd; Split mode flips back to the Triptych so the buffer is
+    /// actually on screen. (`⌘P`'s summon picker replaces this as the fast
+    /// path in M2.2; the panel stays as the native fallback.)
+    func openFileInEditor() {
+        guard let session = activeSession, session.state == .ide, let window else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.directoryURL = URL(fileURLWithPath: session.cwd)
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .OK, let url = panel.url else { return }
+            self.openInEditor(url: url, session: session)
+        }
+    }
+
+    private func openInEditor(url: URL, session: Session) {
+        do {
+            try session.editorPane.open(path: url.path)
+            if session === activeSession {
+                if session.layoutMode == .split { toggleLayout() }
+                window?.makeFirstResponder(session.editorPane.focusView)
+            }
+        } catch {
+            presentError(title: "Couldn't open \(url.lastPathComponent)", error: error)
+        }
+    }
+
+    /// `⌘S` — write the buffer back to its file.
+    func saveEditor() {
+        guard let session = activeSession, session.editorPane.filePath != nil else { return }
+        do {
+            try session.editorPane.save()
+        } catch {
+            presentError(title: "Couldn't save", error: error)
+        }
+    }
 
     func selectNext() { guard !sessions.isEmpty else { return }; showSession(at: (activeIndex + 1) % sessions.count) }
     func selectPrev() { guard !sessions.isEmpty else { return }; showSession(at: (activeIndex - 1 + sessions.count) % sessions.count) }
@@ -880,6 +955,14 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         }
 
         if activeSession?.state == .ide {
+            commands.append(PaletteCommand(id: "editor.open", title: "Editor: Open File…", key: "⌘O") { [weak self] in
+                self?.openFileInEditor()
+            })
+            if editorHasFile {
+                commands.append(PaletteCommand(id: "editor.save", title: "Editor: Save", key: "⌘S") { [weak self] in
+                    self?.saveEditor()
+                })
+            }
             commands.append(PaletteCommand(id: "view.layout", title: "View: Toggle Layout", key: "⌘\\") { [weak self] in
                 self?.toggleLayout()
             })

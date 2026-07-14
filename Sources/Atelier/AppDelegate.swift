@@ -260,6 +260,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func openIDEHere(_ sender: Any?) { keyController?.promoteActiveSessionHere() }
     @objc func closeSession(_ sender: Any?) { keyController?.closeActiveSession() }
     @objc func reopenSession(_ sender: Any?) { keyController?.reopenClosedSession() }
+
+    @objc func openFile(_ sender: Any?) { keyController?.openFileInEditor() }
+    @objc func saveFile(_ sender: Any?) { keyController?.saveEditor() }
     @objc func nextSession(_ sender: Any?) { keyController?.selectNext() }
     @objc func prevSession(_ sender: Any?) { keyController?.selectPrev() }
 
@@ -275,6 +278,12 @@ extension AppDelegate: NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(reopenSession(_:)) {
             return keyController?.canReopenClosedSession ?? false
+        }
+        if menuItem.action == #selector(openFile(_:)) {
+            return keyController?.canUseEditor ?? false
+        }
+        if menuItem.action == #selector(saveFile(_:)) {
+            return keyController?.editorHasFile ?? false
         }
         return true
     }

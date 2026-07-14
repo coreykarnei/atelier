@@ -150,6 +150,28 @@ enum Theme {
     /// §1.2 contrast discipline: terminal *content* runs at full `text`
     /// contrast; chrome never exceeds subtext0 except the attention accents.
     /// Nothing in the app is ever pure white.
+    /// The M2 editor's syntax palette — Catppuccin Mocha's canonical code
+    /// mapping, aligned with the ANSI palette the terminals already speak.
+    /// One shared Mocha definition across editor, terminals, chrome
+    /// (TECHNICAL_PLAN §2.9).
+    enum Editor {
+        static let text = nsColor(0xCDD6F4)        // text
+        static let cursor = nsColor(0xF5E0DC)      // rosewater — same as terminals
+        static let invisibles = nsColor(0x45475A)  // surface1
+        static let keyword = nsColor(0xCBA6F7)     // mauve
+        static let function = nsColor(0x89B4FA)    // blue
+        static let type = nsColor(0xF9E2AF)        // yellow
+        static let attribute = nsColor(0xFAB387)   // peach
+        static let constant = nsColor(0xFAB387)    // peach
+        static let number = nsColor(0xFAB387)      // peach
+        static let string = nsColor(0xA6E3A1)      // green
+        static let character = nsColor(0x94E2D5)   // teal
+        static let command = nsColor(0x89DCEB)     // sky
+        static let comment = nsColor(0x6C7086)     // overlay0
+        static let selection = nsColor(0x585B70).withAlphaComponent(0.5)     // surface2
+        static let lineHighlight = nsColor(0x313244).withAlphaComponent(0.5) // surface0
+    }
+
     static let chromeText = nsColor(0xA6ADC8)      // subtext0 — the §1.2 cap
     static let chromeMutedText = nsColor(0x6C7086) // overlay0
     static let accentBlue = nsColor(0x89B4FA)      // blue

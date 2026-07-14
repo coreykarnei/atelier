@@ -50,7 +50,7 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// previous Claude conversation instead of starting a fresh one.
     private let isRestored: Bool
 
-    let editorPane = EditorPlaceholderView(frame: .zero)
+    let editorPane = EditorPane(frame: .zero)
     let shellPane = TerminalPane()
     let agentPane = TerminalPane(deguttersCopy: true)
     private var landingView: LandingView?
@@ -149,6 +149,12 @@ final class Session: NSObject, NSSplitViewDelegate {
             landingView = landing
         }
         rebuildLayout()
+
+        // The open file rides persistence (M2.1): reopen it if it's still there.
+        if state == .ide, let file = restored.openFile,
+           FileManager.default.fileExists(atPath: file) {
+            try? editorPane.open(path: file)
+        }
     }
 
     /// Snapshot for the session store.
@@ -160,7 +166,8 @@ final class Session: NSObject, NSSplitViewDelegate {
             title: title,
             customTitle: customTitle,
             claudeSessionId: claudeSessionId,
-            dividers: dividers.mapValues { Double($0) }
+            dividers: dividers.mapValues { Double($0) },
+            openFile: editorPane.filePath
         )
     }
 

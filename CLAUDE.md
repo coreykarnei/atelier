@@ -60,7 +60,14 @@ state), and inline tab rename (double-click edits the title in place — ↩
 commits a hard override of the live Claude title, Esc cancels, empty reverts;
 titles uncapped).
 
-Not yet built: the code editor (and `⌘P`/`⌘⇧F`) — a placeholder until Milestone 2.
+Milestone 2 (in progress): **M2.1 landed 2026-07-13** — the editor pane hosts a
+real buffer (CodeEditSourceEditor / TextKit 2, incremental tree-sitter
+highlighting, `Theme.Editor` Mocha syntax palette, background `base` at
+fieldAlpha). `⌘O` open / `⌘S` save / dirty-close guard / per-session open-file
+persistence. Note: `Vendor/CodeEditSymbols` is a committed local override of an
+upstream transitive dep whose manifest only builds under Xcode — see the M2.1
+devlog. Not yet built: `⌘P` fuzzy picker (M2.2, on the summon idiom), `⌘⇧F`
+repo search (M2.3), multi-cursor polish (M2.4), LSP (M2.5).
 
 ## Commands
 

@@ -24,6 +24,14 @@ if [[ -f "$ROOT/Resources/AppIcon.icns" ]]; then
   cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 fi
 
+# SwiftPM resource bundles (tree-sitter highlight queries, editor assets…).
+# Inside an .app, Bundle.module resolves against Contents/Resources — without
+# these the editor's highlighter would crash at first use.
+for bundle in "$BIN_DIR"/*.bundle; do
+  [[ -d "$bundle" ]] || continue
+  cp -R "$bundle" "$APP/Contents/Resources/"
+done
+
 # Ship the hook helper inside the bundle so Claude Code hooks reference one stable
 # path (Contents/MacOS/atelier-notify) regardless of where the .app lives.
 if [[ -x "$BIN_DIR/atelier-notify" ]]; then

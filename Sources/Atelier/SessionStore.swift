@@ -11,6 +11,8 @@ struct PersistedSession: Codable {
     var customTitle: String?
     var claudeSessionId: String
     var dividers: [String: Double]
+    /// Editor buffer path (M2.1). Optional so pre-M2 snapshots still decode.
+    var openFile: String?
 }
 
 struct PersistedWindow: Codable {

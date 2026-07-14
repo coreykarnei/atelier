@@ -23,12 +23,26 @@ enum Menu {
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Atelier", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
+        // File menu (M2.1): the editor's open/save. Routed to AppDelegate →
+        // key window; items disable outside an IDE session.
+        let fileItem = NSMenuItem()
+        main.addItem(fileItem)
+        let fileMenu = NSMenu(title: "File")
+        fileItem.submenu = fileMenu
+        fileMenu.addItem(withTitle: "Open…", action: #selector(AppDelegate.openFile(_:)), keyEquivalent: "o")
+        fileMenu.addItem(withTitle: "Save", action: #selector(AppDelegate.saveFile(_:)), keyEquivalent: "s")
+
         // Edit menu — this is the load-bearing one. nil targets route through the
         // responder chain to the focused terminal/editor view.
         let editItem = NSMenuItem()
         main.addItem(editItem)
         let editMenu = NSMenu(title: "Edit")
         editItem.submenu = editMenu
+        // Undo/Redo reach the editor's CEUndoManager via the responder chain
+        // (NSWindow asks the first responder for its undoManager).
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(chord("Redo", Selector(("redo:")), "z", [.command, .shift]))
+        editMenu.addItem(.separator())
         editMenu.addItem(withTitle: "Cut", action: Selector(("cut:")), keyEquivalent: "x")
         editMenu.addItem(withTitle: "Copy", action: Selector(("copy:")), keyEquivalent: "c")
         editMenu.addItem(withTitle: "Paste", action: Selector(("paste:")), keyEquivalent: "v")
