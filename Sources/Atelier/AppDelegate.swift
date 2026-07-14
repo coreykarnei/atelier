@@ -240,6 +240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Quitting: remote work stays alive on its hosts (reattach on relaunch).
         for controller in controllers { controller.terminateAllSessions(killRemote: false) }
         LSPRegistry.terminateAll()
+        RemoteLink.terminateAll()
         notificationServer.stop()
     }
 

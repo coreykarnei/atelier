@@ -32,6 +32,12 @@ for bundle in "$BIN_DIR"/*.bundle; do
   cp -R "$bundle" "$APP/Contents/Resources/"
 done
 
+# Remote-host provisioning payloads (remote sessions phase 3): the notify
+# sender + provisioning script RemoteLink ships to a host over ssh.
+if [[ -d "$ROOT/Resources/remote" ]]; then
+  cp -R "$ROOT/Resources/remote" "$APP/Contents/Resources/remote"
+fi
+
 # Ship the hook helper inside the bundle so Claude Code hooks reference one stable
 # path (Contents/MacOS/atelier-notify) regardless of where the .app lives.
 if [[ -x "$BIN_DIR/atelier-notify" ]]; then

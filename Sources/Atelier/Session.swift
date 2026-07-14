@@ -307,6 +307,7 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// argv is respawned verbatim on link death — `tmux new -A` turns every
     /// respawn into a reattach.
     private func startRemotePane(_ pane: TerminalPane, host: String, suffix: String, command: String?) {
+        RemoteLink.link(for: host).activate()
         let argv = RemoteCommand.paneArgv(
             host: host,
             tmuxSession: RemoteCommand.tmuxSessionName(claudeSessionId: claudeSessionId, pane: suffix),
@@ -338,6 +339,8 @@ final class Session: NSObject, NSSplitViewDelegate {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak pane] in
             guard let self, let pane, !self.intentionalTeardown else { return }
+            // The notify forward likely died with the same network event.
+            RemoteLink.link(for: host).activate()
             pane.start(executable: RemoteCommand.sshPath, args: argv, cwd: nil)
         }
     }
