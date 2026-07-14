@@ -153,6 +153,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         // The open file rides persistence (M2.1): reopen it if it's still there.
         if state == .ide, let file = restored.openFile,
            FileManager.default.fileExists(atPath: file) {
+            editorPane.lspRoot = cwd
             try? editorPane.open(path: file)
         }
     }

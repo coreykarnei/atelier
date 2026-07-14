@@ -1,5 +1,6 @@
 import AppKit
 import CodeEditSourceEditor
+import CodeEditTextView
 import CodeEditLanguages
 
 /// The editor pane (Milestone 2.1 — TECHNICAL_PLAN §3.3). Hosts
@@ -27,6 +28,17 @@ final class EditorPane: NSView, WorkspacePane {
     private var controller: TextViewController?
     private let changeCoordinator = ChangeCoordinator()
     private let emptyLabel = NSTextField(labelWithString: "")
+
+    /// The repo root whose language server this buffer reports to (M2.5).
+    /// Set by the session before any open; Swift files get didOpen/didChange/
+    /// didSave and diagnostics underlines, other languages stay plain.
+    var lspRoot: String?
+    private var lspClient: LSPClient? {
+        guard let lspRoot, isSwiftBuffer else { return nil }
+        return LSPRegistry.client(for: lspRoot)
+    }
+    private var isSwiftBuffer = false
+    private var lspChangeDebounce: Timer?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -98,6 +110,13 @@ final class EditorPane: NSView, WorkspacePane {
         let text = try String(contentsOf: url, encoding: .utf8)
         let language = CodeLanguage.detectLanguageFrom(url: url)
 
+        // The previous buffer leaves the server's world before the new one
+        // enters it; its underlines go with it.
+        if let previous = filePath, previous != path {
+            lspClient?.didClose(path: previous)
+            clearDiagnostics()
+        }
+
         if let controller {
             controller.language = language
             controller.text = text
@@ -109,7 +128,7 @@ final class EditorPane: NSView, WorkspacePane {
                 cursorPositions: [CursorPosition(line: 1, column: 1)],
                 coordinators: [changeCoordinator]
             )
-            changeCoordinator.onTextChange = { [weak self] in self?.isDirty = true }
+            changeCoordinator.onTextChange = { [weak self] in self?.bufferChanged() }
             controller.view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(controller.view)
             NSLayoutConstraint.activate([
@@ -123,6 +142,29 @@ final class EditorPane: NSView, WorkspacePane {
         filePath = path
         isDirty = false // the coordinator saw the programmatic setText; undo it
         emptyLabel.isHidden = true
+
+        isSwiftBuffer = language == .swift
+        if let client = lspClient {
+            client.onDiagnostics = { [weak self] diagnosticsPath, diagnostics in
+                guard let self, diagnosticsPath == self.filePath else { return }
+                self.showDiagnostics(diagnostics)
+            }
+            client.didOpen(path: path, text: text)
+            client.requestDiagnostics(path: path)
+        }
+    }
+
+    /// Every edit: dirty for the host, debounced didChange for the server
+    /// (full-document sync — the buffer is small and the protocol allows it).
+    private func bufferChanged() {
+        isDirty = true
+        guard lspClient != nil else { return }
+        lspChangeDebounce?.invalidate()
+        lspChangeDebounce = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
+            guard let self, let path = self.filePath, let text = self.controller?.text else { return }
+            self.lspClient?.didChange(path: path, text: text)
+            self.lspClient?.requestDiagnostics(path: path)
+        }
     }
 
     /// Put the caret at `line:column` (1-indexed) and scroll it into view —
@@ -136,7 +178,66 @@ final class EditorPane: NSView, WorkspacePane {
         guard let controller, let filePath else { return }
         try controller.text.write(toFile: filePath, atomically: true, encoding: .utf8)
         isDirty = false
+        lspClient?.didSave(path: filePath)
     }
+
+    // MARK: LSP (M2.5 — definition + diagnostics, nothing else)
+
+    /// The caret, 1-based, for definition requests. Nil when no buffer.
+    var cursorPosition: (line: Int, column: Int)? {
+        guard let position = controller?.cursorPositions.first?.start,
+              position.line > 0, position.column > 0 else { return nil }
+        return (position.line, position.column)
+    }
+
+    /// What the server last published for this buffer (dev-only: lspProbe).
+    private(set) var lastDiagnostics: [LSPDiagnostic] = []
+
+    /// Diagnostics land as underlines: error red, warning peach, the rest
+    /// muted — colors the panes already speak. No gutter icons, no popovers;
+    /// the message itself waits for a later milestone.
+    private func showDiagnostics(_ diagnostics: [LSPDiagnostic]) {
+        lastDiagnostics = diagnostics
+        guard let controller, let emphasisManager = controller.textView.emphasisManager else { return }
+        emphasisManager.removeEmphases(for: Self.diagnosticsEmphasisID)
+        guard !diagnostics.isEmpty else { return }
+
+        // LSP ranges are 0-based line + UTF-16 column; map through the
+        // buffer's line starts. Entries that outrun the live text (stale
+        // publish racing an edit) are dropped, not clamped.
+        let text = controller.text as NSString
+        var lineStarts: [Int] = []
+        var index = 0
+        while index < text.length {
+            lineStarts.append(index)
+            index = NSMaxRange(text.lineRange(for: NSRange(location: index, length: 0)))
+        }
+        if lineStarts.isEmpty { lineStarts = [0] }
+
+        let emphases: [Emphasis] = diagnostics.compactMap { diagnostic in
+            guard diagnostic.startLine < lineStarts.count, diagnostic.endLine < lineStarts.count else { return nil }
+            let start = lineStarts[diagnostic.startLine] + diagnostic.startCharacter
+            let end = lineStarts[diagnostic.endLine] + diagnostic.endCharacter
+            guard start <= end, end <= text.length else { return nil }
+            // A zero-length range draws nothing; give point diagnostics a
+            // one-character underline so they exist.
+            let range = NSRange(location: start, length: max(1, end - start))
+            guard NSMaxRange(range) <= text.length else { return nil }
+            let color: NSColor = switch diagnostic.severity {
+            case .error: Theme.accentRed
+            case .warning: Theme.accentPeach
+            case .information, .hint: Theme.chromeMutedText
+            }
+            return Emphasis(range: range, style: .underline(color: color))
+        }
+        emphasisManager.addEmphases(emphases, for: Self.diagnosticsEmphasisID)
+    }
+
+    private func clearDiagnostics() {
+        controller?.textView.emphasisManager?.removeEmphases(for: Self.diagnosticsEmphasisID)
+    }
+
+    private static let diagnosticsEmphasisID = "lsp.diagnostics"
 
     // MARK: Configuration
 

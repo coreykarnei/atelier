@@ -204,24 +204,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// note the behind-window blur is composited by the WindowServer and won't
     /// appear — judge translucency live, use these for layout/type/color.
     private func handle(_ debug: DebugMessage) {
-        guard debug.debug == .snapshot else { return }
-        let dir = URL(fileURLWithPath: debug.path, isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        for (index, window) in NSApp.windows.enumerated() where window.isVisible {
-            guard let view = window.contentView,
-                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
-            view.cacheDisplay(in: view.bounds, to: rep)
-            guard let png = rep.representation(using: .png, properties: [:]) else { continue }
-            let name = "atelier-\(index)-\(window.title.isEmpty ? "untitled" : window.title).png"
-            try? png.write(to: dir.appendingPathComponent(name))
+        switch debug.debug {
+        case .snapshot:
+            let dir = URL(fileURLWithPath: debug.path, isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            for (index, window) in NSApp.windows.enumerated() where window.isVisible {
+                guard let view = window.contentView,
+                      let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+                view.cacheDisplay(in: view.bounds, to: rep)
+                guard let png = rep.representation(using: .png, properties: [:]) else { continue }
+                let name = "atelier-\(index)-\(window.title.isEmpty ? "untitled" : window.title).png"
+                try? png.write(to: dir.appendingPathComponent(name))
+            }
+            let state = controllers.map(\.debugWashState).joined(separator: "\n")
+            try? state.write(to: dir.appendingPathComponent("state.txt"), atomically: true, encoding: .utf8)
+            NSLog("Atelier: debug snapshot written to \(debug.path)")
+        case .lspProbe:
+            let path = debug.path
+            let controller = keyController ?? controllers.first
+            guard let controller else {
+                try? "lspProbe: no window controller".write(toFile: path, atomically: true, encoding: .utf8)
+                return
+            }
+            controller.lspProbe(line: debug.line ?? 1, column: debug.column ?? 1) { dump in
+                try? dump.write(toFile: path, atomically: true, encoding: .utf8)
+            }
         }
-        let state = controllers.map(\.debugWashState).joined(separator: "\n")
-        try? state.write(to: dir.appendingPathComponent("state.txt"), atomically: true, encoding: .utf8)
-        NSLog("Atelier: debug snapshot written to \(debug.path)")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         for controller in controllers { controller.terminateAllSessions() }
+        LSPRegistry.terminateAll()
         notificationServer.stop()
     }
 
@@ -306,6 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func saveFile(_ sender: Any?) { keyController?.saveEditor() }
     @objc func goToFile(_ sender: Any?) { keyController?.showFilePicker() }
     @objc func searchRepo(_ sender: Any?) { keyController?.showRepoSearch() }
+    @objc func goToDefinition(_ sender: Any?) { keyController?.goToDefinition() }
 
     // Content type scale: app-global by design — every terminal and editor
     // in every window observes the token, so the chords never need a target.
@@ -332,7 +346,7 @@ extension AppDelegate: NSMenuItemValidation {
             || menuItem.action == #selector(searchRepo(_:)) {
             return keyController?.canUseEditor ?? false
         }
-        if menuItem.action == #selector(saveFile(_:)) {
+        if menuItem.action == #selector(saveFile(_:)) || menuItem.action == #selector(goToDefinition(_:)) {
             return keyController?.editorHasFile ?? false
         }
         return true

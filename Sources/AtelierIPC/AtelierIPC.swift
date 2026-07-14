@@ -89,15 +89,21 @@ public struct CommandMessage: Codable {
 public struct DebugMessage: Codable {
     public enum Action: String, Codable {
         case snapshot // write a PNG per visible window into `path`
+        case lspProbe // run go-to-definition at line/column in the active editor; dump to `path`
     }
 
     public let debug: Action
-    /// Output directory for snapshots.
+    /// Output directory for snapshots / output file for probe dumps.
     public let path: String
+    /// lspProbe: 1-based caret to query.
+    public let line: Int?
+    public let column: Int?
 
-    public init(debug: Action, path: String) {
+    public init(debug: Action, path: String, line: Int? = nil, column: Int? = nil) {
         self.debug = debug
         self.path = path
+        self.line = line
+        self.column = column
     }
 }
 

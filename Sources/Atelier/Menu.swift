@@ -60,6 +60,9 @@ enum Menu {
         viewMenu.addItem(chord("Command Palette…", #selector(AppDelegate.showPalette(_:)), "p", [.command, .shift]))
         viewMenu.addItem(withTitle: "Go to File…", action: #selector(AppDelegate.goToFile(_:)), keyEquivalent: "p")
         viewMenu.addItem(chord("Find in Repo…", #selector(AppDelegate.searchRepo(_:)), "f", [.command, .shift]))
+        // F12 — the VSCode instinct (§2.6). Function keys carry no modifier.
+        viewMenu.addItem(chord("Go to Definition", #selector(AppDelegate.goToDefinition(_:)),
+                               String(UnicodeScalar(UInt16(NSF12FunctionKey))!), []))
         viewMenu.addItem(.separator())
 
         viewMenu.addItem(withTitle: "New Project Tab", action: #selector(AppDelegate.newProject(_:)), keyEquivalent: "t")

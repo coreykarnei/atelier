@@ -566,6 +566,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         ) { [weak self] in
             guard let self else { return }
             do {
+                session.editorPane.lspRoot = session.cwd
                 try session.editorPane.open(path: url.path)
                 if let cursor {
                     session.editorPane.reveal(line: cursor.line, column: cursor.column)
@@ -659,6 +660,54 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             try session.editorPane.save()
         } catch {
             presentError(title: "Couldn't save", error: error)
+        }
+    }
+
+    /// Dev-only (lspProbe debug): definition at a given 1-based position in
+    /// the active buffer plus the last published diagnostics, as text.
+    func lspProbe(line: Int, column: Int, completion: @escaping (String) -> Void) {
+        guard let session = activeSession, session.state == .ide,
+              let path = session.editorPane.filePath,
+              let client = LSPRegistry.client(for: session.cwd) else {
+            completion("lspProbe: no active editor buffer or no language server")
+            return
+        }
+        let diagnostics = session.editorPane.lastDiagnostics
+        client.definition(path: path, line: line - 1, character: column - 1) { targets in
+            var dump = "definition @\(line):\(column) in \(path):\n"
+            dump += targets.isEmpty
+                ? "  (no result)\n"
+                : targets.map { "  \($0.path):\($0.line):\($0.column)" }.joined(separator: "\n") + "\n"
+            dump += "diagnostics (\(diagnostics.count)):\n"
+            dump += diagnostics.prefix(10).map {
+                "  \($0.startLine + 1):\($0.startCharacter + 1) [\($0.severity)] \($0.message)"
+            }.joined(separator: "\n")
+            completion(dump)
+        }
+    }
+
+    /// F12 — go to definition at the caret (M2.5). Same-file jumps reveal in
+    /// place; cross-file jumps ride the ⌘P open path (dirty guard included).
+    /// No result is a quiet no-op: the server may still be indexing, and a
+    /// missing definition isn't an error worth a dialog.
+    func goToDefinition() {
+        guard let session = activeSession, session.state == .ide,
+              let path = session.editorPane.filePath,
+              let cursor = session.editorPane.cursorPosition,
+              let client = LSPRegistry.client(for: session.cwd)
+        else { return }
+        client.definition(path: path, line: cursor.line - 1, character: cursor.column - 1) { [weak self] targets in
+            guard let self, let target = targets.first else { return }
+            if target.path == path {
+                session.editorPane.reveal(line: target.line, column: target.column)
+                self.window?.makeFirstResponder(session.editorPane.focusView)
+            } else {
+                self.openInEditor(
+                    url: URL(fileURLWithPath: target.path),
+                    session: session,
+                    cursor: (target.line, target.column)
+                )
+            }
         }
     }
 
@@ -1197,6 +1246,11 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             }
             commands.append(PaletteCommand(id: "view.layout", title: "View: Toggle Layout", key: "⌘\\") { [weak self] in
                 self?.toggleLayout()
+            })
+        }
+        if editorHasFile {
+            commands.append(PaletteCommand(id: "editor.definition", title: "Editor: Go to Definition", key: "F12") { [weak self] in
+                self?.goToDefinition()
             })
         }
         commands.append(PaletteCommand(id: "view.text.bigger", title: "View: Bigger Text", key: "⌘+") {

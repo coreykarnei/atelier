@@ -72,7 +72,21 @@ offer with per-repo recents leading, dirty-buffer guard unified across
 close/open. **M2.3 landed same day** — `⌘⇧F` Find in Repo: `RepoSearchOverlay`,
 the first externally-filtered summon (debounced rg / `git grep -F` fallback,
 capped with an honest tail row, `↩` opens the hit at line:column via
-`EditorPane.reveal`). Not yet built: multi-cursor polish (M2.4), LSP (M2.5).
+`EditorPane.reveal`). **M2.5 landed 2026-07-14** — the LSP client
+(`LSP.swift`: JSON-RPC/stdio to sourcekit-lsp, one per repo root; Swift
+buffers only): F12 go-to-definition (same-file reveals, cross-file rides the
+⌘P open path) and diagnostics as EmphasisManager underlines (pulled via LSP
+3.17 `textDocument/diagnostic` — sourcekit-lsp doesn't push). M2.4
+(multi-cursor/find-panel polish) is library-native and awaits an owner
+feel-check.
+
+Also landed 2026-07-14: the **transparency pipeline** (the owner-reported
+opaque-window bug was compositing arithmetic — see
+`docs/devlog/2026-07-14-transparency-pipeline.md`; WindowServer blur via CGS
+in `WindowBlur.swift`, fieldAlpha 0.75 = Ghostty parity, terminals paint the
+wash exactly once) and the **content type scale** (`Theme.TypeScale`,
+⌘+/⌘−/⌘0, terminals + editor across all windows, JetBrains Mono at Ghostty's
+14pt default; chrome never scales).
 
 ## Commands
 
