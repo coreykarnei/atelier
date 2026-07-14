@@ -75,7 +75,7 @@ is **promoted** into an IDE session:
 - **`⌘T` opens a Landing tab:** a compact recents list (recent roots + git repos
   in the default folder) over a plain terminal. No editor, no Claude — a Landing
   *is* the "just a terminal" tab, useful as-is forever; promotion is optional.
-- **Two promote paths, same result:** pick a recent (`↩` / double-click), or
+- **Two promote paths, same result:** pick a recent (`↩` / single click), or
   `cd` anywhere in the landing terminal and hit **`⌘↩` ("Open IDE Here")** — the
   session transforms *in place* into the Triptych rooted there: the shell
   re-roots (send-keys `cd`, the `ide` script's own move), Claude spawns with the
@@ -85,8 +85,12 @@ is **promoted** into an IDE session:
   surface.
 - **Promotion is one-way.** To go elsewhere, open a new Landing (`⌘T` is two
   keys). App/project-window open with no restored session lands on a Landing.
-- The landing terminal is **focused by default** (terminal-first); the list is
-  one `⌃⌘k` away.
+- The landing is **opener-first** (revised 2026-07-13, owner; originally
+  terminal-first): `⌘T` puts the cursor in a filter field over recents + repos
+  — the first keystroke lands, `↩` opens the top match. This is the shared
+  *summon idiom* (field + fuzzy filter + sliding highlight, `Summon.swift`),
+  the same surface the command palette and the M2 `⌘P` picker use. The shell
+  is one `⌃⌘j` away and the hint line says so.
 - **Closing everything kicks back to the Launch view, never out of the app**
   (refinement pass): closing the last session tab un-anchors the window into a
   fresh Landing; closing the last project window opens a fresh Landing window.

@@ -379,6 +379,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             session.container.leadingAnchor.constraint(equalTo: sessionArea.leadingAnchor),
             session.container.trailingAnchor.constraint(equalTo: sessionArea.trailingAnchor),
         ])
+        session.refreshLanding()
         window?.makeFirstResponder(session.defaultFocusView)
         refreshWindowTitle()
         updateBottomBar()
@@ -608,6 +609,25 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
 
     private var fanOverlay: WorktreeFanOverlay?
 
+    /// Whatever had focus when an overlay stole it. Dismissal puts it back —
+    /// falling to the session default only if that view has left the window.
+    /// (On a landing the default is now the filter field, which must not
+    /// swallow keystrokes meant for the shell the user was just in.)
+    private weak var preOverlayFocus: NSView?
+
+    private func captureFocusForOverlay() {
+        preOverlayFocus = window?.firstResponder as? NSView
+    }
+
+    private func restorePreOverlayFocus() {
+        if let view = preOverlayFocus, view.window === window {
+            window?.makeFirstResponder(view)
+        } else {
+            window?.makeFirstResponder(activeSession?.defaultFocusView)
+        }
+        preOverlayFocus = nil
+    }
+
     func showWorktreeFan(from anchor: NSView? = nil, prefill: String? = nil) {
         guard fanOverlay == nil else { return }
         guard let session = activeSession, let container = window?.contentView,
@@ -656,6 +676,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         container.layoutSubtreeIfNeeded()
         overlay.present(abovePillFrame: anchor.convert(anchor.bounds, to: container))
         fanOverlay = overlay
+        captureFocusForOverlay()
         window?.makeFirstResponder(overlay.focusField)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak fan] in
@@ -669,7 +690,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     private func dismissFan() {
         fanOverlay?.removeFromSuperview()
         fanOverlay = nil
-        window?.makeFirstResponder(activeSession?.defaultFocusView)
+        restorePreOverlayFocus()
     }
 
     /// Return-to: focus the worktree's session if one is open, else open one.
@@ -797,6 +818,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             overlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
         palette = overlay
+        captureFocusForOverlay()
         window?.makeFirstResponder(overlay.focusField)
         overlay.animateIn()
     }
@@ -804,7 +826,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     private func dismissPalette() {
         palette?.removeFromSuperview()
         palette = nil
-        window?.makeFirstResponder(activeSession?.defaultFocusView)
+        restorePreOverlayFocus()
     }
 
     /// The fixed command set (§8), plus dynamic switch targets. Category-prefixed

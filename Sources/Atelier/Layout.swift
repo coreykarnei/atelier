@@ -37,8 +37,10 @@ enum LayoutSlots {
     /// Split mode: agent height vs. shell (horizontal divider). Agent takes the
     /// larger share — in this mode you're driving the agent, the shell is a sidecar.
     static let splitVertical = LayoutSlot(id: "split.vertical", defaultFraction: 0.75, minFirst: 160, minSecond: 80)
-    /// Landing: recents list height vs. terminal (horizontal divider).
-    static let landingVertical = LayoutSlot(id: "landing.vertical", defaultFraction: 0.32, minFirst: 110, minSecond: 120)
+    /// Landing: opener height vs. terminal (horizontal divider). The opener
+    /// holds the centered summon card, so it takes the room (owner revision
+    /// 2026-07-13: terminal is the bottom third).
+    static let landingVertical = LayoutSlot(id: "landing.vertical", defaultFraction: 0.67, minFirst: 160, minSecond: 120)
 }
 
 /// An `NSSplitView` that knows which slot governs its divider, so the owning session

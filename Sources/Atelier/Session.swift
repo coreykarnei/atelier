@@ -240,10 +240,21 @@ final class Session: NSObject, NSSplitViewDelegate {
 
     // MARK: Focus
 
-    /// The pane that should receive focus when this session is shown. A Landing is
-    /// terminal-first: ⌘T gives a usable shell immediately; the list is one ⌃⌘k away.
+    /// The pane that should receive focus when this session is shown. A Landing
+    /// is opener-first (owner revision 2026-07-13, reversing M1's terminal-first):
+    /// ⌘T means "open a project," so the first keystroke lands in the filter
+    /// field; the shell below is one ⌃⌘j away.
     var defaultFocusView: NSView {
-        state == .ide ? agentPane.terminal : shellPane.terminal
+        switch state {
+        case .landing: return landingView?.focusView ?? shellPane.terminal
+        case .ide: return agentPane.terminal
+        }
+    }
+
+    /// Re-scan the Landing's offer (recents/repos). Cheap; called whenever the
+    /// tab is shown so the list is never stale.
+    func refreshLanding() {
+        landingView?.refresh()
     }
 
     /// Panes currently on screen, in reading order — editor is absent in Split,

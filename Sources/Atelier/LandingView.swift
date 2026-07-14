@@ -15,6 +15,16 @@ enum RecentsStore {
         list.insert(path, at: 0)
         UserDefaults.standard.set(Array(list.prefix(12)), forKey: key)
     }
+
+    /// Drop entries whose directories no longer exist — a recent that can't be
+    /// opened is a promise the list shouldn't keep making.
+    static func prune() {
+        let list = all()
+        let existing = list.filter { FileManager.default.fileExists(atPath: $0) }
+        if existing.count != list.count {
+            UserDefaults.standard.set(existing, forKey: key)
+        }
+    }
 }
 
 struct LandingEntry {
@@ -23,25 +33,137 @@ struct LandingEntry {
     let isRecent: Bool
 }
 
-/// The landing pane (MILESTONE_1 §2: a session starts as a Landing and is promoted
-/// into an IDE session). Shows recent projects plus the repos in the default folder;
-/// Enter / double-click promotes the session to the chosen root. The terminal below
-/// it is the session's own shell pane — a Landing *is* the "just a terminal" tab.
-final class LandingView: NSView, WorkspacePane, NSTableViewDataSource, NSTableViewDelegate {
+/// The landing pane (MILESTONE_1 §2.1). Rebuilt on the summon idiom
+/// (interaction pass, 2026-07-13): `⌘T` puts the cursor in a filter field over
+/// recents + repos — the first keystroke lands, `↩` opens the top match, a
+/// single click opens a row, and the offer refreshes every time the landing is
+/// shown so it never lists a repo that's gone or misses one that's new.
+///
+/// The summon lives on a centered raised card in the upper-middle of the pane
+/// (owner direction 2026-07-13) — the Raycast posture: the card hugs its
+/// results, the chord hints sit quietly beneath it, and the terminal keeps the
+/// bottom third. The card fills `base` so the surface0 highlight reads against
+/// it, per the elevation ramp.
+final class LandingView: NSView, WorkspacePane {
     /// Called with the chosen project root.
     var onOpen: ((String) -> Void)?
 
-    var focusView: NSView { table }
+    var focusView: NSView { summon.focusField }
 
-    private let table = LandingTableView()
+    private let summon: SummonList
+    private let cardHost = NSView()
+    private let card = NSView()
+    private var listHeight: NSLayoutConstraint?
+    private let defaultFolder: String
     private var entries: [LandingEntry] = []
+    private var emptyHint: NSTextField?
+    private let hintLabel = NSTextField(labelWithString: "")
+
+    /// The card never grows past this many points of list — exactly 12 rows,
+    /// so the cap never cuts a row mid-height at the card's edge.
+    private static let maxListHeight: CGFloat = 12 * 24
 
     init(defaultFolder: String) {
+        self.defaultFolder = defaultFolder
+        self.summon = SummonList(style: .init(
+            placeholder: "Open a project…",
+            // The query is a repo name — terminal-pasteable, so mono (§1.4);
+            // the placeholder is Atelier speaking, so it stays ui.
+            fieldFont: Theme.Typography.mono(Theme.Typography.body),
+            placeholderFont: Theme.Typography.ui(Theme.Typography.body),
+            rowHeight: 24,
+            // Rows align with the field's text axis above them.
+            rowInset: 14,
+            noMatchText: "No matching projects",
+            escClearsQueryFirst: true
+        ))
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = Theme.Elevation.mantle.cgColor
-        entries = Self.entries(defaultFolder: defaultFolder)
-        build()
+
+        cardHost.wantsLayer = true
+        cardHost.shadow = Theme.Elevation.raisedShadow
+        cardHost.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(cardHost)
+
+        card.wantsLayer = true
+        card.layer?.backgroundColor = Theme.Elevation.base.cgColor
+        card.layer?.cornerRadius = Theme.Elevation.radiusLarge
+        card.layer?.masksToBounds = true
+        card.translatesAutoresizingMaskIntoConstraints = false
+        cardHost.addSubview(card)
+
+        // Light from above: the raised card's 1 px top hairline.
+        let topHairline = NSBox()
+        topHairline.boxType = .custom
+        topHairline.fillColor = Theme.Elevation.hairline
+        topHairline.borderWidth = 0
+        topHairline.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(topHairline)
+
+        summon.translatesAutoresizingMaskIntoConstraints = false
+        summon.onActivate = { [weak self] item in self?.open(path: item.id) }
+        summon.onContentChange = { [weak self] in self?.trackContentHeight() }
+        card.addSubview(summon)
+
+        // Two-voice hint (§1.4): chords and the `ide` command are mono, the
+        // prose around them is Atelier speaking.
+        let hint = NSMutableAttributedString()
+        func prose(_ s: String) { hint.append(NSAttributedString(string: s, attributes: [
+            .font: Theme.Typography.ui(Theme.Typography.small),
+            .foregroundColor: Theme.chromeMutedText,
+        ])) }
+        func chord(_ s: String) { hint.append(NSAttributedString(string: s, attributes: [
+            .font: Theme.Typography.mono(Theme.Typography.small),
+            .foregroundColor: Theme.chromeText,
+        ])) }
+        chord("↩"); prose(" open · "); chord("⌘↩"); prose(" "); chord("ide")
+        prose(" in terminal dir · "); chord("⌃⌘j"); prose(" shell")
+        hintLabel.attributedStringValue = hint
+        hintLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hintLabel)
+
+        // The field sits at ~26% of the pane height — the Spotlight posture:
+        // the field holds still while the list grows downward beneath it.
+        let topSpace = NSLayoutGuide()
+        addLayoutGuide(topSpace)
+
+        let bottomGuard = cardHost.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -16)
+        NSLayoutConstraint.activate([
+            topSpace.topAnchor.constraint(equalTo: topAnchor),
+            topSpace.heightAnchor.constraint(equalTo: heightAnchor, multiplier: 0.26),
+
+            cardHost.topAnchor.constraint(equalTo: topSpace.bottomAnchor),
+            cardHost.centerXAnchor.constraint(equalTo: centerXAnchor),
+            cardHost.widthAnchor.constraint(equalToConstant: 560),
+            bottomGuard,
+
+            card.topAnchor.constraint(equalTo: cardHost.topAnchor),
+            card.leadingAnchor.constraint(equalTo: cardHost.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: cardHost.trailingAnchor),
+            card.bottomAnchor.constraint(equalTo: cardHost.bottomAnchor),
+
+            topHairline.topAnchor.constraint(equalTo: card.topAnchor),
+            topHairline.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            topHairline.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            topHairline.heightAnchor.constraint(equalToConstant: 1),
+
+            summon.topAnchor.constraint(equalTo: card.topAnchor),
+            summon.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            summon.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            summon.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+
+            hintLabel.topAnchor.constraint(equalTo: cardHost.bottomAnchor, constant: 10),
+            hintLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+        ])
+        // When the pane runs short, the list compresses before the card can
+        // cross the divider.
+        let height = summon.makeListHeightConstraint(constant: 0)
+        height.priority = NSLayoutConstraint.Priority(999)
+        height.isActive = true
+        listHeight = height
+
+        refresh()
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
             selector: #selector(accessibilityDisplayChanged),
@@ -55,87 +177,76 @@ final class LandingView: NSView, WorkspacePane, NSTableViewDataSource, NSTableVi
 
     deinit {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        NotificationCenter.default.removeObserver(self)
     }
 
     override func updateLayer() {
         layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+        card.layer?.backgroundColor = Theme.Elevation.base.cgColor
     }
 
     @objc private func accessibilityDisplayChanged() {
         layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+        card.layer?.backgroundColor = Theme.Elevation.base.cgColor
     }
 
-    private func build() {
-        let header = NSTextField(labelWithString: "Open a project")
-        header.font = Theme.Typography.ui(Theme.Typography.small, weight: .semibold)
-        header.textColor = Theme.chromeMutedText
-        header.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(header)
-
-        let hint = NSTextField(labelWithString: "↩ open · ⌘↩ ide in terminal dir")
-        hint.font = Theme.Typography.ui(Theme.Typography.small)
-        hint.textColor = Theme.chromeMutedText
-        hint.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(hint)
-
-        table.dataSource = self
-        table.delegate = self
-        table.headerView = nil
-        table.rowHeight = 24
-        table.backgroundColor = .clear
-        table.style = .plain
-        table.allowsEmptySelection = false
-        table.doubleAction = #selector(rowDoubleClicked)
-        table.target = self
-        table.onReturn = { [weak self] in self?.openSelected() }
-        let column = NSTableColumn(identifier: .init("entry"))
-        column.resizingMask = .autoresizingMask
-        table.addTableColumn(column)
-
-        let scroll = NSScrollView()
-        scroll.documentView = table
-        scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(scroll)
-
-        NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: topAnchor, constant: 10),
-            header.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            hint.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            hint.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8),
-            scroll.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
-            scroll.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-            scroll.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
-        ])
-
-        if entries.isEmpty {
-            // First-launch empty state (§5): one designed two-voice line, not
-            // a blank list. Atelier speaks SF Pro; `cd` and the chord are mono.
-            let line = NSMutableAttributedString()
-            func ui(_ s: String) { line.append(NSAttributedString(string: s, attributes: [
-                .font: Theme.Typography.ui(Theme.Typography.body),
-                .foregroundColor: Theme.chromeMutedText,
-            ])) }
-            func mono(_ s: String) { line.append(NSAttributedString(string: s, attributes: [
-                .font: Theme.Typography.mono(Theme.Typography.body),
-                .foregroundColor: Theme.chromeText,
-            ])) }
-            ui("Nothing yet — ")
-            mono("cd")
-            ui(" into a repo and ")
-            mono("⌘↩")
-            let hint = NSTextField(labelWithAttributedString: line)
-            hint.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(hint)
-            NSLayoutConstraint.activate([
-                hint.centerXAnchor.constraint(equalTo: centerXAnchor),
-                hint.centerYAnchor.constraint(equalTo: centerYAnchor),
-            ])
+    /// The card hugs its results (the palette's §6 height-tracking, embedded):
+    /// grows as matches appear, shrinks as the query narrows, one-line floor
+    /// for the no-match state.
+    private func trackContentHeight() {
+        guard let listHeight else { return }
+        let newHeight = min(summon.contentHeight, Self.maxListHeight)
+        guard listHeight.constant != newHeight else { return }
+        if window == nil || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            listHeight.constant = newHeight
         } else {
-            table.selectRowIndexes([0], byExtendingSelection: false)
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.15
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                ctx.allowsImplicitAnimation = true
+                listHeight.animator().constant = newHeight
+                self.layoutSubtreeIfNeeded()
+            }
         }
+    }
+
+    /// Stale offers are lies: re-scan whenever the landing (re)joins a window
+    /// or its window comes back to key — a repo cloned in another app appears,
+    /// a recent promoted elsewhere reorders, a deleted directory drops out.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: nil)
+        guard let window else { return }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowBecameKey),
+            name: NSWindow.didBecomeKeyNotification,
+            object: window
+        )
+        refresh()
+    }
+
+    @objc private func windowBecameKey() { refresh() }
+
+    /// Re-scan recents + repos and re-offer them; the live query survives.
+    func refresh() {
+        RecentsStore.prune()
+        entries = Self.entries(defaultFolder: defaultFolder)
+        summon.setItems(entries.map { entry in
+            SummonItem(id: entry.path, text: Self.rowText(for: entry), matchText: entry.name.lowercased(), chord: nil)
+        })
+        updateEmptyHint()
+    }
+
+    private func open(path: String) {
+        // The offer can rot between the scan and the click; re-check the truth
+        // at decision time and quietly re-scan instead of opening a dead root.
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
+            refresh()
+            return
+        }
+        onOpen?(path)
     }
 
     /// Recents (that still exist) first, then git repos in the default folder.
@@ -162,19 +273,7 @@ final class LandingView: NSView, WorkspacePane, NSTableViewDataSource, NSTableVi
         return out
     }
 
-    private func openSelected() {
-        guard entries.indices.contains(table.selectedRow) else { return }
-        onOpen?(entries[table.selectedRow].path)
-    }
-
-    @objc private func rowDoubleClicked() { openSelected() }
-
-    // MARK: NSTableViewDataSource / Delegate
-
-    func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
-
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let entry = entries[row]
+    private static func rowText(for entry: LandingEntry) -> NSAttributedString {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let dir = (entry.path as NSString).deletingLastPathComponent
             .replacingOccurrences(of: home, with: "~")
@@ -196,31 +295,39 @@ final class LandingView: NSView, WorkspacePane, NSTableViewDataSource, NSTableVi
             .font: Theme.Typography.mono(Theme.Typography.small),
             .foregroundColor: Theme.chromeMutedText,
         ]))
-
-        let label = NSTextField(labelWithAttributedString: text)
-        label.lineBreakMode = .byTruncatingTail
-        let cell = NSTableCellView()
-        cell.addSubview(label)
-        label.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -8),
-            label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-        ])
-        return cell
+        return text
     }
-}
 
-/// NSTableView that reports Return as "open" instead of beeping.
-private final class LandingTableView: NSTableView {
-    var onReturn: (() -> Void)?
-
-    override func keyDown(with event: NSEvent) {
-        if event.keyCode == 36 { // Return
-            onReturn?()
-            return
+    /// First-launch empty state (§5): one designed two-voice line, not a blank
+    /// list. Atelier speaks SF Pro; `cd` and the chord are mono.
+    private func updateEmptyHint() {
+        if entries.isEmpty {
+            guard emptyHint == nil else { return }
+            let line = NSMutableAttributedString()
+            func ui(_ s: String) { line.append(NSAttributedString(string: s, attributes: [
+                .font: Theme.Typography.ui(Theme.Typography.body),
+                .foregroundColor: Theme.chromeMutedText,
+            ])) }
+            func mono(_ s: String) { line.append(NSAttributedString(string: s, attributes: [
+                .font: Theme.Typography.mono(Theme.Typography.body),
+                .foregroundColor: Theme.chromeText,
+            ])) }
+            ui("Nothing yet — ")
+            mono("cd")
+            ui(" into a repo and ")
+            mono("⌘↩")
+            let hint = NSTextField(labelWithAttributedString: line)
+            hint.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(hint)
+            NSLayoutConstraint.activate([
+                hint.centerXAnchor.constraint(equalTo: centerXAnchor),
+                hint.topAnchor.constraint(equalTo: hintLabel.bottomAnchor, constant: 18),
+            ])
+            emptyHint = hint
+        } else if let hint = emptyHint {
+            hint.removeFromSuperview()
+            emptyHint = nil
         }
-        super.keyDown(with: event)
     }
 }
 

@@ -37,9 +37,12 @@ Milestone 1 (built; see `docs/MILESTONE_1.md`):
   **sessions as bottom-bar tabs** (`⌥⌘T` sibling on the same root; `⌘⇧T` reopens
   the last-closed session; the active tab carries a leading close `×`), each hosting
   its own pinned `claude --session-id` whose transcript `ai-title` labels the tab.
-- **The Landing** (§2.1): sessions start as recents-over-terminal and promote in
-  place (pick a repo, or `⌘↩` on the landing terminal's cwd); Claude spawns only
-  on promote.
+- **The Landing** (§2.1): sessions start as an opener-over-terminal and promote
+  in place (pick a repo, or `⌘↩` on the landing terminal's cwd); Claude spawns
+  only on promote. Rebuilt 2026-07-13 on the **summon idiom** (`Summon.swift`:
+  the shared type-to-choose surface — autofocused field, fuzzy filter, sliding
+  highlight — that the command palette also hosts and the M2 `⌘P` picker will):
+  a centered raised card, opener-first focus, terminal in the bottom third.
 - **Triptych/Split layouts** (`⌘\`), per-session dividers; `⌃⌘+hjkl` pane focus.
 - **Worktree manager**: the pill fan (create/return/guarded-remove) +
   `atelier` / `-b` / `-rm` CLI over the M0 socket (`make install-cli`).
