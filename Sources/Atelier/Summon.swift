@@ -63,8 +63,9 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
     /// Fired whenever the filtered row set changes — hosts that size themselves
     /// to the content (the palette card) track it; embedded hosts ignore it.
     var onContentChange: (() -> Void)?
-    /// Externally-filtered surfaces only (`filtersLocally: false`): the query
-    /// changed — go produce a new offer.
+    /// The query changed. Externally-filtered surfaces (`filtersLocally:
+    /// false`) *must* listen and produce a new offer; locally-filtered hosts
+    /// *may* listen to augment theirs (the Landing's `host:dir` row).
     var onQueryChange: ((String) -> Void)?
     /// Optional match ranking for locally-filtered hosts (⌘P: basename hits
     /// outrank path-scatter hits). Higher wins; ties keep provider order.
@@ -235,7 +236,7 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
 
     func controlTextDidChange(_ obj: Notification) {
         query = field.stringValue
-        if !style.filtersLocally { onQueryChange?(query) }
+        onQueryChange?(query)
         refilter()
     }
 

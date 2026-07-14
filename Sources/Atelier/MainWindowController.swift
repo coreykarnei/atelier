@@ -295,33 +295,40 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
 
     /// `⌘T` — a new Landing tab (a terminal, promotable to an IDE).
     func addSession() {
-        // Dev-only entry for the remote-session work (phase 1): with
-        // ATELIER_REMOTE_DEV=host[:dir] set, ⌘T opens a remote session
-        // directly. The Landing grows real host rows in phase 2.
-        if let spec = ProcessInfo.processInfo.environment["ATELIER_REMOTE_DEV"], !spec.isEmpty {
-            let parts = spec.split(separator: ":", maxSplits: 1)
-            let host = String(parts[0])
-            let dir = parts.count > 1
-                ? (parts[1].hasPrefix("/") ? String(parts[1]) : "~/\(parts[1])")
-                : "~"
-            adopt(Session(remoteHost: host, remoteDir: dir))
-            return
-        }
         adopt(Session(cwd: Self.defaultWorkdir()))
     }
 
     /// The tab-strip `+` / `⌥⌘T` — another session on the project's *main*
-    /// checkout, regardless of which worktree the active tab is on. Falls back to
-    /// a Landing when the window isn't anchored to a project yet.
+    /// checkout, regardless of which worktree the active tab is on. A remote
+    /// session's sibling is another session on the same host and dir. Falls
+    /// back to a Landing when the window isn't anchored to a project yet.
     func addSessionOnMain() {
-        if let root = projectRepoRoot {
+        if let session = activeSession, case .remote(let host) = session.location {
+            adopt(Session(remoteHost: host, remoteDir: session.cwd))
+        } else if let root = projectRepoRoot {
             adopt(Session(ideRoot: root))
         } else {
             addSession()
         }
     }
 
+    /// A Landing picked a remote target: replace it, same tab slot, with a
+    /// fresh remote session (promotion-in-place can't cross machines — the
+    /// landing shell's PTY is local).
+    private func replaceLanding(_ landing: Session, withRemote host: String, dir: String) {
+        guard let index = sessions.firstIndex(where: { $0 === landing }) else { return }
+        RecentsStore.record(RemoteTarget(host: host, dir: dir).id)
+        landing.terminate()
+        landing.container.removeFromSuperview()
+        sessions.remove(at: index)
+        adopt(Session(remoteHost: host, remoteDir: dir), at: index)
+    }
+
     private func adopt(_ session: Session, at index: Int? = nil) {
+        session.onRemoteRequested = { [weak self, weak session] host, dir in
+            guard let self, let session else { return }
+            self.replaceLanding(session, withRemote: host, dir: dir)
+        }
         session.onPromoted = { [weak self, weak session] in
             guard let self else { return }
             if let session {
@@ -343,7 +350,12 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     /// Anchor the window to its project once the first IDE session exists: cache
     /// the primary checkout and name the native tab after it.
     private func noteProjectRoot(for session: Session) {
-        guard session.state == .ide else { return }
+        // A remote dir is not a local repo root — anchoring the window to it
+        // would aim ⌥⌘T and the worktree fan at a path that isn't here.
+        guard session.state == .ide, !session.isRemote else {
+            refreshWindowTitle()
+            return
+        }
         if projectRepoRoot == nil {
             projectRepoRoot = WorktreeManager.repoRoot(for: session.cwd) ?? session.cwd
         }
@@ -355,6 +367,12 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     /// worktree directory is named for its branch (slashes dashed), which
     /// keeps this off the subprocess path.
     private func refreshWindowTitle() {
+        if let session = activeSession, case .remote(let host) = session.location {
+            window?.title = session.cwd == "~"
+                ? host
+                : "\(host) — \((session.cwd as NSString).lastPathComponent)"
+            return
+        }
         guard let root = projectRepoRoot else {
             window?.title = "New Tab"
             return
@@ -477,8 +495,11 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     func reopenClosedSession() {
         while let entry = recentlyClosed.popLast() {
             let (cwd, index) = entryLocation(entry)
+            // Remote roots aren't stat-able here; reopen optimistically (the
+            // reconnecting placard covers a host that's gone).
             var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: cwd, isDirectory: &isDir), isDir.boolValue else {
+            guard entryIsRemote(entry)
+                || (FileManager.default.fileExists(atPath: cwd, isDirectory: &isDir) && isDir.boolValue) else {
                 evict(entry: entry)
                 continue
             }
@@ -504,6 +525,13 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         switch entry {
         case .live(let session, let index): return (session.cwd, index)
         case .snapshot(let persisted, let index): return (persisted.cwd, index)
+        }
+    }
+
+    private func entryIsRemote(_ entry: ClosedEntry) -> Bool {
+        switch entry {
+        case .live(let session, _): return session.isRemote
+        case .snapshot(let persisted, _): return persisted.remoteHost != nil
         }
     }
 
@@ -540,7 +568,10 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
 
     // MARK: Editor (M2.1)
 
-    var canUseEditor: Bool { activeSession?.state == .ide }
+    var canUseEditor: Bool {
+        guard let session = activeSession else { return false }
+        return session.state == .ide && !session.isRemote
+    }
     var editorHasFile: Bool { activeSession?.editorPane.filePath != nil }
 
     /// Buffers with unsaved edits across this window's sessions — the app's

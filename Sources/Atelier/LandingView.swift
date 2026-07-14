@@ -17,10 +17,14 @@ enum RecentsStore {
     }
 
     /// Drop entries whose directories no longer exist — a recent that can't be
-    /// opened is a promise the list shouldn't keep making.
+    /// opened is a promise the list shouldn't keep making. Remote (`ssh://`)
+    /// entries have no local directory to check; their host's continued
+    /// existence in ~/.ssh/config is checked at offer time instead.
     static func prune() {
         let list = all()
-        let existing = list.filter { FileManager.default.fileExists(atPath: $0) }
+        let existing = list.filter {
+            $0.hasPrefix("ssh://") || FileManager.default.fileExists(atPath: $0)
+        }
         if existing.count != list.count {
             UserDefaults.standard.set(existing, forKey: key)
         }
@@ -29,8 +33,11 @@ enum RecentsStore {
 
 struct LandingEntry {
     let name: String
+    /// A local directory, or an `ssh://host:dir` remote target id.
     let path: String
     let isRecent: Bool
+    /// Set for remote entries: the ssh host they open on.
+    var host: String? = nil
 }
 
 /// The landing pane (MILESTONE_1 §2.1). Rebuilt on the summon idiom
@@ -47,6 +54,9 @@ struct LandingEntry {
 final class LandingView: NSView, WorkspacePane {
     /// Called with the chosen project root.
     var onOpen: ((String) -> Void)?
+
+    /// Called with the chosen remote target (host, remote dir).
+    var onOpenRemote: ((String, String) -> Void)?
 
     var focusView: NSView { summon.focusField }
 
@@ -104,6 +114,7 @@ final class LandingView: NSView, WorkspacePane {
         summon.translatesAutoresizingMaskIntoConstraints = false
         summon.onActivate = { [weak self] item in self?.open(path: item.id) }
         summon.onContentChange = { [weak self] in self?.trackContentHeight() }
+        summon.onQueryChange = { [weak self] query in self?.injectRemoteQueryItem(for: query) }
         card.addSubview(summon)
 
         // Two-voice hint (§1.4): chords and the `ide` command are mono, the
@@ -228,17 +239,36 @@ final class LandingView: NSView, WorkspacePane {
 
     @objc private func windowBecameKey() { refresh() }
 
-    /// Re-scan recents + repos and re-offer them; the live query survives.
+    /// Re-scan recents + repos + ssh hosts and re-offer them; the live query
+    /// survives.
     func refresh() {
         RecentsStore.prune()
-        entries = Self.entries(defaultFolder: defaultFolder)
-        summon.setItems(entries.map { entry in
-            SummonItem(id: entry.path, text: Self.rowText(for: entry), matchText: entry.name.lowercased(), chord: nil)
-        })
+        knownHosts = SSHConfigHosts.all()
+        entries = Self.entries(defaultFolder: defaultFolder, hosts: knownHosts)
+        // Through the injector, not setItems directly: a live `host:dir`
+        // query must survive a background refresh (window became key).
+        injectRemoteQueryItem(for: summon.query)
         updateEmptyHint()
     }
 
+    private static func items(for entries: [LandingEntry]) -> [SummonItem] {
+        entries.map { entry in
+            SummonItem(
+                id: entry.path,
+                text: rowText(for: entry),
+                matchText: entry.host == nil
+                    ? entry.name.lowercased()
+                    : entry.path.dropFirst("ssh://".count).lowercased(),
+                chord: nil
+            )
+        }
+    }
+
     private func open(path: String) {
+        if let target = RemoteTarget.parse(path) {
+            onOpenRemote?(target.host, target.dir)
+            return
+        }
         // The offer can rot between the scan and the click; re-check the truth
         // at decision time and quietly re-scan instead of opening a dead root.
         var isDir: ObjCBool = false
@@ -249,15 +279,24 @@ final class LandingView: NSView, WorkspacePane {
         onOpen?(path)
     }
 
-    /// Recents (that still exist) first, then git repos in the default folder.
-    static func entries(defaultFolder: String) -> [LandingEntry] {
+    /// Recents (that still exist) first, then git repos in the default folder,
+    /// then ssh hosts (§remote): every place you can start is one list.
+    static func entries(defaultFolder: String, hosts: [String] = []) -> [LandingEntry] {
         let fm = FileManager.default
         var seen = Set<String>()
         var out: [LandingEntry] = []
 
-        for path in RecentsStore.all() where fm.fileExists(atPath: path) {
+        for path in RecentsStore.all() {
             guard seen.insert(path).inserted else { continue }
-            out.append(LandingEntry(name: (path as NSString).lastPathComponent, path: path, isRecent: true))
+            if let target = RemoteTarget.parse(path) {
+                // A recent on a host that left ssh config can't be opened.
+                guard hosts.contains(target.host) else { continue }
+                out.append(LandingEntry(
+                    name: target.host, path: path, isRecent: true, host: target.host
+                ))
+            } else if fm.fileExists(atPath: path) {
+                out.append(LandingEntry(name: (path as NSString).lastPathComponent, path: path, isRecent: true))
+            }
         }
 
         if let children = try? fm.contentsOfDirectory(atPath: defaultFolder) {
@@ -270,13 +309,25 @@ final class LandingView: NSView, WorkspacePane {
                 out.append(LandingEntry(name: child, path: full, isRecent: false))
             }
         }
+
+        for host in hosts {
+            let target = RemoteTarget(host: host, dir: "~")
+            guard seen.insert(target.id).inserted else { continue }
+            out.append(LandingEntry(name: host, path: target.id, isRecent: false, host: host))
+        }
         return out
     }
 
     private static func rowText(for entry: LandingEntry) -> NSAttributedString {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let dir = (entry.path as NSString).deletingLastPathComponent
-            .replacingOccurrences(of: home, with: "~")
+        let detail: String
+        if entry.host != nil {
+            let dir = RemoteTarget.parse(entry.path)?.dir ?? "~"
+            detail = dir == "~" ? "ssh" : "ssh · \(dir)"
+        } else {
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            detail = (entry.path as NSString).deletingLastPathComponent
+                .replacingOccurrences(of: home, with: "~")
+        }
 
         let text = NSMutableAttributedString()
         if entry.isRecent {
@@ -291,11 +342,50 @@ final class LandingView: NSView, WorkspacePane {
             .font: Theme.Typography.mono(Theme.Typography.body, weight: .medium),
             .foregroundColor: Theme.chromeText,
         ]))
-        text.append(NSAttributedString(string: "  \(dir)", attributes: [
+        text.append(NSAttributedString(string: "  \(detail)", attributes: [
             .font: Theme.Typography.mono(Theme.Typography.small),
             .foregroundColor: Theme.chromeMutedText,
         ]))
         return text
+    }
+
+    // MARK: Remote targets (§remote)
+
+    private var knownHosts: [String] = []
+
+    /// `host:dir` typed into the filter injects a synthetic top row aimed at
+    /// that directory on that host — the colon defeats subsequence matching
+    /// against the bare host row, so the row is *made*, not matched.
+    private func injectRemoteQueryItem(for query: String) {
+        var items = Self.items(for: entries)
+        if let target = parseRemoteQuery(query) {
+            let text = NSMutableAttributedString()
+            text.append(NSAttributedString(string: "\(target.host):\(target.dir)", attributes: [
+                .font: Theme.Typography.mono(Theme.Typography.body, weight: .medium),
+                .foregroundColor: Theme.chromeText,
+            ]))
+            text.append(NSAttributedString(string: "  open on \(target.host)", attributes: [
+                .font: Theme.Typography.ui(Theme.Typography.small),
+                .foregroundColor: Theme.chromeMutedText,
+            ]))
+            items.insert(SummonItem(
+                id: target.id,
+                text: text,
+                matchText: query.lowercased().trimmingCharacters(in: .whitespaces),
+                chord: nil
+            ), at: 0)
+        }
+        summon.setItems(items)
+    }
+
+    private func parseRemoteQuery(_ query: String) -> RemoteTarget? {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard let colon = q.firstIndex(of: ":") else { return nil }
+        let host = String(q[..<colon])
+        let rest = String(q[q.index(after: colon)...])
+        guard !rest.isEmpty, knownHosts.contains(host) else { return nil }
+        let dir = rest.hasPrefix("/") || rest.hasPrefix("~") ? rest : "~/\(rest)"
+        return RemoteTarget(host: host, dir: dir)
     }
 
     /// First-launch empty state (§5): one designed two-voice line, not a blank

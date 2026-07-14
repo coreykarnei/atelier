@@ -109,6 +109,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var restoredAny = false
         for window in state.windows {
             let valid = window.sessions.filter { session in
+                // Remote sessions restore optimistically — no pre-flight ssh
+                // (a dead host must not block launch); the reconnecting
+                // placard *is* the offline UX.
+                if session.remoteHost != nil { return true }
                 var isDir: ObjCBool = false
                 let ok = FileManager.default.fileExists(atPath: session.cwd, isDirectory: &isDir) && isDir.boolValue
                 if !ok { orphans.append((session.title, (session.cwd as NSString).lastPathComponent)) }

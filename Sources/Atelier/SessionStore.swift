@@ -13,6 +13,9 @@ struct PersistedSession: Codable {
     var dividers: [String: Double]
     /// Editor buffer path (M2.1). Optional so pre-M2 snapshots still decode.
     var openFile: String?
+    /// Set for remote sessions: the ssh host; `cwd` is then the *remote* dir.
+    /// Optional so pre-remote snapshots still decode.
+    var remoteHost: String? = nil
 }
 
 struct PersistedWindow: Codable {

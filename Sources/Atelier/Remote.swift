@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import AtelierIPC
 
@@ -17,6 +18,84 @@ enum SessionLocation: Equatable {
     var host: String? {
         if case .remote(let host) = self { return host }
         return nil
+    }
+}
+
+/// A host + remote directory, and its `ssh://host:dir` string form — the id
+/// the Landing's summon rows and the recents list carry for remote targets.
+struct RemoteTarget: Equatable {
+    let host: String
+    let dir: String
+
+    var id: String { "ssh://\(host):\(dir)" }
+
+    static func parse(_ id: String) -> RemoteTarget? {
+        guard id.hasPrefix("ssh://") else { return nil }
+        let rest = id.dropFirst("ssh://".count)
+        guard !rest.isEmpty else { return nil }
+        guard let colon = rest.firstIndex(of: ":") else {
+            return RemoteTarget(host: String(rest), dir: "~")
+        }
+        let host = String(rest[..<colon])
+        let dir = String(rest[rest.index(after: colon)...])
+        guard !host.isEmpty else { return nil }
+        return RemoteTarget(host: host, dir: dir.isEmpty ? "~" : dir)
+    }
+}
+
+/// Hosts from `~/.ssh/config` (plus one level of `Include`) — the Landing's
+/// remote offer. Wildcard patterns are config plumbing, not destinations.
+enum SSHConfigHosts {
+    static func all() -> [String] {
+        var out: [String] = []
+        var seen = Set<String>()
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        collect(file: "\(home)/.ssh/config", into: &out, seen: &seen, includeDepth: 1)
+        return out
+    }
+
+    private static func collect(
+        file: String, into out: inout [String], seen: inout Set<String>, includeDepth: Int
+    ) {
+        guard let text = try? String(contentsOfFile: file, encoding: .utf8) else { return }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty, !line.hasPrefix("#") else { continue }
+            let tokens = line.split(separator: " ", omittingEmptySubsequences: true)
+                .flatMap { $0.split(separator: "\t", omittingEmptySubsequences: true) }
+            guard let keyword = tokens.first?.lowercased() else { continue }
+
+            if keyword == "host" {
+                for token in tokens.dropFirst() {
+                    let host = String(token)
+                    guard !host.contains(where: { "*?!".contains($0) }),
+                          seen.insert(host).inserted else { continue }
+                    out.append(host)
+                }
+            } else if keyword == "include", includeDepth > 0 {
+                for token in tokens.dropFirst() {
+                    var pattern = String(token)
+                    if pattern.hasPrefix("~") {
+                        pattern = home + pattern.dropFirst()
+                    } else if !pattern.hasPrefix("/") {
+                        pattern = "\(home)/.ssh/\(pattern)"
+                    }
+                    for included in Self.glob(pattern) {
+                        collect(file: included, into: &out, seen: &seen, includeDepth: includeDepth - 1)
+                    }
+                }
+            }
+        }
+    }
+
+    private static func glob(_ pattern: String) -> [String] {
+        var g = glob_t()
+        defer { globfree(&g) }
+        guard Darwin.glob(pattern, 0, nil, &g) == 0 else { return [] }
+        return (0..<Int(g.gl_matchc)).compactMap {
+            g.gl_pathv[$0].flatMap { String(cString: $0) }
+        }
     }
 }
 

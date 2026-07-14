@@ -92,6 +92,11 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// refresh the branch pill, tabs, and focus.
     var onPromoted: (() -> Void)?
 
+    /// A Landing chose a remote target. Promotion-in-place can't cross
+    /// machines (the landing shell's PTY is local), so the window controller
+    /// replaces this Landing with a fresh remote session in the same tab slot.
+    var onRemoteRequested: ((_ host: String, _ dir: String) -> Void)?
+
     private(set) var layoutMode: LayoutMode = .triptych
 
     /// Divider fractions keyed by slot id (ids already encode the mode). In-memory
@@ -115,6 +120,7 @@ final class Session: NSObject, NSSplitViewDelegate {
 
         let landing = LandingView(defaultFolder: cwd)
         landing.onOpen = { [weak self] path in self?.promote(to: path) }
+        landing.onOpenRemote = { [weak self] host, dir in self?.onRemoteRequested?(host, dir) }
         landingView = landing
 
         rebuildLayout()
@@ -162,9 +168,11 @@ final class Session: NSObject, NSSplitViewDelegate {
         self.customTitle = restored.customTitle
         self.claudeSessionId = restored.claudeSessionId
         self.isRestored = true
-        self.location = .local
+        self.location = restored.remoteHost.map { .remote(host: $0) } ?? .local
         self.state = restored.isIDE ? .ide : .landing
-        self.layoutMode = LayoutMode(rawValue: restored.layoutMode) ?? .triptych
+        self.layoutMode = restored.remoteHost == nil
+            ? (LayoutMode(rawValue: restored.layoutMode) ?? .triptych)
+            : .split
         self.dividers = restored.dividers.mapValues { CGFloat($0) }
         super.init()
         container.translatesAutoresizingMaskIntoConstraints = false
@@ -172,6 +180,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         if state == .landing {
             let landing = LandingView(defaultFolder: cwd)
             landing.onOpen = { [weak self] path in self?.promote(to: path) }
+            landing.onOpenRemote = { [weak self] host, dir in self?.onRemoteRequested?(host, dir) }
             landingView = landing
         }
         rebuildLayout()
@@ -194,7 +203,8 @@ final class Session: NSObject, NSSplitViewDelegate {
             customTitle: customTitle,
             claudeSessionId: claudeSessionId,
             dividers: dividers.mapValues { Double($0) },
-            openFile: editorPane.filePath
+            openFile: editorPane.filePath,
+            remoteHost: location.host
         )
     }
 
@@ -255,6 +265,11 @@ final class Session: NSObject, NSSplitViewDelegate {
             // gone; if claude is still alive out there we just reattach to it,
             // mid-conversation, which no local `--resume` can match.
             let flag = isRestored ? "--resume" : "--session-id"
+            if isRestored {
+                agentPane.showResumingPlacard(
+                    title: displayTitle, subtitle: "reattaching to \(host)…"
+                )
+            }
             startRemotePane(
                 agentPane, host: host, suffix: "ai",
                 command: "bash -lc \"exec claude \(flag) \(claudeSessionId)\""
