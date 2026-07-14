@@ -110,11 +110,18 @@ enum RemoteCommand {
     /// own conf — deterministic status-off/TERM without ever touching the
     /// host's tmux.conf. Versioned filename: changing the conf below must also
     /// bump the name so existing hosts rewrite it.
-    static let tmuxConfPath = "~/.config/atelier/tmux-v2.conf"
+    static let tmuxConfPath = "~/.config/atelier/tmux-v4.conf"
     private static let tmuxConfLines = [
         "set -g status off",
         "set -g escape-time 0",
         "set -g default-terminal \"xterm-256color\"",
+        // Truecolor needs both halves (owner report 2026-07-14, "muted"):
+        // Tc declares the *outer* terminal (SwiftTerm) RGB-capable so tmux
+        // stops downsampling to the 256 palette on the way out…
+        "set -ga terminal-overrides \",xterm-256color:Tc\"",
+        // …and COLORTERM tells *inner* processes (claude's chalk/ink checks
+        // it, SwiftTerm exports it locally) to emit 24-bit color at all.
+        "set-environment -g COLORTERM truecolor",
         "set -g history-limit 10000",
         "set -g exit-empty on",
         // Claude Code asks for this on attach; SwiftTerm sends focus reports.
@@ -164,9 +171,15 @@ enum RemoteCommand {
     static func paneArgv(
         host: String, tmuxSession: String, remoteDir: String, command: String?
     ) -> [String] {
-        var script = "mkdir -p ~/.config/atelier && { [ -f \(tmuxConfPath) ] || printf '%s\\n' "
+        // Temp + mv, not a straight redirect: the two panes bootstrap
+        // concurrently, and one truncating the conf while the other's tmux
+        // (the server-start winner) is parsing it drops whichever lines were
+        // mid-flight — observed as the Tc override alone missing. mv is
+        // atomic; a reader holds the complete old inode or sees the complete
+        // new file.
+        var script = "mkdir -p ~/.config/atelier && { [ -f \(tmuxConfPath) ] || { printf '%s\\n' "
         script += tmuxConfLines.map(quoted).joined(separator: " ")
-        script += " > \(tmuxConfPath); }; exec tmux -f \(tmuxConfPath) -L atelier"
+        script += " > \(tmuxConfPath).$$ && mv \(tmuxConfPath).$$ \(tmuxConfPath); }; }; exec tmux -f \(tmuxConfPath) -L atelier"
         script += " new-session -A -s \(tmuxSession) -c \(quotedRemoteDir(remoteDir))"
         if let command {
             script += " \(quoted(command))"

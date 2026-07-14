@@ -225,7 +225,12 @@ final class BottomBar: NSView {
         pillView.isHidden = pill.isEmpty
 
         layoutButton.isHidden = mode == nil
-        let symbol = mode == .triptych ? "rectangle.split.3x1" : "rectangle.split.1x2"
+        let symbol: String
+        switch mode {
+        case .triptych: symbol = "rectangle.split.3x1"
+        case .splitSide: symbol = "rectangle.split.2x1"
+        default: symbol = "rectangle.split.1x2"
+        }
         layoutButton.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Toggle layout")
 
         flowTabs(animated: true)

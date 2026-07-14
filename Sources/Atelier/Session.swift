@@ -170,9 +170,10 @@ final class Session: NSObject, NSSplitViewDelegate {
         self.isRestored = true
         self.location = restored.remoteHost.map { .remote(host: $0) } ?? .local
         self.state = restored.isIDE ? .ide : .landing
+        let restoredMode = LayoutMode(rawValue: restored.layoutMode) ?? .triptych
         self.layoutMode = restored.remoteHost == nil
-            ? (LayoutMode(rawValue: restored.layoutMode) ?? .triptych)
-            : .split
+            ? restoredMode
+            : (restoredMode == .splitSide ? .splitSide : .split)
         self.dividers = restored.dividers.mapValues { CGFloat($0) }
         super.init()
         container.translatesAutoresizingMaskIntoConstraints = false
@@ -224,8 +225,14 @@ final class Session: NSObject, NSSplitViewDelegate {
         case .local:
             shellPane.start(executable: "/bin/zsh", args: ["-l"], cwd: cwd)
         case .remote(let host):
-            // No command: tmux runs the remote user's login shell.
-            startRemotePane(shellPane, host: host, suffix: "sh", command: nil)
+            // A login shell, like tmux's default — but with COLORTERM set
+            // explicitly: the conf's set-environment races the initial
+            // session's pane creation (observed), and truecolor programs in
+            // the pane check the env, not the terminal.
+            startRemotePane(
+                shellPane, host: host, suffix: "sh",
+                command: "sh -c 'COLORTERM=truecolor exec \"$SHELL\" -l'"
+            )
         }
         if state == .ide { startAgent() }
     }
@@ -272,7 +279,7 @@ final class Session: NSObject, NSSplitViewDelegate {
             }
             startRemotePane(
                 agentPane, host: host, suffix: "ai",
-                command: "bash -lc \"exec claude \(flag) \(claudeSessionId)\""
+                command: "bash -lc \"COLORTERM=truecolor exec claude \(flag) \(claudeSessionId)\""
             )
             return
         }
@@ -399,6 +406,7 @@ final class Session: NSObject, NSSplitViewDelegate {
             switch layoutMode {
             case .triptych: return [editorPane, shellPane, agentPane]
             case .split: return [agentPane, shellPane]
+            case .splitSide: return [shellPane, agentPane]
             }
         }
     }
@@ -521,12 +529,13 @@ final class Session: NSObject, NSSplitViewDelegate {
 
     // MARK: Layout
 
-    /// Toggle Triptych/Split. Meaningless for a Landing, so a no-op there.
-    /// Remote sessions are pinned to Split — the editor edits *local* files,
-    /// which is exactly the wrong thing next to a remote shell.
+    /// Toggle the layout. Meaningless for a Landing, so a no-op there.
+    /// Remote sessions never show the editor (it edits *local* files), so
+    /// their ⌘\ cycles the two-pane arrangements instead: stacked ↔
+    /// side-by-side.
     func toggleLayout() {
-        guard state == .ide, !isRemote else { return }
-        layoutMode = layoutMode.next
+        guard state == .ide else { return }
+        layoutMode = isRemote ? layoutMode.nextSplit : layoutMode.next
         rebuildLayout()
     }
 
@@ -540,7 +549,19 @@ final class Session: NSObject, NSSplitViewDelegate {
 
     /// Build (or rebuild) the pane tree for the current state/mode into `container`,
     /// re-parenting the persistent panes so terminal/editor state survives the switch.
+    ///
+    /// PTY resizes are frozen for the duration (§1.5, same rule as divider
+    /// drags): re-parenting walks the terminals through degenerate transient
+    /// frames, and a 0-column resize reaching the hosted process can kill it —
+    /// observed as the remote claude dying on a ⌘\ toggle. Only the final
+    /// geometry may land.
     private func rebuildLayout() {
+        shellPane.terminal.resizeFrozen = true
+        agentPane.terminal.resizeFrozen = true
+        defer {
+            shellPane.terminal.resizeFrozen = false
+            agentPane.terminal.resizeFrozen = false
+        }
         tearDownCurrentLayout()
 
         let root: NSView
@@ -554,6 +575,8 @@ final class Session: NSObject, NSSplitViewDelegate {
                 root = makeSplit(slot: LayoutSlots.triptychOuter, vertical: true, first: leftColumn, second: agentPane)
             case .split:
                 root = makeSplit(slot: LayoutSlots.splitVertical, vertical: false, first: agentPane, second: shellPane)
+            case .splitSide:
+                root = makeSplit(slot: LayoutSlots.splitSide, vertical: true, first: shellPane, second: agentPane)
             }
         }
 
