@@ -34,7 +34,8 @@ transcript-aligned markdown — see the M0 devlog).
 
 Milestone 1 (built; see `docs/MILESTONE_1.md`):
 - **Projects as native tabbed windows** (`⌘T` new project tab, `⌘1..9`),
-  **sessions as bottom-bar tabs** (`⌘⇧T` sibling on the same root), each hosting
+  **sessions as bottom-bar tabs** (`⌥⌘T` sibling on the same root; `⌘⇧T` reopens
+  the last-closed session; the active tab carries a leading close `×`), each hosting
   its own pinned `claude --session-id` whose transcript `ai-title` labels the tab.
 - **The Landing** (§2.1): sessions start as recents-over-terminal and promote in
   place (pick a repo, or `⌘↩` on the landing terminal's cwd); Claude spawns only

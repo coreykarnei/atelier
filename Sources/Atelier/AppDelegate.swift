@@ -259,6 +259,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func newSession(_ sender: Any?) { keyController?.addSessionOnMain() }
     @objc func openIDEHere(_ sender: Any?) { keyController?.promoteActiveSessionHere() }
     @objc func closeSession(_ sender: Any?) { keyController?.closeActiveSession() }
+    @objc func reopenSession(_ sender: Any?) { keyController?.reopenClosedSession() }
     @objc func nextSession(_ sender: Any?) { keyController?.selectNext() }
     @objc func prevSession(_ sender: Any?) { keyController?.selectPrev() }
 
@@ -266,4 +267,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func focusDown(_ sender: Any?) { keyController?.focusPane(.down) }
     @objc func focusUp(_ sender: Any?) { keyController?.focusPane(.up) }
     @objc func focusRight(_ sender: Any?) { keyController?.focusPane(.right) }
+}
+
+extension AppDelegate: NSMenuItemValidation {
+    /// "Reopen Closed Session" is only offered when there's something to reopen;
+    /// every other item keeps its default enablement.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(reopenSession(_:)) {
+            return keyController?.canReopenClosedSession ?? false
+        }
+        return true
+    }
 }

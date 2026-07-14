@@ -242,7 +242,7 @@ final class BottomBar: NSView {
 
         func width(of bar: BottomBar) -> CGFloat {
             switch self {
-            case .tab(let info): return SessionTabView.desiredWidth(for: info)
+            case .tab(let info): return SessionTabView.desiredWidth(for: info, isActive: info.index == bar.activeIndex)
             case .separator: return 9
             case .overflow, .add: return 26
             }
@@ -289,7 +289,7 @@ final class BottomBar: NSView {
         }
 
         outer: for (chunkIndex, chunk) in chunks.enumerated() {
-            let chunkWidth = chunk.reduce(0) { $0 + SessionTabView.desiredWidth(for: $1) + 4 }
+            let chunkWidth = chunk.reduce(0) { $0 + SessionTabView.desiredWidth(for: $1, isActive: $1.index == activeIndex) + 4 }
             // Try to keep the whole group on one row: jump rows if it won't fit here.
             if chunkWidth <= rowWidth, widths[rows.count - 1] + chunkWidth > rowWidth,
                !rows[rows.count - 1].isEmpty, rows.count < 2 {
@@ -496,8 +496,11 @@ final class BottomBar: NSView {
 }
 
 /// A single session tab: optional attention badge, ⎇ glyph for worktree
-/// sessions, ellipsized title, close affordance. Click selects; double-click
-/// renames. Persistent across bar updates so its state changes can animate:
+/// sessions, ellipsized title. The active tab — and only the active tab —
+/// carries a close `×` at its leading edge, before the title: the tab you can
+/// close is the one you're looking at, and inactive tabs stay quiet. Click
+/// selects; double-click renames. Persistent across bar updates so its state
+/// changes can animate:
 /// attention cross-fades (~250 ms), a green arrival does one soft scale-in,
 /// the working blue carries the ~4 s subliminal pulse, and the peach `!`
 /// **never** animates — urgency reads as stillness (§1.3).
@@ -509,7 +512,7 @@ private final class SessionTabView: NSView {
     var onRename: ((Int) -> Void)?
 
     private let titleLabel = NSTextField(labelWithString: "")
-    private let closeButton = NSButton()
+    private let closeButton = HoverFadeButton()
     private var badgeView: NSView?
     private var attention: Session.Attention = .none
     private var attentionSince: Date?
@@ -534,21 +537,26 @@ private final class SessionTabView: NSView {
         closeButton.symbolConfiguration = .init(pointSize: 8, weight: .medium)
         closeButton.target = self
         closeButton.action = #selector(closeTapped)
+        closeButton.isHidden = true
+        closeButton.alphaValue = HoverFadeButton.restingAlpha
         addSubview(closeButton)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    /// Estimated width for the flow: full label + glyphs + close + padding.
-    /// Titles are uncapped — the two-row wrap and the `»` overflow absorb long
-    /// ones. Mono is width-stable across the regular/semibold active swap.
-    static func desiredWidth(for info: SessionTabInfo) -> CGFloat {
+    /// Estimated width for the flow: full label + glyphs + padding, plus the
+    /// leading close `×` on the active tab. Titles are uncapped — the two-row
+    /// wrap and the `»` overflow absorb long ones. Mono is width-stable across
+    /// the regular/semibold active swap.
+    static func desiredWidth(for info: SessionTabInfo, isActive: Bool) -> CGFloat {
         let label = (info.isWorktree ? "⎇ " : "") + (info.title.isEmpty ? "untitled" : info.title)
-        let font = Theme.Typography.mono(Theme.Typography.small)
+        // Measure at the active (semibold) weight — a hair wider than regular
+        // at this size, and the estimate must never come in under the truth.
+        let font = Theme.Typography.mono(Theme.Typography.small, weight: .semibold)
         let textWidth = (label as NSString).size(withAttributes: [.font: font]).width
         let badge: CGFloat = info.attention == .none ? 0 : 11
-        return ceil(textWidth) + badge + 38
+        return ceil(textWidth) + badge + (isActive ? 34 : 20)
     }
 
     func apply(info: SessionTabInfo, isActive: Bool) {
@@ -562,7 +570,9 @@ private final class SessionTabView: NSView {
             layer?.backgroundColor = (isActive ? Theme.accentGreen : .clear).cgColor
             titleLabel.font = Theme.Typography.mono(Theme.Typography.small, weight: isActive ? .semibold : .regular)
             titleLabel.textColor = isActive ? Theme.accentTextDark : Theme.chromeMutedText
-            closeButton.contentTintColor = isActive ? Theme.accentTextDark : Theme.chromeMutedText
+            closeButton.contentTintColor = Theme.accentTextDark
+            closeButton.isHidden = !isActive
+            closeButton.alphaValue = HoverFadeButton.restingAlpha
         }
         attentionSince = info.attentionSince
         setAttention(info.attention, animated: applied)
@@ -572,11 +582,22 @@ private final class SessionTabView: NSView {
 
     override func layout() {
         super.layout()
+        let closeWidth: CGFloat = 12
+        if !closeButton.isHidden {
+            closeButton.frame = CGRect(
+                x: 6,
+                y: (bounds.height - closeWidth) / 2,
+                width: closeWidth,
+                height: closeWidth
+            )
+        }
+        // Everything else flows after the close `×` when it's present.
+        let leading: CGFloat = closeButton.isHidden ? 8 : 22
         let hasBadge = badgeView != nil
         if let badge = badgeView {
             let size = badge.frame.size == .zero ? badge.fittingSize : badge.frame.size
             badge.frame = CGRect(
-                x: 8,
+                x: leading,
                 y: (bounds.height - size.height) / 2,
                 width: size.width,
                 height: size.height
@@ -595,19 +616,12 @@ private final class SessionTabView: NSView {
                 addToolTip(tipRect, owner: self, userData: nil)
             }
         }
-        let titleX: CGFloat = hasBadge ? 19 : 8
-        let closeWidth: CGFloat = 12
-        closeButton.frame = CGRect(
-            x: bounds.width - closeWidth - 6,
-            y: (bounds.height - closeWidth) / 2,
-            width: closeWidth,
-            height: closeWidth
-        )
+        let titleX: CGFloat = leading + (hasBadge ? 11 : 0)
         let titleHeight = titleLabel.fittingSize.height
         titleLabel.frame = CGRect(
             x: titleX,
             y: (bounds.height - titleHeight) / 2,
-            width: max(0, closeButton.frame.minX - titleX - 4),
+            width: max(0, bounds.width - titleX - 8),
             height: titleHeight
         )
     }
@@ -729,6 +743,29 @@ private final class SessionTabView: NSView {
         }
         return "\(word) · \(elapsed)"
     }
+}
+
+/// The active tab's close `×`: quiet at rest, full-strength under the pointer.
+/// Opacity only — no color change, no growth, no motion (§1.3).
+private final class HoverFadeButton: NSButton {
+    static let restingAlpha: CGFloat = 0.55
+    private var tracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { alphaValue = 1.0 }
+    override func mouseExited(with event: NSEvent) { alphaValue = Self.restingAlpha }
 }
 
 /// A 6 pt attention dot drawn as a centered sublayer, so scale animations

@@ -146,7 +146,8 @@ VSCode, and move only the bindings that *must* move to stop fighting the editor.
 | Focus pane (directional) | `⌃⌘ + h/j/k/l` | collision-free; matches tmux `prefix+hjkl` instinct |
 | Next / prev session | `⌘⇧]` / `⌘⇧[` | browser/VSCode tab nav |
 | New project tab | `⌘T` | a Landing — matches Ghostty's new-tab muscle memory (revised during M1.3: the Landing is a *project* opener, so it lives at the project tier) |
-| New session (on main) | `⌘⇧T` | sibling session on the project's main checkout |
+| New session (on main) | `⌥⌘T` | sibling session on the project's main checkout |
+| Reopen closed session | `⌘⇧T` | resurrects the last-closed session at its old position; the agent resumes its conversation |
 | Open IDE here | `⌘↩` | promote a Landing at the terminal's cwd |
 | Close session | `⌘W` | last one reverts the window to a Landing |
 | Toggle layout | `⌘\` | Triptych ↔ Split |
@@ -159,6 +160,11 @@ The single relearned binding is pane focus (`⌥+arrows` → `⌃⌘+hjkl`) — 
 *had* to move, because the editor and shell both own `⌥+arrow` for word motion.
 Session number-keys (`⌥1..9`) are **dropped** — unused in practice, and dropping
 them keeps `⌥+number` free of collisions.
+
+Revised 2026-07-13 (owner): the active tab grew a leading close `×`, and with a
+clickable close comes the browser's undo — `⌘⇧T` now **reopens** the last-closed
+session (matching `⌘T`-new / `⌘⇧T`-reopen browser muscle memory exactly);
+new-session-on-main moved to `⌥⌘T`.
 
 ---
 
@@ -184,7 +190,7 @@ worktree path, so this is about *invocation*.
   requires explicit force (surfacing git's own refusal, never a silent `--force`).
 
 **New session** is the `+` at the trailing edge of the session-tab strip (or
-`⌘⇧T`) — always "another session on the project's **main** checkout," regardless
+`⌥⌘T`) — always "another session on the project's **main** checkout," regardless
 of which worktree the active tab is on (revised from "current root" in the
 refinement pass: worktree sessions should only come from deliberate acts — the
 fan or the CLI).

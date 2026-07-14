@@ -68,6 +68,15 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     private var bottomBarHeight: NSLayoutConstraint?
     private var titleTimer: Timer?
 
+    /// Sessions closed from this window, oldest → newest — `⌘⇧T` reopens the
+    /// most recent (the agent resumes its conversation via `--resume`).
+    /// In-memory by design: the stack dies with the window, like a browser's.
+    private var recentlyClosed: [(session: PersistedSession, index: Int)] = []
+    /// The Landing auto-created when the last session closed. If it's still the
+    /// only tab when a reopen lands, the reopen replaces it — the gesture is an
+    /// undo, and undo restores the exact prior state.
+    private weak var landingFromRevert: Session?
+
     private var activeSession: Session? {
         sessions.indices.contains(activeIndex) ? sessions[activeIndex] : nil
     }
@@ -230,7 +239,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         adopt(Session(cwd: Self.defaultWorkdir()))
     }
 
-    /// The tab-strip `+` / `⌘⇧T` — another session on the project's *main*
+    /// The tab-strip `+` / `⌥⌘T` — another session on the project's *main*
     /// checkout, regardless of which worktree the active tab is on. Falls back to
     /// a Landing when the window isn't anchored to a project yet.
     func addSessionOnMain() {
@@ -241,7 +250,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         }
     }
 
-    private func adopt(_ session: Session) {
+    private func adopt(_ session: Session, at index: Int? = nil) {
         session.onPromoted = { [weak self, weak session] in
             guard let self else { return }
             if let session {
@@ -252,10 +261,11 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             }
             self.updateBottomBar()
         }
-        sessions.append(session)
+        let insertAt = min(index ?? sessions.count, sessions.count)
+        sessions.insert(session, at: insertAt)
         if processesStarted { session.start() }
         noteProjectRoot(for: session)
-        showSession(at: sessions.count - 1)
+        showSession(at: insertAt)
         updateBottomBar()
     }
 
@@ -302,6 +312,12 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     func closeActiveSession() {
         guard sessions.indices.contains(activeIndex) else { return }
         let session = sessions.remove(at: activeIndex)
+        // Only promoted sessions are worth resurrecting — a Landing is just a
+        // shell. Snapshot before teardown; `⌘⇧T` brings it back.
+        if session.state == .ide {
+            recentlyClosed.append((session.persisted(), activeIndex))
+            if recentlyClosed.count > 10 { recentlyClosed.removeFirst() }
+        }
         session.terminate()
         session.container.removeFromSuperview()
 
@@ -319,7 +335,29 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         projectRepoRoot = nil
         window?.title = "New Tab"
         addSession()
+        landingFromRevert = sessions.last
     }
+
+    /// `⌘⇧T` — bring back the most recently closed session whose root still
+    /// exists (a root can vanish under the stack: worktree removed). The agent
+    /// resumes the same conversation; the tab returns to its old position.
+    func reopenClosedSession() {
+        while let entry = recentlyClosed.popLast() {
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: entry.session.cwd, isDirectory: &isDir),
+                  isDir.boolValue else { continue }
+            if let auto = landingFromRevert, sessions.count == 1, sessions[0] === auto,
+               auto.state == .landing {
+                auto.terminate()
+                auto.container.removeFromSuperview()
+                sessions.removeAll()
+            }
+            adopt(Session(restored: entry.session), at: min(entry.index, sessions.count))
+            return
+        }
+    }
+
+    var canReopenClosedSession: Bool { !recentlyClosed.isEmpty }
 
     func selectNext() { guard !sessions.isEmpty else { return }; showSession(at: (activeIndex + 1) % sessions.count) }
     func selectPrev() { guard !sessions.isEmpty else { return }; showSession(at: (activeIndex - 1 + sessions.count) % sessions.count) }
@@ -779,12 +817,17 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
                 self?.promoteActiveSessionHere()
             })
         }
-        commands.append(PaletteCommand(id: "session.new", title: "Session: New on Main", key: "⌘⇧T") { [weak self] in
+        commands.append(PaletteCommand(id: "session.new", title: "Session: New on Main", key: "⌥⌘T") { [weak self] in
             self?.addSessionOnMain()
         })
         commands.append(PaletteCommand(id: "session.close", title: "Session: Close", key: "⌘W") { [weak self] in
             self?.closeActiveSession()
         })
+        if canReopenClosedSession {
+            commands.append(PaletteCommand(id: "session.reopen", title: "Session: Reopen Closed", key: "⌘⇧T") { [weak self] in
+                self?.reopenClosedSession()
+            })
+        }
         commands.append(PaletteCommand(id: "session.next", title: "Session: Next", key: "⌘⇧]") { [weak self] in
             self?.selectNext()
         })
