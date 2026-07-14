@@ -18,7 +18,21 @@ let kind: NotifyMessage.Kind
 let defaultTitle: String
 let defaultBody: String
 switch kindArg {
+case "blocked", "input-blocked", "permission":
+    // Notification hook, matcher `permission_prompt` — a genuine blocker.
+    kind = .blocked
+    defaultTitle = "Claude needs you"
+    defaultBody = "Permission or a question is blocking the agent."
+case "waiting", "input-waiting", "idle":
+    // Notification hook, matcher `idle_prompt` — done, your move. The body
+    // keeps the word "waiting": legacy-configured apps classify by it.
+    kind = .inputNeeded
+    defaultTitle = "Claude is waiting"
+    defaultBody = "The agent is waiting on your next prompt."
 case "input", "inputNeeded", "notification":
+    // Legacy unmatched Notification hook (pre-matcher settings merge): the
+    // app classifies by message body. Kept so an un-migrated
+    // ~/.claude/settings.json keeps working.
     kind = .inputNeeded
     defaultTitle = "Claude needs you"
     defaultBody = "The agent is waiting for input."

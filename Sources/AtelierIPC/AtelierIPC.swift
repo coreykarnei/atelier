@@ -29,7 +29,8 @@ public enum AtelierIPC {
 public struct NotifyMessage: Codable {
     public enum Kind: String, Codable {
         case stop          // agent finished a turn
-        case inputNeeded   // agent is waiting on the user
+        case inputNeeded   // agent idles for the next prompt (waiting — your move)
+        case blocked       // agent explicitly blocked: permission or question (the `!`)
         case working       // agent began a turn (tab state only, no banner)
     }
 

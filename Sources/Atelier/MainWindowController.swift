@@ -708,10 +708,14 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         switch message.kind {
         case .working:
             sessions[index].attention = .working
+        case .blocked:
+            // Structured at the source: the hook's `permission_prompt` matcher
+            // fired. This is the `!`.
+            sessions[index].attention = .needsInput
         case .inputNeeded:
-            // The Notification hook carries both Claude's idle "waiting for your
-            // input" ping and genuine blockers (permission, question). Only the
-            // latter earns the `!`.
+            // `idle_prompt`-matched hooks send this for "your move". Legacy
+            // unmatched Notification hooks also land here carrying blockers —
+            // for those, fall back to classifying by the message body.
             sessions[index].attention = message.body.lowercased().contains("waiting")
                 ? .waiting
                 : .needsInput
