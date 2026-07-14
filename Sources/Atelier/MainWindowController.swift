@@ -117,11 +117,14 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
-        // §3.1 titlebar unification, rung (b): the native tab strip composites
-        // over the window's backing — tint it mantle so the strip sits in the
-        // app's material language instead of stock dark-aqua gray. The tabs
-        // themselves stay native (MILESTONE_1 §2 is locked).
-        window.backgroundColor = NSColor(srgbRed: 0x18/255.0, green: 0x18/255.0, blue: 0x25/255.0, alpha: 1.0)
+        // §2.9: transparent, native blur — the aesthetic is a spec
+        // requirement, and an opaque window never lets the behind-window
+        // material reach the desktop (owner call 2026-07-13: "still not
+        // semi transparent" — it wasn't; the backing was opaque). The
+        // titlebar region still reads mantle via TitlebarWashView, which is
+        // translucent over the blur like every field surface.
+        window.isOpaque = false
+        window.backgroundColor = .clear
         window.titlebarSeparatorStyle = .none
         // Projects are native window tabs (MILESTONE_1 §2): the OS draws the
         // always-visible project strip in the titlebar.

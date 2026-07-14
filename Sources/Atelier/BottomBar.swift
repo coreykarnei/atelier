@@ -123,7 +123,10 @@ final class BottomBar: NSView {
         addSubview(pillView)
 
         // The pill carries the project name — a path component, so mono (§1.4).
-        pillLabel.font = Theme.Typography.mono(Theme.Typography.small, weight: .semibold)
+        // Body size across the whole bar (owner call 2026-07-13): the tmux
+        // status bar this succeeds runs at terminal size, and 11 pt read as a
+        // downgrade next to it.
+        pillLabel.font = Theme.Typography.mono(Theme.Typography.body, weight: .semibold)
         pillLabel.textColor = Theme.accentTextDark
         pillLabel.lineBreakMode = .byTruncatingMiddle
         pillLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -142,7 +145,7 @@ final class BottomBar: NSView {
         // (§1.1 motion inventory item 3: ~1 Hz opacity ease — a breath, not a
         // blink). JetBrains Mono keeps the line from shifting under it.
         for label in [clockPrefixLabel, clockColonLabel, clockSuffixLabel] {
-            label.font = Theme.Typography.mono(Theme.Typography.small)
+            label.font = Theme.Typography.mono(Theme.Typography.body)
             label.textColor = Theme.chromeMutedText
             label.translatesAutoresizingMaskIntoConstraints = false
             addSubview(label)
@@ -485,7 +488,7 @@ final class BottomBar: NSView {
     private func overflowMenu(for tabs: [SessionTabInfo]) -> NSMenu {
         let menu = NSMenu()
         for tab in tabs {
-            let title = (tab.isWorktree ? "⎇ " : "") + (tab.title.isEmpty ? "untitled" : tab.title)
+            let title = SessionTabView.label(for: tab)
             let item = NSMenuItem(title: title, action: #selector(overflowItemSelected(_:)), keyEquivalent: "")
             item.target = self
             item.tag = tab.index
@@ -594,8 +597,10 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         wantsLayer = true
         layer?.cornerRadius = Theme.Elevation.radiusSmall
 
+        // No usesSingleLineMode: its cell centers glyphs on different metrics
+        // than a plain label, which is exactly the "text sits low in the tab"
+        // read next to the constraint-centered pill (owner call 2026-07-13).
         titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.cell?.usesSingleLineMode = true
         addSubview(titleLabel)
 
         closeButton.bezelStyle = .regularSquare
@@ -615,29 +620,34 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
 
     /// Estimated width for the flow: full label + glyphs + padding, plus the
     /// leading close `×` on the active tab. Titles are uncapped — the two-row
-    /// wrap and the `»` overflow absorb long ones. Mono is width-stable across
-    /// the regular/semibold active swap.
+    /// wrap and the `»` overflow absorb long ones.
     static func desiredWidth(for info: SessionTabInfo, isActive: Bool) -> CGFloat {
-        let label = (info.isWorktree ? "⎇ " : "") + (info.title.isEmpty ? "untitled" : info.title)
         // Measure at the active (semibold) weight — a hair wider than regular
         // at this size, and the estimate must never come in under the truth.
-        let font = Theme.Typography.mono(Theme.Typography.small, weight: .semibold)
-        let textWidth = (label as NSString).size(withAttributes: [.font: font]).width
+        let font = Theme.Typography.mono(Theme.Typography.body, weight: .semibold)
+        let textWidth = (label(for: info) as NSString).size(withAttributes: [.font: font]).width
         let badge: CGFloat = info.attention == .none ? 0 : 11
         return ceil(textWidth) + badge + (isActive ? 34 : 20)
+    }
+
+    /// The tab's label: `index:name` — the tmux `#I:#W` anatomy this bar
+    /// succeeds (owner call 2026-07-13), 1-based like tmux, ⎇ marking
+    /// worktree sessions.
+    static func label(for info: SessionTabInfo) -> String {
+        "\(info.index + 1):" + (info.isWorktree ? "⎇ " : "") + (info.title.isEmpty ? "untitled" : info.title)
     }
 
     func apply(info: SessionTabInfo, isActive: Bool) {
         index = info.index
         rawTitle = info.title
-        let text = (info.isWorktree ? "⎇ " : "") + (info.title.isEmpty ? "untitled" : info.title)
+        let text = Self.label(for: info)
         if titleLabel.stringValue != text { titleLabel.stringValue = text }
 
         if self.isActive != isActive || !applied {
             self.isActive = isActive
             // Active tab wears the tmux green; inactive tabs stay quiet.
             layer?.backgroundColor = (isActive ? Theme.accentGreen : .clear).cgColor
-            titleLabel.font = Theme.Typography.mono(Theme.Typography.small, weight: isActive ? .semibold : .regular)
+            titleLabel.font = Theme.Typography.mono(Theme.Typography.body, weight: isActive ? .semibold : .regular)
             titleLabel.textColor = isActive ? Theme.accentTextDark : Theme.chromeMutedText
             closeButton.contentTintColor = Theme.accentTextDark
             closeButton.isHidden = !isActive
@@ -689,7 +699,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         let titleHeight = titleLabel.fittingSize.height
         titleLabel.frame = CGRect(
             x: titleX,
-            y: (bounds.height - titleHeight) / 2,
+            y: round((bounds.height - titleHeight) / 2),
             width: max(0, bounds.width - titleX - 8),
             height: titleHeight
         )
@@ -712,7 +722,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     func beginRename() {
         guard editField == nil else { return }
         let field = NSTextField(string: rawTitle)
-        field.font = Theme.Typography.mono(Theme.Typography.small, weight: isActive ? .semibold : .regular)
+        field.font = Theme.Typography.mono(Theme.Typography.body, weight: isActive ? .semibold : .regular)
         field.textColor = isActive ? Theme.accentTextDark : Theme.chromeText
         field.isBezeled = false
         field.isBordered = false
