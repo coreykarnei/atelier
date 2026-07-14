@@ -493,6 +493,19 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     var canUseEditor: Bool { activeSession?.state == .ide }
     var editorHasFile: Bool { activeSession?.editorPane.filePath != nil }
 
+    /// Buffers with unsaved edits across this window's sessions — the app's
+    /// quit guard names them (§5: the refusal names the actual loss).
+    var dirtyBufferPaths: [String] {
+        sessions.compactMap { $0.editorPane.isDirty ? $0.editorPane.filePath : nil }
+    }
+
+    /// Save every dirty buffer; throws on the first failure.
+    func saveAllDirtyBuffers() throws {
+        for session in sessions where session.editorPane.isDirty {
+            try session.editorPane.save()
+        }
+    }
+
     /// `⌘O` — open a file into the editor pane. The panel roots at the
     /// session's cwd; Split mode flips back to the Triptych so the buffer is
     /// actually on screen. (`⌘P`'s summon picker replaces this as the fast

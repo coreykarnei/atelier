@@ -47,7 +47,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Snapshot before windows tear down — `applicationWillTerminate` is too late,
     /// the controllers are already gone by then. Closing every window by hand
     /// quits without a snapshot; that's deliberate ("I closed my projects").
+    ///
+    /// Dirty editor buffers get the informative refusal first (M2.1's ⌘W
+    /// guard, at quit scale): the files are named, saving is one button away.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let dirty = controllers.flatMap { $0.dirtyBufferPaths }
+        if !dirty.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = dirty.count == 1
+                ? "\((dirty[0] as NSString).lastPathComponent) has unsaved changes"
+                : "\(dirty.count) files have unsaved changes"
+            alert.informativeText = "Quitting will discard them."
+            let label = NSTextField(labelWithString: dirty.map {
+                ($0 as NSString).lastPathComponent
+            }.joined(separator: "\n"))
+            label.font = Theme.Typography.mono(Theme.Typography.small)
+            label.textColor = Theme.chromeText
+            label.frame = NSRect(x: 0, y: 0, width: 320, height: label.fittingSize.height)
+            alert.accessoryView = label
+            alert.addButton(withTitle: "Save All and Quit")
+            alert.addButton(withTitle: "Discard and Quit")
+            alert.addButton(withTitle: "Cancel")
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                do {
+                    for controller in controllers { try controller.saveAllDirtyBuffers() }
+                } catch {
+                    let failure = NSAlert()
+                    failure.alertStyle = .warning
+                    failure.messageText = "Couldn't save"
+                    failure.informativeText = error.localizedDescription
+                    failure.runModal()
+                    return .terminateCancel
+                }
+            case .alertSecondButtonReturn:
+                break // discard
+            default:
+                return .terminateCancel
+            }
+        }
+
         let state = PersistedState(
             windows: controllers.map { $0.persisted() },
             activeWindow: controllers.firstIndex { $0.window === NSApp.keyWindow } ?? 0
