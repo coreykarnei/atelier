@@ -1291,9 +1291,12 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
 
     // MARK: Environment
 
-    /// The directory new sessions open in. Deliberately *not* `$HOME` (avoids Claude
-    /// enumerating `~/Desktop`/`~/Documents`/`~/Downloads` on startup). M1.4 replaces
-    /// this with the selected repo/worktree; `ATELIER_WORKDIR` overrides meanwhile.
+    /// Where a fresh Landing's terminal opens, pre-promote — every *project*
+    /// session carries its own root (picked repo, worktree, CLI path), so this
+    /// only seeds the shell you get before choosing. Deliberately *not* `$HOME`
+    /// (avoids Claude enumerating `~/Desktop`/`~/Documents`/`~/Downloads` on
+    /// startup): the repos folder is where `cd foo && ⌘↩` starts, and
+    /// `ATELIER_WORKDIR` overrides for machines shaped differently.
     private static func defaultWorkdir() -> String {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.path
