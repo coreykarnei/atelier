@@ -66,8 +66,11 @@ highlighting, `Theme.Editor` Mocha syntax palette, background `base` at
 fieldAlpha). `⌘O` open / `⌘S` save / dirty-close guard / per-session open-file
 persistence. Note: `Vendor/CodeEditSymbols` is a committed local override of an
 upstream transitive dep whose manifest only builds under Xcode — see the M2.1
-devlog. Not yet built: `⌘P` fuzzy picker (M2.2, on the summon idiom), `⌘⇧F`
-repo search (M2.3), multi-cursor polish (M2.4), LSP (M2.5).
+devlog. **M2.2 landed same day** — `⌘P` Go to File: `FilePicker` on the shared
+`SummonCardOverlay` (the palette's floating chrome, extracted), `git ls-files`
+offer with per-repo recents leading, dirty-buffer guard unified across
+close/open. Not yet built: `⌘⇧F` repo search (M2.3), multi-cursor polish
+(M2.4), LSP (M2.5).
 
 ## Commands
 

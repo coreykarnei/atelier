@@ -322,29 +322,46 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     /// `⌘W`. A dirty editor buffer gets the informative refusal first (§5):
     /// the file is named, the loss is stated, saving is one button away.
     func closeActiveSession() {
-        guard let session = activeSession, let window else { return }
-        guard session.editorPane.isDirty, let path = session.editorPane.filePath else {
-            forceCloseActiveSession()
+        guard let session = activeSession else { return }
+        guardDirtyBuffer(
+            in: session,
+            saveButton: "Save and Close",
+            informative: "Closing this session will discard them."
+        ) { [weak self] in
+            self?.forceCloseActiveSession()
+        }
+    }
+
+    /// Run `proceed` now if the session's buffer is clean; otherwise the
+    /// informative refusal — the file named, the loss stated, save one
+    /// button away.
+    private func guardDirtyBuffer(
+        in session: Session,
+        saveButton: String,
+        informative: String,
+        then proceed: @escaping () -> Void
+    ) {
+        guard session.editorPane.isDirty, let path = session.editorPane.filePath, let window else {
+            proceed()
             return
         }
         let alert = NSAlert()
         alert.messageText = "\((path as NSString).lastPathComponent) has unsaved changes"
-        alert.informativeText = "Closing this session will discard them."
-        alert.addButton(withTitle: "Save and Close")
+        alert.informativeText = informative
+        alert.addButton(withTitle: saveButton)
         alert.addButton(withTitle: "Discard")
         alert.addButton(withTitle: "Cancel")
         alert.beginSheetModal(for: window) { [weak self] response in
-            guard let self else { return }
             switch response {
             case .alertFirstButtonReturn:
                 do {
                     try session.editorPane.save()
-                    self.forceCloseActiveSession()
+                    proceed()
                 } catch {
-                    self.presentError(title: "Couldn't save \((path as NSString).lastPathComponent)", error: error)
+                    self?.presentError(title: "Couldn't save \((path as NSString).lastPathComponent)", error: error)
                 }
             case .alertSecondButtonReturn:
-                self.forceCloseActiveSession()
+                proceed()
             default:
                 break
             }
@@ -422,16 +439,60 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         }
     }
 
+    /// The one buffer is precious (M2.1): opening over unsaved edits gets the
+    /// same refusal closing does.
     private func openInEditor(url: URL, session: Session) {
-        do {
-            try session.editorPane.open(path: url.path)
-            if session === activeSession {
-                if session.layoutMode == .split { toggleLayout() }
-                window?.makeFirstResponder(session.editorPane.focusView)
+        guardDirtyBuffer(
+            in: session,
+            saveButton: "Save and Open",
+            informative: "Opening \(url.lastPathComponent) will discard them."
+        ) { [weak self] in
+            guard let self else { return }
+            do {
+                try session.editorPane.open(path: url.path)
+                if session === self.activeSession {
+                    if session.layoutMode == .split { self.toggleLayout() }
+                    self.window?.makeFirstResponder(session.editorPane.focusView)
+                }
+            } catch {
+                self.presentError(title: "Couldn't open \(url.lastPathComponent)", error: error)
             }
-        } catch {
-            presentError(title: "Couldn't open \(url.lastPathComponent)", error: error)
         }
+    }
+
+    // MARK: File picker (M2.2 — the ⌘P summon)
+
+    private var filePicker: FilePicker?
+
+    func showFilePicker() {
+        guard filePicker == nil, palette == nil,
+              let session = activeSession, session.state == .ide,
+              let container = window?.contentView else { return }
+
+        let overlay = FilePicker(
+            root: session.cwd,
+            onDismiss: { [weak self] in self?.dismissFilePicker() },
+            onOpen: { [weak self] url in self?.openInEditor(url: url, session: session) }
+        )
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(overlay)
+        let contentTop = (window?.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? container.topAnchor
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: contentTop),
+            overlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            overlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        filePicker = overlay
+        captureFocusForOverlay()
+        window?.makeFirstResponder(overlay.focusField)
+        overlay.animateIn()
+    }
+
+    private func dismissFilePicker() {
+        filePicker?.removeFromSuperview()
+        filePicker = nil
+        restorePreOverlayFocus()
     }
 
     /// `⌘S` — write the buffer back to its file.
@@ -877,7 +938,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     private var palette: CommandPalette?
 
     func showPalette() {
-        guard palette == nil, let container = window?.contentView else { return }
+        guard palette == nil, filePicker == nil, let container = window?.contentView else { return }
 
         let overlay = CommandPalette(commands: paletteCommands()) { [weak self] in
             self?.dismissPalette()
@@ -955,6 +1016,9 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         }
 
         if activeSession?.state == .ide {
+            commands.append(PaletteCommand(id: "editor.goto", title: "Editor: Go to File…", key: "⌘P") { [weak self] in
+                self?.showFilePicker()
+            })
             commands.append(PaletteCommand(id: "editor.open", title: "Editor: Open File…", key: "⌘O") { [weak self] in
                 self?.openFileInEditor()
             })

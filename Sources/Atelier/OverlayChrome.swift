@@ -50,6 +50,137 @@ final class SlidingSelectionHighlight {
     }
 }
 
+/// The floating summon card (POLISH_PLAN §6 physiology, extracted for M2.2):
+/// scrim, hud-blur card descending from the titlebar, top hairline, and a
+/// SummonList whose height the card hugs as you type. The command palette and
+/// the `⌘P` file picker are both this overlay with different offers.
+class SummonCardOverlay: NSView {
+    let summon: SummonList
+    private let onDismissHandler: () -> Void
+
+    /// Carries the floating shadow; the card itself masks to its rounded
+    /// corners, which would clip a shadow set on its own layer.
+    private let cardHost = NSView()
+    private let card = NSVisualEffectView()
+    private var listHeight: NSLayoutConstraint?
+    private let maxListHeight: CGFloat
+
+    init(summonStyle: SummonList.Style, maxListHeight: CGFloat = 300, onDismiss: @escaping () -> Void) {
+        self.summon = SummonList(style: summonStyle)
+        self.maxListHeight = maxListHeight
+        self.onDismissHandler = onDismiss
+        super.init(frame: .zero)
+        build()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func build() {
+        // Scrim: swallow clicks; a click outside the card dismisses (§Phase-0
+        // lighting model: modals get a dimmed scrim).
+        wantsLayer = true
+        layer?.backgroundColor = Theme.Elevation.scrim.cgColor
+
+        cardHost.wantsLayer = true
+        cardHost.shadow = Theme.Elevation.floatingShadow
+        cardHost.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(cardHost)
+
+        card.material = .hudWindow
+        card.blendingMode = .withinWindow
+        card.state = .active
+        card.wantsLayer = true
+        card.layer?.cornerRadius = Theme.Elevation.radiusLarge
+        card.layer?.masksToBounds = true
+        card.translatesAutoresizingMaskIntoConstraints = false
+        cardHost.addSubview(card)
+
+        // Light from above: the 1 px top hairline of a floating surface.
+        let topHairline = NSBox()
+        topHairline.boxType = .custom
+        topHairline.fillColor = Theme.Elevation.hairline
+        topHairline.borderWidth = 0
+        topHairline.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(topHairline)
+
+        summon.translatesAutoresizingMaskIntoConstraints = false
+        summon.onEscape = { [weak self] in self?.dismiss() }
+        summon.onContentChange = { [weak self] in self?.trackContentHeight() }
+        card.addSubview(summon)
+
+        NSLayoutConstraint.activate([
+            cardHost.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            cardHost.centerXAnchor.constraint(equalTo: centerXAnchor),
+            cardHost.widthAnchor.constraint(equalToConstant: 560),
+
+            card.topAnchor.constraint(equalTo: cardHost.topAnchor),
+            card.leadingAnchor.constraint(equalTo: cardHost.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: cardHost.trailingAnchor),
+            card.bottomAnchor.constraint(equalTo: cardHost.bottomAnchor),
+
+            topHairline.topAnchor.constraint(equalTo: card.topAnchor),
+            topHairline.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            topHairline.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            topHairline.heightAnchor.constraint(equalToConstant: 1),
+
+            summon.topAnchor.constraint(equalTo: card.topAnchor),
+            summon.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            summon.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            summon.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+        ])
+
+        let height = summon.makeListHeightConstraint(constant: min(summon.contentHeight, maxListHeight))
+        height.isActive = true
+        listHeight = height
+    }
+
+    func dismiss() { onDismissHandler() }
+
+    /// The panel height tracks the results as you type (§6 — the single
+    /// biggest "native" tell).
+    private func trackContentHeight() {
+        let newHeight = min(summon.contentHeight, maxListHeight)
+        guard let listHeight, listHeight.constant != newHeight else { return }
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            listHeight.constant = newHeight
+        } else {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.15
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                ctx.allowsImplicitAnimation = true
+                listHeight.animator().constant = newHeight
+                self.layoutSubtreeIfNeeded()
+            }
+        }
+    }
+
+    /// The Spotlight descent (§6): the card drops in from the titlebar edge,
+    /// settling in ~180 ms. Reduce Motion gets a plain appear.
+    func animateIn() {
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        layoutSubtreeIfNeeded()
+        let target = cardHost.frame
+        cardHost.frame = target.offsetBy(dx: 0, dy: 10) // AppKit y-up: start higher
+        cardHost.alphaValue = 0
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.18
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            ctx.allowsImplicitAnimation = true
+            cardHost.animator().frame = target
+            cardHost.animator().alphaValue = 1
+        }
+    }
+
+    /// The view to focus once presented.
+    var focusField: NSView { summon.focusField }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if !cardHost.frame.contains(point) { dismiss() }
+    }
+}
+
 /// A keycap chip (Theme.Typography.Keycap): mono glyphs on a surface0 fill,
 /// 4 pt radius, hairline top edge — obeying the lighting model.
 final class KeycapChipView: NSView {

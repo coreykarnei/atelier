@@ -58,6 +58,7 @@ enum Menu {
 
         viewMenu.addItem(withTitle: "Toggle Layout", action: #selector(AppDelegate.toggleLayout(_:)), keyEquivalent: "\\")
         viewMenu.addItem(chord("Command Palette…", #selector(AppDelegate.showPalette(_:)), "p", [.command, .shift]))
+        viewMenu.addItem(withTitle: "Go to File…", action: #selector(AppDelegate.goToFile(_:)), keyEquivalent: "p")
         viewMenu.addItem(.separator())
 
         viewMenu.addItem(withTitle: "New Project Tab", action: #selector(AppDelegate.newProject(_:)), keyEquivalent: "t")

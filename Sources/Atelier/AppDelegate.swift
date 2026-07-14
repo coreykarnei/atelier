@@ -263,6 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func openFile(_ sender: Any?) { keyController?.openFileInEditor() }
     @objc func saveFile(_ sender: Any?) { keyController?.saveEditor() }
+    @objc func goToFile(_ sender: Any?) { keyController?.showFilePicker() }
     @objc func nextSession(_ sender: Any?) { keyController?.selectNext() }
     @objc func prevSession(_ sender: Any?) { keyController?.selectPrev() }
 
@@ -279,7 +280,7 @@ extension AppDelegate: NSMenuItemValidation {
         if menuItem.action == #selector(reopenSession(_:)) {
             return keyController?.canReopenClosedSession ?? false
         }
-        if menuItem.action == #selector(openFile(_:)) {
+        if menuItem.action == #selector(openFile(_:)) || menuItem.action == #selector(goToFile(_:)) {
             return keyController?.canUseEditor ?? false
         }
         if menuItem.action == #selector(saveFile(_:)) {
