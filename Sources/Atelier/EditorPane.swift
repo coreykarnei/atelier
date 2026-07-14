@@ -113,6 +113,12 @@ final class EditorPane: NSView, WorkspacePane {
         emptyLabel.isHidden = true
     }
 
+    /// Put the caret at `line:column` (1-indexed) and scroll it into view —
+    /// how a search hit lands (M2.3).
+    func reveal(line: Int, column: Int) {
+        controller?.setCursorPositions([CursorPosition(line: line, column: column)], scrollToVisible: true)
+    }
+
     /// Write the buffer back to its file.
     func save() throws {
         guard let controller, let filePath else { return }

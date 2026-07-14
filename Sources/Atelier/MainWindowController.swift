@@ -440,8 +440,8 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     }
 
     /// The one buffer is precious (M2.1): opening over unsaved edits gets the
-    /// same refusal closing does.
-    private func openInEditor(url: URL, session: Session) {
+    /// same refusal closing does. `cursor` lands a search hit (M2.3).
+    private func openInEditor(url: URL, session: Session, cursor: (line: Int, column: Int)? = nil) {
         guardDirtyBuffer(
             in: session,
             saveButton: "Save and Open",
@@ -450,6 +450,9 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             guard let self else { return }
             do {
                 try session.editorPane.open(path: url.path)
+                if let cursor {
+                    session.editorPane.reveal(line: cursor.line, column: cursor.column)
+                }
                 if session === self.activeSession {
                     if session.layoutMode == .split { self.toggleLayout() }
                     self.window?.makeFirstResponder(session.editorPane.focusView)
@@ -465,7 +468,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     private var filePicker: FilePicker?
 
     func showFilePicker() {
-        guard filePicker == nil, palette == nil,
+        guard filePicker == nil, palette == nil, repoSearch == nil,
               let session = activeSession, session.state == .ide,
               let container = window?.contentView else { return }
 
@@ -492,6 +495,43 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     private func dismissFilePicker() {
         filePicker?.removeFromSuperview()
         filePicker = nil
+        restorePreOverlayFocus()
+    }
+
+    // MARK: Repo search (M2.3 — the ⌘⇧F summon)
+
+    private var repoSearch: RepoSearchOverlay?
+
+    func showRepoSearch() {
+        guard repoSearch == nil, palette == nil, filePicker == nil,
+              let session = activeSession, session.state == .ide,
+              let container = window?.contentView else { return }
+
+        let overlay = RepoSearchOverlay(
+            root: session.cwd,
+            onDismiss: { [weak self] in self?.dismissRepoSearch() },
+            onOpen: { [weak self] url, line, column in
+                self?.openInEditor(url: url, session: session, cursor: (line, column))
+            }
+        )
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(overlay)
+        let contentTop = (window?.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? container.topAnchor
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: contentTop),
+            overlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            overlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        repoSearch = overlay
+        captureFocusForOverlay()
+        window?.makeFirstResponder(overlay.focusField)
+        overlay.animateIn()
+    }
+
+    private func dismissRepoSearch() {
+        repoSearch?.removeFromSuperview()
+        repoSearch = nil
         restorePreOverlayFocus()
     }
 
@@ -938,7 +978,8 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     private var palette: CommandPalette?
 
     func showPalette() {
-        guard palette == nil, filePicker == nil, let container = window?.contentView else { return }
+        guard palette == nil, filePicker == nil, repoSearch == nil,
+              let container = window?.contentView else { return }
 
         let overlay = CommandPalette(commands: paletteCommands()) { [weak self] in
             self?.dismissPalette()
@@ -1018,6 +1059,9 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         if activeSession?.state == .ide {
             commands.append(PaletteCommand(id: "editor.goto", title: "Editor: Go to File…", key: "⌘P") { [weak self] in
                 self?.showFilePicker()
+            })
+            commands.append(PaletteCommand(id: "editor.search", title: "Editor: Find in Repo…", key: "⌘⇧F") { [weak self] in
+                self?.showRepoSearch()
             })
             commands.append(PaletteCommand(id: "editor.open", title: "Editor: Open File…", key: "⌘O") { [weak self] in
                 self?.openFileInEditor()

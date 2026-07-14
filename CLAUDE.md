@@ -69,8 +69,10 @@ upstream transitive dep whose manifest only builds under Xcode — see the M2.1
 devlog. **M2.2 landed same day** — `⌘P` Go to File: `FilePicker` on the shared
 `SummonCardOverlay` (the palette's floating chrome, extracted), `git ls-files`
 offer with per-repo recents leading, dirty-buffer guard unified across
-close/open. Not yet built: `⌘⇧F` repo search (M2.3), multi-cursor polish
-(M2.4), LSP (M2.5).
+close/open. **M2.3 landed same day** — `⌘⇧F` Find in Repo: `RepoSearchOverlay`,
+the first externally-filtered summon (debounced rg / `git grep -F` fallback,
+capped with an honest tail row, `↩` opens the hit at line:column via
+`EditorPane.reveal`). Not yet built: multi-cursor polish (M2.4), LSP (M2.5).
 
 ## Commands
 

@@ -51,6 +51,11 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
         /// `Esc` with a live query clears it first (Raycast); a second `Esc`
         /// reaches `onEscape`. Off = `Esc` escapes immediately (VSCode palette).
         let escClearsQueryFirst: Bool
+        /// On = the list fuzzy-filters its items against the query (palette,
+        /// landing, ⌘P). Off = the query *produces* the items — the host
+        /// listens on `onQueryChange` and calls `setItems` with fresh results
+        /// (⌘⇧F repo search).
+        var filtersLocally: Bool = true
     }
 
     var onActivate: ((SummonItem) -> Void)?
@@ -58,6 +63,9 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
     /// Fired whenever the filtered row set changes — hosts that size themselves
     /// to the content (the palette card) track it; embedded hosts ignore it.
     var onContentChange: (() -> Void)?
+    /// Externally-filtered surfaces only (`filtersLocally: false`): the query
+    /// changed — go produce a new offer.
+    var onQueryChange: ((String) -> Void)?
 
     var focusField: NSView { field }
     private(set) var query = ""
@@ -179,7 +187,7 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
 
     private func refilter(preserving keepId: String? = nil) {
         let q = query.lowercased().trimmingCharacters(in: .whitespaces)
-        filtered = q.isEmpty
+        filtered = (q.isEmpty || !style.filtersLocally)
             ? items
             : items.filter { fuzzyMatches(query: q, candidate: $0.matchText) }
         table.reloadData()
@@ -216,6 +224,7 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
 
     func controlTextDidChange(_ obj: Notification) {
         query = field.stringValue
+        if !style.filtersLocally { onQueryChange?(query) }
         refilter()
     }
 
