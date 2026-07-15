@@ -95,6 +95,30 @@ Pi-side hooks; `pkill`ed the forward → self-healed in one retry and the
 next prompt's dot still arrived; quit reaps the forward; restore with the
 host unplugged lands in the reconnecting placard instead of an orphan alert.
 
+## Addendum, same evening: truecolor and the second ⌘\
+
+The owner read the remote claude as muted. Three real causes, peeled in
+order (commits cff7d16, fcca6ff): tmux downsampled RGB to the 256 palette
+without a `Tc` terminal-override; inner processes had no `COLORTERM` (and
+the initial panes *race the conf parse*, so the conf's `set-environment`
+isn't enough — the pane commands set it explicitly, and conf writes went
+atomic after the two panes' concurrent bootstraps were caught truncating
+the conf mid-parse); and the one that mattered most — **Claude Code
+fingerprints tmux via TMUX/TERM_PROGRAM and self-downgrades to
+indexed-256, ignoring COLORTERM and FORCE_COLOR**. The agent command now
+unsets the fingerprints before exec. Proof method worth keeping: a
+`48;2`-gradient in the pane proves transport, `tmux capture-pane -e`
+shows what the app emitted (38;2 vs 38;5), `script -qec` captures raw
+emission outside tmux.
+
+Also: ⌘\ on a remote session now cycles stacked ↔ `splitSide` (shell
+left, agent right at the ide script's 53%) — and the first toggle
+exposed a real bug: rebuildLayout walked the terminals through a
+transient 0-column frame, the resize reached the Pi, and claude died
+(exit-empty then reaped its session; the clean exit correctly didn't
+reattach). rebuildLayout now freezes PTY resizes for its duration, the
+divider-drag rule applied one level up.
+
 ## Follow-ups (not blocking)
 
 - Live tab titles for remote sessions (read the transcript's `ai-title`
