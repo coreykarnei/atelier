@@ -277,9 +277,15 @@ final class Session: NSObject, NSSplitViewDelegate {
                     title: displayTitle, subtitle: "reattaching to \(host)…"
                 )
             }
+            // The unsets matter as much as COLORTERM: Claude Code fingerprints
+            // tmux via TMUX/TERM_PROGRAM and self-downgrades to indexed-256
+            // (ignoring COLORTERM and even FORCE_COLOR) — the owner's "muted"
+            // pane. tmux itself passes RGB fine (Tc); hide the fingerprints
+            // and claude emits truecolor. Verified against jarvis 2026-07-14.
             startRemotePane(
                 agentPane, host: host, suffix: "ai",
-                command: "bash -lc \"COLORTERM=truecolor exec claude \(flag) \(claudeSessionId)\""
+                command: "bash -lc \"unset TMUX TMUX_PANE TERM_PROGRAM TERM_PROGRAM_VERSION;"
+                    + " COLORTERM=truecolor exec claude \(flag) \(claudeSessionId)\""
             )
             return
         }
