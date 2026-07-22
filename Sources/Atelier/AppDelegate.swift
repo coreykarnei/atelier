@@ -244,10 +244,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notificationServer.stop()
     }
 
-    /// Closing the last project tab kicks back to the Launch view, not out of the
-    /// app: a fresh Landing window opens in its place (unless we're quitting).
+    /// Closing the last project window closes the app — the close button means
+    /// leave, not "swap my window for a fresh Landing" (owner report
+    /// 2026-07-21; the old respawn read as a window that refused to die).
+    /// The by-hand close path saves no meaningful snapshot ("I closed my
+    /// projects"), so relaunch starts at the Launch view anyway.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        false
+        true
     }
 
     private var isTerminating = false
@@ -285,14 +288,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // these sessions back, so their remote side must survive.
             controllers[index].terminateAllSessions(killRemote: !isTerminating)
             controllers.remove(at: index)
-        }
-        // Last project tab closed → back to the Launch view (a fresh Landing),
-        // not out of the app. Deferred so the close finishes unwinding first.
-        if controllers.isEmpty, !isTerminating {
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.controllers.isEmpty, !self.isTerminating else { return }
-                self.openProjectWindow()
-            }
         }
     }
 
