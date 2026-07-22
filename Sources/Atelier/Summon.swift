@@ -138,6 +138,14 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
         table.allowsEmptySelection = false
         table.target = self
         table.action = #selector(rowClicked)
+        // Mouse-over moves the selection (Raycast): what's under the pointer
+        // is what `↩` opens. The highlight glides like the arrows'; no scroll —
+        // the hovered row is by definition already visible.
+        table.onHoverRow = { [weak self] row in
+            guard let self, row != table.selectedRow, filtered.indices.contains(row) else { return }
+            table.selectRowIndexes([row], byExtendingSelection: false)
+            highlight.update(for: table, animated: true)
+        }
         table.addTableColumn(NSTableColumn(identifier: .init("summon")))
 
         scroll.documentView = table
@@ -306,7 +314,30 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
 
 /// The summon list never takes keyboard focus — the field keeps it, so typing
 /// keeps filtering no matter what was last clicked. Clicks still select and
-/// activate via the table's target/action.
+/// activate via the table's target/action. The pointer participates without
+/// owning: moving over a row reports it (the host slides the selection there),
+/// but only actual movement fires — arrows keep winning until the mouse moves.
 private final class SummonTableView: NSTableView {
     override var acceptsFirstResponder: Bool { false }
+
+    var onHoverRow: ((Int) -> Void)?
+    private var hoverTracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTracking { removeTrackingArea(hoverTracking) }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverTracking = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        let row = row(at: convert(event.locationInWindow, from: nil))
+        if row >= 0 { onHoverRow?(row) }
+    }
 }

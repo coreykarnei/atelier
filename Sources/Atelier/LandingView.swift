@@ -357,6 +357,10 @@ final class LandingView: NSView, WorkspacePane {
     /// that directory on that host — the colon defeats subsequence matching
     /// against the bare host row, so the row is *made*, not matched.
     private func injectRemoteQueryItem(for query: String) {
+        if let pathItems = pathModeItems(for: query) {
+            summon.setItems(pathItems)
+            return
+        }
         var items = Self.items(for: entries)
         if let target = parseRemoteQuery(query) {
             let text = NSMutableAttributedString()
@@ -376,6 +380,82 @@ final class LandingView: NSView, WorkspacePane {
             ), at: 0)
         }
         summon.setItems(items)
+    }
+
+    // MARK: Path mode
+
+    /// A leading `/` or `~` turns the query into a filesystem walk: the offer
+    /// becomes the typed directory's children instead of the repo scan.
+    /// `/repositories` lists that folder (falling back to home-relative when
+    /// the root-anchored path doesn't exist, so the leading slash never costs
+    /// a `~`), `/repositories/ate` narrows to the prefix-matching children,
+    /// and selecting any row opens it like a scanned entry. Rows carry the
+    /// live query as their matchText — like the `host:dir` row, they're
+    /// *made* for this query, not matched against it.
+    private func pathModeItems(for query: String) -> [SummonItem]? {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard q.hasPrefix("/") || q.hasPrefix("~") else { return nil }
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser.path
+
+        func existingDir(_ path: String) -> String? {
+            var isDir: ObjCBool = false
+            if fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue { return path }
+            if path.hasPrefix("/"), !path.hasPrefix(home) {
+                let fallback = home + path
+                if fm.fileExists(atPath: fallback, isDirectory: &isDir), isDir.boolValue { return fallback }
+            }
+            return nil
+        }
+
+        let expanded = ((q.hasPrefix("~") ? home + q.dropFirst() : q) as NSString).standardizingPath
+        let dir: String
+        let filter: String
+        if let d = existingDir(expanded) {
+            dir = d
+            filter = ""
+        } else if let d = existingDir((expanded as NSString).deletingLastPathComponent) {
+            dir = d
+            filter = (expanded as NSString).lastPathComponent.lowercased()
+        } else {
+            return []
+        }
+
+        let children = ((try? fm.contentsOfDirectory(atPath: dir)) ?? [])
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            .filter { name in
+                // Dotfolders stay hidden unless the filter asks for them.
+                guard filter.hasPrefix(".") || !name.hasPrefix(".") else { return false }
+                var isDir: ObjCBool = false
+                return fm.fileExists(atPath: "\(dir)/\(name)", isDirectory: &isDir) && isDir.boolValue
+            }
+
+        // Completion semantics, not palette semantics: prefix first, and only
+        // when nothing starts with the fragment does subsequence rescue it.
+        let matched: [String]
+        if filter.isEmpty {
+            matched = children
+        } else {
+            let prefixed = children.filter { $0.lowercased().hasPrefix(filter) }
+            matched = prefixed.isEmpty
+                ? children.filter { fuzzyMatches(query: filter, candidate: $0.lowercased()) }
+                : prefixed
+        }
+
+        let detail = "  " + dir.replacingOccurrences(of: home, with: "~")
+        let matchText = q.lowercased()
+        return matched.map { name in
+            let text = NSMutableAttributedString()
+            text.append(NSAttributedString(string: name, attributes: [
+                .font: Theme.Typography.mono(Theme.Typography.body, weight: .medium),
+                .foregroundColor: Theme.chromeText,
+            ]))
+            text.append(NSAttributedString(string: detail, attributes: [
+                .font: Theme.Typography.mono(Theme.Typography.small),
+                .foregroundColor: Theme.chromeMutedText,
+            ]))
+            return SummonItem(id: "\(dir)/\(name)", text: text, matchText: matchText, chord: nil)
+        }
     }
 
     private func parseRemoteQuery(_ query: String) -> RemoteTarget? {
