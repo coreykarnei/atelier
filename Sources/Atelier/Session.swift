@@ -121,6 +121,9 @@ final class Session: NSObject, NSSplitViewDelegate {
         let landing = LandingView(defaultFolder: cwd)
         landing.onOpen = { [weak self] path in self?.promote(to: path) }
         landing.onOpenRemote = { [weak self] host, dir in self?.onRemoteRequested?(host, dir) }
+        landing.liveCwd = { [weak self] in
+            self?.shellPane.hostedPid.flatMap(ProcessCwd.cwd(of:))
+        }
         landingView = landing
 
         rebuildLayout()
@@ -182,6 +185,9 @@ final class Session: NSObject, NSSplitViewDelegate {
             let landing = LandingView(defaultFolder: cwd)
             landing.onOpen = { [weak self] path in self?.promote(to: path) }
             landing.onOpenRemote = { [weak self] host, dir in self?.onRemoteRequested?(host, dir) }
+            landing.liveCwd = { [weak self] in
+                self?.shellPane.hostedPid.flatMap(ProcessCwd.cwd(of:))
+            }
             landingView = landing
         }
         rebuildLayout()

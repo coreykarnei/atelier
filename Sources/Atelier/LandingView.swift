@@ -58,6 +58,12 @@ final class LandingView: NSView, WorkspacePane {
     /// Called with the chosen remote target (host, remote dir).
     var onOpenRemote: ((String, String) -> Void)?
 
+    /// The landing terminal's live working directory — the same truth `⌘↩`
+    /// promotes on. Path-mode queries resolve relative to it first: the
+    /// summon is an extension of that terminal, so `/foo` means what it
+    /// would mean rendered there. Nil (or unset) falls back to home.
+    var liveCwd: (() -> String?)?
+
     var focusView: NSView { summon.focusField }
 
     private let summon: SummonList
@@ -194,6 +200,14 @@ final class LandingView: NSView, WorkspacePane {
     override func updateLayer() {
         layer?.backgroundColor = Theme.Elevation.mantle.cgColor
         card.layer?.backgroundColor = Theme.Elevation.base.cgColor
+    }
+
+    /// Dead space is a return path: a click anywhere off the card (the terminal
+    /// stole focus, the eye wanders back up) puts the cursor straight back in
+    /// the field — no aiming at the field itself required. Card and list
+    /// clicks hit their own subviews and never reach here.
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(summon.focusField)
     }
 
     @objc private func accessibilityDisplayChanged() {
@@ -386,25 +400,33 @@ final class LandingView: NSView, WorkspacePane {
 
     /// A leading `/` or `~` turns the query into a filesystem walk: the offer
     /// becomes the typed directory's children instead of the repo scan.
-    /// `/repositories` lists that folder (falling back to home-relative when
-    /// the root-anchored path doesn't exist, so the leading slash never costs
-    /// a `~`), `/repositories/ate` narrows to the prefix-matching children,
-    /// and selecting any row opens it like a scanned entry. Rows carry the
-    /// live query as their matchText — like the `host:dir` row, they're
-    /// *made* for this query, not matched against it.
+    /// A path that doesn't exist root-anchored resolves against the landing
+    /// terminal's cwd, then home — the summon extends the terminal below it,
+    /// so `/atelier` reaches `<cwd>/atelier` and the leading slash never
+    /// costs a `~`. `/repositories/ate` narrows to the prefix-matching
+    /// children, and selecting any row opens it like a scanned entry. Rows
+    /// carry the live query as their matchText — like the `host:dir` row,
+    /// they're *made* for this query, not matched against it.
     private func pathModeItems(for query: String) -> [SummonItem]? {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard q.hasPrefix("/") || q.hasPrefix("~") else { return nil }
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.path
+        let anchors = [liveCwd?() ?? defaultFolder, home]
 
         func existingDirs(_ path: String) -> [String] {
             var out: [String] = []
             var isDir: ObjCBool = false
-            if fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue { out.append(path) }
-            if path.hasPrefix("/"), !path.hasPrefix(home) {
-                let fallback = home + path
-                if fm.fileExists(atPath: fallback, isDirectory: &isDir), isDir.boolValue { out.append(fallback) }
+            func offer(_ p: String) {
+                guard !out.contains(p),
+                      fm.fileExists(atPath: p, isDirectory: &isDir), isDir.boolValue else { return }
+                out.append(p)
+            }
+            offer(path)
+            if path.hasPrefix("/") {
+                for anchor in anchors where !path.hasPrefix(anchor) {
+                    offer(anchor + path)
+                }
             }
             return out
         }
