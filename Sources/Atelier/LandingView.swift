@@ -267,13 +267,24 @@ final class LandingView: NSView, WorkspacePane {
 
     private static func items(for entries: [LandingEntry]) -> [SummonItem] {
         entries.map { entry in
-            SummonItem(
+            // ⇥ on a repo fills its name; on a bare host, `host:` — priming
+            // the host:dir syntax; on a remote recent, its full host:dir.
+            let fill: String
+            if entry.host == nil {
+                fill = entry.name
+            } else if let target = RemoteTarget.parse(entry.path) {
+                fill = target.dir == "~" ? "\(target.host):" : "\(target.host):\(target.dir)"
+            } else {
+                fill = entry.name
+            }
+            return SummonItem(
                 id: entry.path,
                 text: rowText(for: entry),
                 matchText: entry.host == nil
                     ? entry.name.lowercased()
                     : entry.path.dropFirst("ssh://".count).lowercased(),
-                chord: nil
+                chord: nil,
+                fill: fill
             )
         }
     }
@@ -371,7 +382,7 @@ final class LandingView: NSView, WorkspacePane {
     /// that directory on that host — the colon defeats subsequence matching
     /// against the bare host row, so the row is *made*, not matched.
     private func injectRemoteQueryItem(for query: String) {
-        if let pathItems = pathModeItems(for: query) {
+        if parseRemoteQuery(query) == nil, let pathItems = pathModeItems(for: query) {
             summon.setItems(pathItems)
             return
         }
@@ -393,6 +404,10 @@ final class LandingView: NSView, WorkspacePane {
                 chord: nil
             ), at: 0)
         }
+        // Bare-word folder completion (`ide repos…`): anchor children whose
+        // names start with the query join the offer *below* every project
+        // match — projects outrank plain folders.
+        items += folderSuggestions(for: query, excluding: Set(entries.map(\.path)))
         summon.setItems(items)
     }
 
@@ -409,7 +424,9 @@ final class LandingView: NSView, WorkspacePane {
     /// they're *made* for this query, not matched against it.
     private func pathModeItems(for query: String) -> [SummonItem]? {
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard q.hasPrefix("/") || q.hasPrefix("~") else { return nil }
+        // Any slash (or `~`) makes the query a path; a colon means host:dir,
+        // which is never a local walk.
+        guard q.contains("/") || q.hasPrefix("~"), !q.contains(":") else { return nil }
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.path
         let anchors = [liveCwd?() ?? defaultFolder, home]
@@ -422,11 +439,15 @@ final class LandingView: NSView, WorkspacePane {
                       fm.fileExists(atPath: p, isDirectory: &isDir), isDir.boolValue else { return }
                 out.append(p)
             }
-            offer(path)
             if path.hasPrefix("/") {
+                offer(path)
                 for anchor in anchors where !path.hasPrefix(anchor) {
                     offer(anchor + path)
                 }
+            } else {
+                // Relative (`repositories/ate`): the terminal's cwd, then home
+                // — never the process's own working directory.
+                for anchor in anchors { offer("\(anchor)/\(path)") }
             }
             return out
         }
@@ -476,20 +497,56 @@ final class LandingView: NSView, WorkspacePane {
             }
         }
 
-        let detail = "  " + dir.replacingOccurrences(of: home, with: "~")
         let matchText = q.lowercased()
-        return matched.map { name in
-            let text = NSMutableAttributedString()
-            text.append(NSAttributedString(string: name, attributes: [
-                .font: Theme.Typography.mono(Theme.Typography.body, weight: .medium),
-                .foregroundColor: Theme.chromeText,
-            ]))
-            text.append(NSAttributedString(string: detail, attributes: [
-                .font: Theme.Typography.mono(Theme.Typography.small),
-                .foregroundColor: Theme.chromeMutedText,
-            ]))
-            return SummonItem(id: "\(dir)/\(name)", text: text, matchText: matchText, chord: nil)
+        return matched.map { pathItem(dir: dir, name: $0, matchText: matchText) }
+    }
+
+    /// A folder row: name mono, containing dir muted, `⇥` completing to the
+    /// `~`-shortened path with a trailing `/` so the walk continues.
+    private func pathItem(dir: String, name: String, matchText: String? = nil) -> SummonItem {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let text = NSMutableAttributedString()
+        text.append(NSAttributedString(string: name, attributes: [
+            .font: Theme.Typography.mono(Theme.Typography.body, weight: .medium),
+            .foregroundColor: Theme.chromeText,
+        ]))
+        text.append(NSAttributedString(string: "  " + dir.replacingOccurrences(of: home, with: "~"), attributes: [
+            .font: Theme.Typography.mono(Theme.Typography.small),
+            .foregroundColor: Theme.chromeMutedText,
+        ]))
+        let path = "\(dir)/\(name)"
+        return SummonItem(
+            id: path,
+            text: text,
+            matchText: matchText ?? name.lowercased(),
+            chord: nil,
+            fill: path.replacingOccurrences(of: home, with: "~") + "/"
+        )
+    }
+
+    /// Bare-word completion, the `ide repos…` gesture: anchor-directory
+    /// children whose names start with the query, offered beneath the project
+    /// matches. Prefix only — a bare word should complete like a shell, not
+    /// pattern-match the whole disk.
+    private func folderSuggestions(for query: String, excluding taken: Set<String>) -> [SummonItem] {
+        let q = query.lowercased().trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty, !q.contains("/"), !q.contains(":"), !q.hasPrefix("~") else { return [] }
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser.path
+        var seen = taken
+        var out: [SummonItem] = []
+        for anchor in [liveCwd?() ?? defaultFolder, home] {
+            let children = ((try? fm.contentsOfDirectory(atPath: anchor)) ?? [])
+                .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            for name in children where name.lowercased().hasPrefix(q) && !name.hasPrefix(".") {
+                let path = "\(anchor)/\(name)"
+                var isDir: ObjCBool = false
+                guard fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue,
+                      seen.insert(path).inserted else { continue }
+                out.append(pathItem(dir: anchor, name: name))
+            }
         }
+        return Array(out.prefix(8))
     }
 
     private func parseRemoteQuery(_ query: String) -> RemoteTarget? {

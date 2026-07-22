@@ -24,6 +24,11 @@ struct SummonItem {
     let matchText: String
     /// Optional trailing keycap chord (the surface teaches the keymap).
     let chord: String?
+    /// What `⇥` writes into the field (terminal tab-completion): the row's
+    /// textual identity — a repo name, `host:`, a path ending in `/` that
+    /// re-sources the walk. `⇥` only ever rewrites the query; it never
+    /// activates. Nil = the row offers no completion.
+    var fill: String? = nil
 }
 
 /// Subsequence match — `wt` finds "worktree: …", `tl` finds "toggle layout".
@@ -261,6 +266,19 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
                 refilter()
             } else {
                 onEscape?()
+            }
+            return true
+        case #selector(NSResponder.insertTab(_:)):
+            // Complete to the selected row, shell-style. The rewritten query
+            // flows through the normal keystroke pipeline (onQueryChange →
+            // refilter), so the host's offer logic reacts as if it were typed.
+            if filtered.indices.contains(table.selectedRow),
+               let fill = filtered[table.selectedRow].fill, fill != query {
+                field.stringValue = fill
+                query = fill
+                field.currentEditor()?.selectedRange = NSRange(location: (fill as NSString).length, length: 0)
+                onQueryChange?(fill)
+                refilter()
             }
             return true
         case #selector(NSResponder.moveDown(_:)):
