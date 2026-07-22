@@ -139,12 +139,13 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
         table.target = self
         table.action = #selector(rowClicked)
         // Mouse-over moves the selection (Raycast): what's under the pointer
-        // is what `↩` opens. The highlight glides like the arrows'; no scroll —
+        // is what `↩` opens. No glide — the highlight must track pointer
+        // speed exactly, so it snaps; arrows keep their slide. No scroll —
         // the hovered row is by definition already visible.
         table.onHoverRow = { [weak self] row in
             guard let self, row != table.selectedRow, filtered.indices.contains(row) else { return }
             table.selectRowIndexes([row], byExtendingSelection: false)
-            highlight.update(for: table, animated: true)
+            highlight.update(for: table, animated: false)
         }
         table.addTableColumn(NSTableColumn(identifier: .init("summon")))
 

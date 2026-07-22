@@ -398,48 +398,60 @@ final class LandingView: NSView, WorkspacePane {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.path
 
-        func existingDir(_ path: String) -> String? {
+        func existingDirs(_ path: String) -> [String] {
+            var out: [String] = []
             var isDir: ObjCBool = false
-            if fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue { return path }
+            if fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue { out.append(path) }
             if path.hasPrefix("/"), !path.hasPrefix(home) {
                 let fallback = home + path
-                if fm.fileExists(atPath: fallback, isDirectory: &isDir), isDir.boolValue { return fallback }
+                if fm.fileExists(atPath: fallback, isDirectory: &isDir), isDir.boolValue { out.append(fallback) }
             }
-            return nil
+            return out
         }
 
-        let expanded = ((q.hasPrefix("~") ? home + q.dropFirst() : q) as NSString).standardizingPath
-        let dir: String
-        let filter: String
-        if let d = existingDir(expanded) {
-            dir = d
-            filter = ""
-        } else if let d = existingDir((expanded as NSString).deletingLastPathComponent) {
-            dir = d
-            filter = (expanded as NSString).lastPathComponent.lowercased()
-        } else {
-            return []
+        func directoryChildren(of dir: String, hiddenAllowed: Bool) -> [String] {
+            ((try? fm.contentsOfDirectory(atPath: dir)) ?? [])
+                .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+                .filter { name in
+                    // Dotfolders stay hidden unless the filter asks for them.
+                    guard hiddenAllowed || !name.hasPrefix(".") else { return false }
+                    var isDir: ObjCBool = false
+                    return fm.fileExists(atPath: "\(dir)/\(name)", isDirectory: &isDir) && isDir.boolValue
+                }
         }
-
-        let children = ((try? fm.contentsOfDirectory(atPath: dir)) ?? [])
-            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-            .filter { name in
-                // Dotfolders stay hidden unless the filter asks for them.
-                guard filter.hasPrefix(".") || !name.hasPrefix(".") else { return false }
-                var isDir: ObjCBool = false
-                return fm.fileExists(atPath: "\(dir)/\(name)", isDirectory: &isDir) && isDir.boolValue
-            }
 
         // Completion semantics, not palette semantics: prefix first, and only
         // when nothing starts with the fragment does subsequence rescue it.
-        let matched: [String]
-        if filter.isEmpty {
-            matched = children
-        } else {
+        func matches(in children: [String], filter: String) -> [String] {
+            guard !filter.isEmpty else { return children }
             let prefixed = children.filter { $0.lowercased().hasPrefix(filter) }
-            matched = prefixed.isEmpty
+            return prefixed.isEmpty
                 ? children.filter { fuzzyMatches(query: filter, candidate: $0.lowercased()) }
                 : prefixed
+        }
+
+        // Every interpretation of the typed path, most-literal first: the path
+        // as a directory, then its parent + last-component filter — each with
+        // its home-relative twin, so `/reposit` reaches ~/repositories even
+        // though `/` exists literally. First interpretation with matches wins.
+        let expanded = ((q.hasPrefix("~") ? home + q.dropFirst() : q) as NSString).standardizingPath
+        var candidates: [(dir: String, filter: String)] =
+            existingDirs(expanded).map { ($0, "") }
+        let fragment = (expanded as NSString).lastPathComponent.lowercased()
+        candidates += existingDirs((expanded as NSString).deletingLastPathComponent)
+            .map { ($0, fragment) }
+
+        var dir = candidates.first?.dir ?? home
+        var matched: [String] = []
+        for candidate in candidates {
+            let children = directoryChildren(
+                of: candidate.dir, hiddenAllowed: candidate.filter.hasPrefix(".")
+            )
+            matched = matches(in: children, filter: candidate.filter)
+            if !matched.isEmpty {
+                dir = candidate.dir
+                break
+            }
         }
 
         let detail = "  " + dir.replacingOccurrences(of: home, with: "~")
