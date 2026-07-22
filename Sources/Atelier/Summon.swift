@@ -189,6 +189,17 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
 
         field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14).isActive = true
 
+        // The placeholder voice (ui) and the query voice (mono) can differ in
+        // line height, and the field's intrinsic height follows whichever is
+        // live — so the divider (and the text above it) would jump a hair on
+        // every focus change. Freeze the field at the taller of the two.
+        let lineHeights = NSLayoutManager()
+        let fieldHeight = ceil(max(
+            lineHeights.defaultLineHeight(for: style.fieldFont),
+            lineHeights.defaultLineHeight(for: style.placeholderFont ?? style.fieldFont)
+        ))
+        field.heightAnchor.constraint(equalToConstant: fieldHeight).isActive = true
+
         highlight.attach(to: table)
     }
 

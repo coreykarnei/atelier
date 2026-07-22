@@ -37,6 +37,59 @@ class FreezableTerminalView: LocalProcessTerminalView {
             DispatchQueue.main.async(execute: callback)
         }
         super.dataReceived(slice: slice)
+        suppressCaretBlinkIfUnfocused()
+    }
+
+    // MARK: Caret blink follows focus
+
+    /// Blink is a focus signal. SwiftTerm draws the unfocused caret hollow but
+    /// leaves its blink animation running, so an unfocused pane still pulses —
+    /// on a fresh Landing, *two* cursors blink at once. The caret view is
+    /// internal to SwiftTerm (found by class name); its blink is suspended
+    /// whenever this view isn't first responder and restored on focus.
+    /// `dataReceived` (main queue) re-checks because the hosted process can
+    /// (re)start the blink via DECSCUSR at any time.
+
+    private var caretLayer: CALayer? {
+        subviews.first { String(describing: type(of: $0)).hasSuffix("CaretView") }?.layer
+    }
+    private var caretWantsBlink = false
+
+    private func suppressCaretBlinkIfUnfocused() {
+        guard window?.firstResponder !== self, let layer = caretLayer,
+              layer.animation(forKey: "opacity") != nil else { return }
+        caretWantsBlink = true
+        layer.removeAllAnimations()
+        layer.opacity = 1
+    }
+
+    /// become/resignFirstResponder aren't open in SwiftTerm, but both funnel
+    /// into this open property — the focus signal rides it.
+    override var hasFocus: Bool {
+        get { super.hasFocus }
+        set {
+            super.hasFocus = newValue
+            if newValue {
+                restoreCaretBlink()
+            } else {
+                // The responder handoff is mid-flight; check after it lands.
+                DispatchQueue.main.async { [weak self] in self?.suppressCaretBlinkIfUnfocused() }
+            }
+        }
+    }
+
+    private func restoreCaretBlink() {
+        guard caretWantsBlink, let layer = caretLayer,
+              layer.animation(forKey: "opacity") == nil else { return }
+        // SwiftTerm's own blink, reinstated: 0.7s ease-in autoreverse.
+        let anim = CABasicAnimation(keyPath: #keyPath(CALayer.opacity))
+        anim.duration = 0.7
+        anim.autoreverses = true
+        anim.repeatCount = .infinity
+        anim.fromValue = 1
+        anim.toValue = 0
+        anim.timingFunction = CAMediaTimingFunction(name: .easeIn)
+        layer.add(anim, forKey: #keyPath(CALayer.opacity))
     }
 }
 
