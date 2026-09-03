@@ -6,8 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Milestones 0 and 1 built (M1.1–M1.6 landed); polish pass
 (docs/POLISH_PLAN.md) built through all phases — 0 (foundation tokens),
-1 (cockpit), 2 (distances), 3 (arrivals), 4 (overlay physiology; the fan
-overlay awaits one live look).** Read `VISION.md` (the
+1 (cockpit), 2 (distances), 3 (arrivals), 4 (overlay physiology).** Read `VISION.md` (the
 authoritative *what*), `TECHNICAL_PLAN.md` (the *how* and the milestone
 sequence), and `docs/MILESTONE_1.md` (the workspace/layout/keymap/worktree/
 persistence design, as built) before proposing anything. The polish pass is
@@ -44,8 +43,13 @@ Milestone 1 (built; see `docs/MILESTONE_1.md`):
   highlight — that the command palette also hosts and the M2 `⌘P` picker will):
   a centered raised card, opener-first focus, terminal in the bottom third.
 - **Triptych/Split layouts** (`⌘\`), per-session dividers; `⌃⌘+hjkl` pane focus.
-- **Worktree manager**: the pill fan (create/return/guarded-remove) +
+- **Worktree manager** (reworked 2026-09-03): the **worktree chooser** — a
+  small modal the `+`/`⌥⌘T` raise before a session spawns ("Starting a session
+  in worktree [main ▾]", ↩ starts; dropdown lists worktrees + New…; typing
+  names a new one), gated behind Settings → Enable worktrees — plus the
   `atelier` / `-b` / `-rm` CLI over the M0 socket (`make install-cli`).
+  Tear-down: right-click a worktree folder's label in the tab strip, or the
+  palette. The old pill fan is deleted.
 - **Session persistence**: window→session tree saved on quit, restored on launch
   with root validation; agents resume via `claude --resume`.
 - **Command palette** (`⌘⇧P`).
@@ -53,10 +57,13 @@ Milestone 1 (built; see `docs/MILESTONE_1.md`):
 Also built: per-tab attention state (§7.1 — the agent's exact state, always
 visible: blue dot working, peach dot waiting-on-you, peach `!` explicitly
 blocked, green dot unseen-completion → waiting on focus; fed by hooks carrying
-`session_id`, banner clicks focus the exact session), worktree grouping +
-two-row group-aware wrap + `»` overflow in the tab strip (overflowed tabs keep
-their ⎇/attention marks in the menu, and the `»` wears the loudest overflowed
-state), and inline tab rename (double-click edits the title in place — ↩
+`session_id`, banner clicks focus the exact session), **worktree folders** in
+the tab strip (2026-09-03: each root's tabs sit in a folder-shaped cell whose
+label tab names the worktree — main's branch / `⎇ dir` / `@host` — tinted per
+group; two-row group-aware wrap + `»` overflow, overflowed tabs keep their
+⎇/attention marks in the menu, and the `»` wears the loudest overflowed
+state), a **Settings window** (`⌘,` / the bar's gear: field-opacity slider
+applied live via `Settings.didChange`, Enable worktrees), and inline tab rename (double-click edits the title in place — ↩
 commits a hard override of the live Claude title, Esc cancels, empty reverts;
 titles uncapped).
 

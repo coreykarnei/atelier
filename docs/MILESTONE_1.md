@@ -172,32 +172,46 @@ new-session-on-main moved to `⌥⌘T`.
 
 ---
 
-## 6. Worktree gesture **[LOCKED]**
+## 6. Worktree gesture **[LOCKED — revised 2026-09-03]**
 
 Worktrees are first-class: spawn / list / return-to / tear-down, one visible action
 each. In the model a worktree session is just a bottom-bar tab whose root is the
 worktree path, so this is about *invocation*.
 
-**The worktree fan.** The bottom-left pill (§7) is clickable; clicking fans a list
-**upward** (it's pinned to the bottom edge):
+**The worktree chooser** (replaces the pill fan, owner call 2026-09-03). Worktree
+choice is part of *starting a session*, not a separate surface: the `+` / `⌥⌘T`
+raise one small modal before the session spawns —
 
-- **New worktree at top** — the fan is keyboard-first: click it *or* just start
-  typing. Typing a new branch name → "Create worktree for *x*"; a name matching a
-  local/remote branch → "Create from *x*."
-- **Each row** shows branch, open/closed (is a session live for it?), and
-  clean/dirty.
-- **Click a row = return-to** — focus that worktree's session if one is open, else
-  open one. (It does *not* always spawn a new session — that's the `+`'s job, so
-  you don't accumulate duplicates.)
-- **`x` on a row = tear-down** — opens a confirmation modal. The modal is
-  *informative*: clean → quick confirm; dirty → names what would be lost and
-  requires explicit force (surfacing git's own refusal, never a silent `--force`).
+```
+┌─────────────────────────────────┐
+│ ×   Starting a session in worktree │
+│           ┌───────────┐          │
+│           │ main    ▾ │          │
+│           └───────────┘          │
+│                            [ ↩ ] │
+└─────────────────────────────────┘
+```
 
-**New session** is the `+` at the trailing edge of the session-tab strip (or
-`⌥⌘T`) — always "another session on the project's **main** checkout," regardless
-of which worktree the active tab is on (revised from "current root" in the
-refinement pass: worktree sessions should only come from deliberate acts — the
-fan or the CLI).
+- **Default is the main checkout**, so the fast path is *plus, enter*.
+- **The dropdown** lists the repo's worktrees (checkmark on the current pick)
+  and **New worktree…**, which swaps the dropdown for a name field in place;
+  `↩` creates the worktree (existing local/remote branch → checked out; new
+  name → branched from `main`) and starts the session in it. Naming a branch
+  that already has a worktree simply picks it.
+- **Keyboard-first**: `↩` starts, `Esc`/`×`/scrim click dismiss, `↓`/space/tab
+  open the dropdown, and *typing any character* jumps straight into naming a
+  new worktree with that character typed. `Esc` in the name field steps back
+  to the dropdown.
+- **Gated in Settings** (`Enable worktrees`, default off): off, the `+` starts
+  a session on main with no modal. The `atelier -b` CLI works regardless.
+- **Tear-down** lives on the folder (§7): right-click a worktree folder's
+  label → *Remove worktree…*; also the palette (`Worktree: Remove ⎇ x…`) and
+  `atelier -rm`. The confirmation is *informative*: clean → quick confirm;
+  dirty → names what would be lost and requires explicit force (surfacing
+  git's own refusal, never a silent `--force`).
+
+*(Superseded: the bottom-left pill fan — filter-or-name field, return-to rows,
+`×` per row. The pill is now a static project label.)*
 
 **Storage:** worktrees live at `~/.local/share/worktrees/<repo>/<safe-branch>/`,
 anchored to the **primary** working tree (resolved via `git rev-parse
@@ -218,43 +232,48 @@ underneath.
 
 ---
 
-## 7. The bottom bar **[LOCKED]**
+## 7. The bottom bar **[LOCKED — revised 2026-09-03]**
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ atelier │ Fix copy bug · Wire palette  ┃  ⎇ Refactor auth  +     12:34·Jun09  ⊞ │
-└──────────────────────────────────────────────────────────────────────────────┘
-   pill        main group (shared)         feat-x group     +     clock      toggle
- (fan →)                                                        (blink :)  (corner)
+┌────────────────────────────────────────────────────────────────────────────────────┐
+│           ┌ main ┐                       ┌ ⎇ feat-x ┐                               │
+│ ┌───────┐ │ Fix copy bug · Wire palette │ │ Refactor auth │  +     12:34·Sep03  ⊞ ⚙ │
+│ └atelier┘ └────────────────────────────┘ └───────────────┘                          │
+└────────────────────────────────────────────────────────────────────────────────────┘
+   pill        main folder (surface0)        worktree folder (tinted)   clock  toggle gear
+ (static)
 ```
 
 **Left — the project pill (static).** The project's name, unchanged across
-session switches — the original `⎇ branch` design reflowed the whole bar every
-time you clicked a tab on a different worktree, so the pill was made static in
-the refinement pass. Branch/worktree identity lives in the tabs (`⎇` glyph +
-grouping) and the fan. Clicking the pill opens the worktree fan (§6); before a
-window is anchored to a project it shows where a Landing would open.
+session switches. It no longer does anything on click (the fan is gone, §6).
 
-**Center — session tabs.**
+**Center — session tabs, in folders.**
 - **Text = the Claude session title** (the same summary `/resume` shows), read live
   from the transcript (`~/.claude/projects/...`) — the M0 transcript-reading path,
   reused, against each session's *pinned* `--session-id` so same-root sessions
   never collide. Falls back to the folder name while a session is untitled, and is
   **user-renamable** (double-click) as a hard override. Titles are **uncapped** —
-  full text, no ellipsis; the wrap and overflow absorb long ones. (The planned
-  `·2` untitled-collision counter was dropped as unneeded — pinned ids + live
-  titles disambiguate.)
-- **Grouped by worktree** with separators (`┃`), main checkout first; worktree
-  tabs carry a `⎇` glyph. The grouping *is* how codebase sharing is shown — we do
-  **not** also append the worktree name to each tab.
-- **Two-row, group-aware wrap** when the strip fills: whole groups flow to row two,
-  never split mid-group; `+` rides the trailing edge of the last row. Hard ceiling
-  of two rows — beyond that a `»` overflow menu, so the bar can't grow into a
-  third pane.
+  full text, no ellipsis; the wrap and overflow absorb long ones.
+- **Grouped by worktree into folders** (owner call 2026-09-03): each root's tabs
+  sit inside a rounded cell with a small **label tab rising from its top-left
+  edge** — one continuous shape, one fill, so it reads as a folder, not a box with
+  a badge. The label is the main checkout's branch (read from git once, cached),
+  `⎇ dir` for a worktree, `@host` for a remote group. Main first; the main folder
+  is plain surface0 and each further folder is tinted a hair toward the next
+  accent (blue, mauve, teal, peach, pink) so two never read the same. Fills are
+  half-alpha — the bar's translucency shows through. The per-tab `⎇` glyph is
+  gone: the folder *is* the mark (it returns only inside the `»` menu, which has
+  no folder). Right-click a worktree folder's label → *Remove worktree…*.
+- **Two-row, group-aware wrap** when the strip fills: whole folders flow to row
+  two, never split unless one folder alone exceeds a row (then its continuation
+  is a bare, labelless cell); `+` rides the trailing edge of the last row. Hard
+  ceiling of two rows — beyond that a `»` overflow menu, so the bar can't grow
+  into a third pane. Bar height is 44 (one row) / 86 (two) to house the label band.
 
 **Right cluster** (left→right): `line:col` (editor focus only) · `clock · date`
-with a blinking `:` (subtle 1 Hz) · the **layout toggle** in the very corner.
-No activity dot — see §7.1.
+with a blinking `:` (subtle 1 Hz) · the **layout toggle** · the **settings gear**
+(`⌘,`: field opacity slider, Enable worktrees) in the very corner. No activity
+dot — see §7.1.
 
 ### 7.1 Per-session attention state **[BUILT]**
 

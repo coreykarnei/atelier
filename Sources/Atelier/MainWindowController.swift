@@ -17,6 +17,12 @@ private final class TitlebarWashView: NSView {
             name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(accessibilityDisplayChanged),
+            name: Settings.didChange,
+            object: nil
+        )
     }
 
     @available(*, unavailable)
@@ -24,6 +30,7 @@ private final class TitlebarWashView: NSView {
 
     deinit {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        NotificationCenter.default.removeObserver(self)
     }
 
     override func updateLayer() {
@@ -52,7 +59,7 @@ final class AtelierWindow: NSWindow {
 /// shape), shows one at a time, and carries the bottom bar with the session
 /// tab strip (MILESTONE_1 §2, §7). Projects are native tabbed windows
 /// (`tabbingMode = .preferred`); persistence snapshots/restores the whole
-/// window → session tree (§9); overlays (fan, palette, ⌘P, ⌘⇧F) mount on the
+/// window → session tree (§9); overlays (chooser, palette, ⌘P, ⌘⇧F) mount on the
 /// content view and restore pre-overlay focus on dismissal.
 final class MainWindowController: NSWindowController, BottomBarDelegate {
     private var sessions: [Session] = []
@@ -298,10 +305,10 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         adopt(Session(cwd: Self.defaultWorkdir()))
     }
 
-    /// The tab-strip `+` / `⌥⌘T` — another session on the project's *main*
-    /// checkout, regardless of which worktree the active tab is on. A remote
-    /// session's sibling is another session on the same host and dir. Falls
-    /// back to a Landing when the window isn't anchored to a project yet.
+    /// Another session on the project's *main* checkout, no question asked
+    /// (the chooser's default answer). A remote session's sibling is another
+    /// session on the same host and dir. Falls back to a Landing when the
+    /// window isn't anchored to a project yet.
     func addSessionOnMain() {
         if let session = activeSession, case .remote(let host) = session.location {
             adopt(Session(remoteHost: host, remoteDir: session.cwd))
@@ -351,13 +358,14 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     /// the primary checkout and name the native tab after it.
     private func noteProjectRoot(for session: Session) {
         // A remote dir is not a local repo root — anchoring the window to it
-        // would aim ⌥⌘T and the worktree fan at a path that isn't here.
+        // would aim ⌥⌘T and the worktree chooser at a path that isn't here.
         guard session.state == .ide, !session.isRemote else {
             refreshWindowTitle()
             return
         }
         if projectRepoRoot == nil {
             projectRepoRoot = WorktreeManager.repoRoot(for: session.cwd) ?? session.cwd
+            refreshMainBranch()
         }
         refreshWindowTitle()
     }
@@ -898,11 +906,22 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
                     isWorktree: session.isWorktree,
                     remoteHost: session.location.host,
                     groupKey: key,
+                    groupLabel: folderLabel(for: session, key: key),
                     attention: session.attention,
                     attentionSince: session.attentionSince
                 )
             }
         }
+    }
+
+    /// What a group's folder tab says: the branch for the main checkout (cached),
+    /// the worktree's directory (named for its branch) for a worktree, `@host`
+    /// for a remote group, the folder name otherwise.
+    private func folderLabel(for session: Session, key: String) -> String {
+        if let host = session.location.host { return "@\(host)" }
+        if let root = projectRepoRoot, key == root { return mainBranchName ?? "main" }
+        if session.isWorktree { return "⎇ \((session.cwd as NSString).lastPathComponent)" }
+        return (session.cwd as NSString).lastPathComponent
     }
 
     // MARK: Attention (MILESTONE_1 §7.1)
@@ -983,13 +1002,14 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     // MARK: BottomBarDelegate
 
     func bottomBarDidSelectSession(at index: Int) { showSession(at: index) }
-    func bottomBarDidRequestNewSession() { addSessionOnMain() }
+    func bottomBarDidRequestNewSession() { requestNewSession() }
     func bottomBarDidRequestCloseSession(at index: Int) {
         showSession(at: index)
         closeActiveSession()
     }
     func bottomBarDidToggleLayout() { toggleLayout() }
-    func bottomBarDidClickPill(anchor: NSView) { showWorktreeFan(from: anchor) }
+    func bottomBarDidRequestRemoveWorktree(at path: String) { removeWorktree(atPath: path) }
+    func bottomBarDidRequestSettings() { SettingsWindowController.shared.show() }
 
     /// Inline rename committed on a tab: set a custom name that the live
     /// Claude title never overwrites; nil (empty input) reverts to auto.
@@ -1004,9 +1024,18 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         bottomBar.beginRename(at: index)
     }
 
-    // MARK: Worktree fan (MILESTONE_1 §6, physiology per POLISH_PLAN §6)
+    // MARK: Worktree chooser (MILESTONE_1 §6, revised 2026-09-03)
 
-    private var fanOverlay: WorktreeFanOverlay?
+    private var chooserOverlay: WorktreeChooserOverlay?
+
+    /// The main checkout's branch, worn by its folder tab. Cached: the strip
+    /// redraws on every attention change and must not shell out to git.
+    private var mainBranchName: String?
+
+    private func refreshMainBranch() {
+        guard let root = projectRepoRoot else { return }
+        mainBranchName = WorktreeManager.currentBranch(root) ?? mainBranchName ?? "main"
+    }
 
     /// Whatever had focus when an overlay stole it. Dismissal puts it back —
     /// falling to the session default only if that view has left the window.
@@ -1027,68 +1056,67 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         preOverlayFocus = nil
     }
 
-    func showWorktreeFan(from anchor: NSView? = nil, prefill: String? = nil) {
-        guard fanOverlay == nil else { return }
-        guard let session = activeSession, let container = window?.contentView,
-              let repoRoot = WorktreeManager.repoRoot(for: session.cwd) else {
-            NSSound.beep() // landing on a non-repo: nothing to fan
-            return
-        }
-        let anchor = anchor ?? bottomBar.pillAnchor
-
-        // The fan opens next frame (§1.5): one fast `git worktree list` now;
-        // the per-tree dirty sweep (a subprocess per worktree) lands async.
-        let worktrees = WorktreeManager.list(repoRoot: repoRoot)
-        let rows = worktrees.map { worktree in
-            WorktreeFanRow(
-                worktree: worktree,
-                isOpen: sessions.contains { $0.cwd == worktree.path },
-                isDirty: false
-            )
-        }
-
-        let fan = WorktreeFanController(rows: rows)
-        fan.prefill = prefill
-        fan.onOpen = { [weak self] worktree in
-            self?.dismissFan()
-            self?.openWorktree(at: worktree.path)
-        }
-        fan.onCreate = { [weak self] branch in
-            self?.dismissFan()
-            self?.createWorktree(branch: branch, repoRoot: repoRoot)
-        }
-        fan.onRemove = { [weak self] row in
-            self?.dismissFan()
-            self?.confirmRemoveWorktree(row, repoRoot: repoRoot)
-        }
-        fan.onDismiss = { [weak self] in self?.dismissFan() }
-
-        let overlay = WorktreeFanOverlay(controller: fan) { [weak self] in self?.dismissFan() }
-        overlay.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(overlay)
-        NSLayoutConstraint.activate([
-            overlay.topAnchor.constraint(equalTo: container.topAnchor),
-            overlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            overlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            overlay.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-        ])
-        container.layoutSubtreeIfNeeded()
-        overlay.present(abovePillFrame: anchor.convert(anchor.bounds, to: container))
-        fanOverlay = overlay
-        captureFocusForOverlay()
-        window?.makeFirstResponder(overlay.focusField)
-
-        DispatchQueue.global(qos: .userInitiated).async { [weak fan] in
-            let dirty = Dictionary(uniqueKeysWithValues: worktrees.map {
-                ($0.path, WorktreeManager.isDirty($0.path))
-            })
-            DispatchQueue.main.async { fan?.updateDirty(dirty) }
+    /// The `+` / `⌥⌘T`: a new session — after one question, which worktree,
+    /// when worktrees are enabled in Settings. Defaults to the main checkout
+    /// so the fast path is plus-enter. Worktrees off: straight onto main. A
+    /// remote session's sibling is another session on the same host and dir
+    /// (no worktrees across the wire); an unanchored window gets a Landing.
+    func requestNewSession() {
+        if let session = activeSession, case .remote = session.location {
+            addSessionOnMain()
+        } else if projectRepoRoot != nil, Settings.worktreesEnabled {
+            showWorktreeChooser()
+        } else {
+            addSessionOnMain()
         }
     }
 
-    private func dismissFan() {
-        fanOverlay?.removeFromSuperview()
-        fanOverlay = nil
+    func showWorktreeChooser(prefill: String? = nil) {
+        guard chooserOverlay == nil, palette == nil, filePicker == nil, repoSearch == nil,
+              let container = window?.contentView else { return }
+        guard let repoRoot = projectRepoRoot
+                ?? activeSession.flatMap({ WorktreeManager.repoRoot(for: $0.cwd) }) else {
+            NSSound.beep() // landing on a non-repo: nothing to choose from
+            return
+        }
+        let worktrees = WorktreeManager.list(repoRoot: repoRoot)
+        guard !worktrees.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        if let primary = worktrees.first(where: { $0.isPrimary }) {
+            mainBranchName = primary.branch == "(detached)" ? (mainBranchName ?? "main") : primary.branch
+        }
+
+        let overlay = WorktreeChooserOverlay(worktrees: worktrees, prefill: prefill) { [weak self] in
+            self?.dismissChooser()
+        }
+        overlay.onStart = { [weak self] worktree in
+            self?.dismissChooser()
+            self?.adopt(Session(ideRoot: worktree.path))
+        }
+        overlay.onCreate = { [weak self] branch in
+            self?.dismissChooser()
+            self?.createWorktree(branch: branch, repoRoot: repoRoot)
+        }
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(overlay)
+        let contentTop = (window?.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? container.topAnchor
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: contentTop),
+            overlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            overlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        chooserOverlay = overlay
+        captureFocusForOverlay()
+        window?.makeFirstResponder(overlay.focusField)
+        overlay.animateIn()
+    }
+
+    private func dismissChooser() {
+        chooserOverlay?.removeFromSuperview()
+        chooserOverlay = nil
         restorePreOverlayFocus()
     }
 
@@ -1112,17 +1140,30 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         }
     }
 
-    /// CLI entry (`atelier -rm <branch>`): same guarded modal as the fan's ×.
+    /// CLI entry (`atelier -rm <branch>`) and the palette: the guarded modal.
     func removeWorktree(branch: String) {
         guard let repoRoot = projectRepoRoot,
               let worktree = WorktreeManager.list(repoRoot: repoRoot).first(where: { $0.branch == branch }),
               !worktree.isPrimary else { return }
-        let row = WorktreeFanRow(
-            worktree: worktree,
-            isOpen: sessions.contains { $0.cwd == worktree.path },
-            isDirty: WorktreeManager.isDirty(worktree.path)
-        )
-        confirmRemoveWorktree(row, repoRoot: repoRoot)
+        confirmRemoveWorktree(worktree, repoRoot: repoRoot)
+    }
+
+    /// The folder tab's context menu: remove the worktree the group sits on.
+    func removeWorktree(atPath path: String) {
+        guard let repoRoot = projectRepoRoot,
+              let worktree = WorktreeManager.list(repoRoot: repoRoot).first(where: { $0.path == path }),
+              !worktree.isPrimary else { return }
+        confirmRemoveWorktree(worktree, repoRoot: repoRoot)
+    }
+
+    /// The worktrees this window's sessions currently sit on, main excluded —
+    /// the removable set the palette offers.
+    private var openWorktreePaths: [String] {
+        var seen: [String] = []
+        for session in sessions where session.isWorktree && !seen.contains(session.cwd) {
+            seen.append(session.cwd)
+        }
+        return seen
     }
 
     private func createWorktree(branch: String, repoRoot: String) {
@@ -1136,12 +1177,11 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
 
     /// The informative delete modal: clean → quick confirm; dirty → names the loss
     /// and requires an explicit force (git's own refusal, surfaced).
-    private func confirmRemoveWorktree(_ row: WorktreeFanRow, repoRoot: String) {
-        let branch = row.worktree.branch
-        let openSessions = sessions.filter { $0.cwd == row.worktree.path }
-        // The fan's dirty marker is an async hint; the *refusal* re-checks the
-        // truth at decision time.
-        let isDirty = WorktreeManager.isDirty(row.worktree.path)
+    private func confirmRemoveWorktree(_ worktree: Worktree, repoRoot: String) {
+        let branch = worktree.branch
+        let openSessions = sessions.filter { $0.cwd == worktree.path }
+        // Re-check the truth at decision time.
+        let isDirty = WorktreeManager.isDirty(worktree.path)
 
         let alert = NSAlert()
         if isDirty {
@@ -1151,7 +1191,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
                 + (openSessions.isEmpty ? "" : " Its \(openSessions.count) open session(s) will close.")
             // The refusal names the actual loss (§5): the real `git status
             // --short` lines, in mono — not a vague "changes exist".
-            let lines = WorktreeManager.statusLines(row.worktree.path)
+            let lines = WorktreeManager.statusLines(worktree.path)
             if !lines.isEmpty {
                 let shown = lines.prefix(8)
                 var text = shown.joined(separator: "\n")
@@ -1166,7 +1206,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             alert.addButton(withTitle: "Force Remove")
         } else {
             alert.messageText = "Remove worktree ⎇ \(branch)?"
-            alert.informativeText = "The checkout at \(Self.abbreviate(row.worktree.path)) will be deleted."
+            alert.informativeText = "The checkout at \(Self.abbreviate(worktree.path)) will be deleted."
                 + (openSessions.isEmpty ? "" : " Its \(openSessions.count) open session(s) will close.")
             alert.addButton(withTitle: "Remove")
         }
@@ -1192,8 +1232,8 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
                 }
                 // Closed-but-alive sessions in the reopen grace also hold PTYs
                 // on this tree — release them before git deletes it.
-                self.purgeClosedSessions(under: row.worktree.path)
-                try WorktreeManager.remove(path: row.worktree.path, repoRoot: repoRoot, force: isDirty)
+                self.purgeClosedSessions(under: worktree.path)
+                try WorktreeManager.remove(path: worktree.path, repoRoot: repoRoot, force: isDirty)
             } catch {
                 self.presentError(title: "Couldn't remove worktree", error: error)
             }
@@ -1242,8 +1282,8 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
                 self?.promoteActiveSessionHere()
             })
         }
-        commands.append(PaletteCommand(id: "session.new", title: "Session: New on Main", key: "⌥⌘T") { [weak self] in
-            self?.addSessionOnMain()
+        commands.append(PaletteCommand(id: "session.new", title: "Session: New…", key: "⌥⌘T") { [weak self] in
+            self?.requestNewSession()
         })
         commands.append(PaletteCommand(id: "session.close", title: "Session: Close", key: "⌘W") { [weak self] in
             self?.closeActiveSession()
@@ -1269,10 +1309,17 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             })
         }
 
-        commands.append(PaletteCommand(id: "worktree.fan", title: "Worktree: New / Switch / Remove…", key: nil) { [weak self] in
-            guard let self else { return }
-            self.showWorktreeFan(from: self.bottomBar.pillAnchor)
-        })
+        if projectRepoRoot != nil {
+            commands.append(PaletteCommand(id: "worktree.new", title: "Worktree: New…", key: nil) { [weak self] in
+                self?.showWorktreeChooser(prefill: "")
+            })
+            for path in openWorktreePaths {
+                let name = (path as NSString).lastPathComponent
+                commands.append(PaletteCommand(id: "worktree.remove.\(name)", title: "Worktree: Remove ⎇ \(name)…", key: nil) { [weak self] in
+                    self?.removeWorktree(atPath: path)
+                })
+            }
+        }
 
         commands.append(PaletteCommand(id: "project.new", title: "Project: New Tab", key: "⌘T") {
             (NSApp.delegate as? AppDelegate)?.newProject(nil)

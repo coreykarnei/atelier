@@ -53,6 +53,12 @@ final class EditorPane: NSView, WorkspacePane {
         )
         NotificationCenter.default.addObserver(
             self,
+            selector: #selector(accessibilityDisplayChanged),
+            name: Settings.didChange,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
             selector: #selector(typeScaleChanged),
             name: Theme.TypeScale.didChange,
             object: nil
@@ -64,6 +70,7 @@ final class EditorPane: NSView, WorkspacePane {
 
     deinit {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        NotificationCenter.default.removeObserver(self)
         NotificationCenter.default.removeObserver(self)
     }
 

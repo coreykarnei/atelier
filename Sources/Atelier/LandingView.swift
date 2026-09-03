@@ -187,6 +187,12 @@ final class LandingView: NSView, WorkspacePane {
             name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(accessibilityDisplayChanged),
+            name: Settings.didChange,
+            object: nil
+        )
     }
 
     @available(*, unavailable)
@@ -194,6 +200,7 @@ final class LandingView: NSView, WorkspacePane {
 
     deinit {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        NotificationCenter.default.removeObserver(self)
         NotificationCenter.default.removeObserver(self)
     }
 

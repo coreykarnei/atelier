@@ -1,7 +1,7 @@
 import AppKit
 
-/// Shared physiology for the floating overlays (POLISH_PLAN §6) — the fan and
-/// the palette, and later the M2 `⌘P` picker.
+/// Shared physiology for the floating overlays (POLISH_PLAN §6) — the palette,
+/// the `⌘P` picker, `⌘⇧F`, and the worktree chooser.
 
 /// One sliding rounded-rect selection highlight: a single view that glides
 /// between rows (~120 ms) instead of discrete row repaints. The table's own

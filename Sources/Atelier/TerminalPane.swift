@@ -147,6 +147,12 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
         )
         NotificationCenter.default.addObserver(
             self,
+            selector: #selector(accessibilityDisplayChanged),
+            name: Settings.didChange,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
             selector: #selector(typeScaleChanged),
             name: Theme.TypeScale.didChange,
             object: nil
@@ -158,6 +164,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
 
     deinit {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        NotificationCenter.default.removeObserver(self)
         NotificationCenter.default.removeObserver(self)
     }
 

@@ -68,6 +68,12 @@ enum WorktreeManager {
         return out
     }
 
+    /// The branch checked out at `path` (nil when detached or not a repo).
+    static func currentBranch(_ path: String) -> String? {
+        let result = git(["-C", path, "symbolic-ref", "--short", "-q", "HEAD"])
+        return result.status == 0 && !result.out.isEmpty ? result.out : nil
+    }
+
     /// Uncommitted changes (staged, unstaged, or untracked)?
     static func isDirty(_ path: String) -> Bool {
         let result = git(["-C", path, "status", "--porcelain"])

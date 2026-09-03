@@ -8,7 +8,10 @@ protocol BottomBarDelegate: AnyObject {
     /// the live auto title); a cancelled rename never reaches this.
     func bottomBarDidRenameSession(at index: Int, title: String?)
     func bottomBarDidToggleLayout()
-    func bottomBarDidClickPill(anchor: NSView)
+    /// Right-click on a worktree folder's label: tear the worktree down.
+    func bottomBarDidRequestRemoveWorktree(at path: String)
+    /// The gear at the bar's far right.
+    func bottomBarDidRequestSettings()
 }
 
 /// Everything one session tab needs to draw. `id` is the session's stable
@@ -25,18 +28,22 @@ struct SessionTabInfo {
     /// Group boundary marker — tabs sharing a root sit together (MILESTONE_1 §7);
     /// the grouping *is* how codebase sharing is shown.
     let groupKey: String
+    /// What the group's folder tab says (branch, `⎇ worktree`, `@host`).
+    let groupLabel: String
     let attention: Session.Attention
     /// When the attention state began — surfaced only in the hover tooltip
     /// (§1.3: time on inquiry, never pushed).
     let attentionSince: Date?
 }
 
-/// The bottom bar (MILESTONE_1 §7, polished per POLISH_PLAN §3). Static project
-/// pill on the left (the worktree fan's trigger), session tabs grouped by root
-/// in the middle — wrapping to a second row group-aware when full, with a `»`
-/// overflow menu as the hard ceiling — and the clock + layout toggle on the
-/// right. Styling follows the tmux status bar this app succeeds: blue pill,
-/// green active tab, dark text on both.
+/// The bottom bar (MILESTONE_1 §7, revised 2026-09-03). Static project pill
+/// on the left, session tabs in the middle — each root's tabs sitting inside a
+/// **folder**: a cell with a small label tab rising from its top-left edge
+/// naming the worktree (main's branch, `⎇ dir`, `@host`). Wraps to a second
+/// row group-aware when full, with a `»` overflow menu as the hard ceiling —
+/// and the clock, layout toggle, and settings gear on the right. Styling
+/// follows the tmux status bar this app succeeds: blue pill, green active tab,
+/// dark text on both.
 ///
 /// Tab views are *persistent* (keyed by session id) and laid out by hand, so
 /// width changes glide (a Claude title rewrite slides neighbors instead of
@@ -44,18 +51,29 @@ struct SessionTabInfo {
 final class BottomBar: NSView {
     weak var delegate: BottomBarDelegate?
 
-    static let rowHeight: CGFloat = 30
-    static let twoRowHeight: CGFloat = 54
+    /// Bar heights: 1 px border + 3 pt margins around one or two folder rows.
+    static let rowHeight: CGFloat = 44
+    static let twoRowHeight: CGFloat = 86
     private static let tabHeight: CGFloat = 20
+    private static let tabGap: CGFloat = 4
     private static let rowGap: CGFloat = 4
+    /// Folder anatomy: the cell hugs its tabs by `folderPadX`/`folderPadY`;
+    /// the label tab rises `folderTabHeight` above the cell.
+    private static let folderPadX: CGFloat = 6
+    private static let folderPadY: CGFloat = 2
+    private static let folderTabHeight: CGFloat = 13
+    private static let folderGap: CGFloat = 10
+    private static let buttonGap: CGFloat = 6
+    private static var cellHeight: CGFloat { tabHeight + folderPadY * 2 }
+    private static var rowContentHeight: CGFloat { cellHeight + folderTabHeight }
+    /// Where the bottom row's tabs are centered, measured from the bar's
+    /// bottom edge — the pill, clock, and buttons sit on this axis.
+    private static var bottomRowAxis: CGFloat { 3 + folderPadY + tabHeight / 2 }
 
     /// The bar's current natural height (one or two tab rows).
     private(set) var desiredHeight: CGFloat = BottomBar.rowHeight
     /// Fired when `desiredHeight` changes so the owner can resize the constraint.
     var onDesiredHeightChange: ((CGFloat) -> Void)?
-
-    /// Anchor for surfaces that fan from the pill.
-    var pillAnchor: NSView { pillView }
 
     private let pillView = NSView()
     private let pillLabel = NSTextField(labelWithString: "")
@@ -67,12 +85,13 @@ final class BottomBar: NSView {
     private let clockColonLabel = BreathingColonLabel(labelWithString: ":")
     private let clockSuffixLabel = NSTextField(labelWithString: "")
     private let layoutButton = NSButton()
+    private let settingsButton = NSButton()
     private let topBorder = NSBox()
 
     private var tabs: [SessionTabInfo] = []
     private var activeIndex = 0
     private var tabViews: [UUID: SessionTabView] = [:]
-    private var separatorPool: [NSView] = []
+    private var folderViews: [String: FolderView] = [:]
     private var lastFlowWidth: CGFloat = 0
     private var lastFlowHeight: CGFloat = 0
     /// First population per launch gets the restore stagger (§5); afterwards
@@ -93,6 +112,12 @@ final class BottomBar: NSView {
             name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(accessibilityDisplayChanged),
+            name: Settings.didChange,
+            object: nil
+        )
     }
 
     @available(*, unavailable)
@@ -101,6 +126,7 @@ final class BottomBar: NSView {
     deinit {
         clockTimer?.invalidate()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        NotificationCenter.default.removeObserver(self)
     }
 
     override func updateLayer() {
@@ -122,7 +148,6 @@ final class BottomBar: NSView {
         pillView.layer?.backgroundColor = Theme.accentBlue.cgColor
         pillView.layer?.cornerRadius = Theme.Elevation.radiusSmall
         pillView.translatesAutoresizingMaskIntoConstraints = false
-        pillView.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(pillClicked)))
         addSubview(pillView)
 
         // The pill carries the project name — a path component, so mono (§1.4).
@@ -154,10 +179,13 @@ final class BottomBar: NSView {
             addSubview(label)
         }
         configureIconButton(layoutButton, symbol: "rectangle.split.3x1", action: #selector(layoutTapped))
-        // The toggle is constraint-anchored (unlike the flow-placed buttons,
-        // which are positioned by frame inside tabsArea).
+        // The toggle and gear are constraint-anchored (unlike the flow-placed
+        // buttons, which are positioned by frame inside tabsArea).
         layoutButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(layoutButton)
+        configureIconButton(settingsButton, symbol: "gearshape", action: #selector(settingsTapped))
+        settingsButton.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(settingsButton)
 
         NSLayoutConstraint.activate([
             topBorder.topAnchor.constraint(equalTo: topAnchor),
@@ -166,15 +194,16 @@ final class BottomBar: NSView {
             topBorder.heightAnchor.constraint(equalToConstant: 1),
 
             pillView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            pillView.centerYAnchor.constraint(equalTo: centerYAnchor),
             pillView.heightAnchor.constraint(equalToConstant: Self.tabHeight),
             pillLabel.leadingAnchor.constraint(equalTo: pillView.leadingAnchor, constant: 8),
             pillLabel.trailingAnchor.constraint(equalTo: pillView.trailingAnchor, constant: -8),
             pillLabel.centerYAnchor.constraint(equalTo: pillView.centerYAnchor),
             pillLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 220),
 
-            layoutButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            layoutButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            settingsButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            settingsButton.widthAnchor.constraint(equalToConstant: 22),
+            settingsButton.heightAnchor.constraint(equalToConstant: 22),
+            layoutButton.trailingAnchor.constraint(equalTo: settingsButton.leadingAnchor, constant: -4),
             layoutButton.widthAnchor.constraint(equalToConstant: 22),
             layoutButton.heightAnchor.constraint(equalToConstant: 22),
 
@@ -183,11 +212,8 @@ final class BottomBar: NSView {
             // without cross-branch baseline constraints (which AppKit's
             // window-sizing pass mishandles; see the tabsArea note below).
             clockSuffixLabel.trailingAnchor.constraint(equalTo: layoutButton.leadingAnchor, constant: -12),
-            clockSuffixLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             clockColonLabel.trailingAnchor.constraint(equalTo: clockSuffixLabel.leadingAnchor),
-            clockColonLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             clockPrefixLabel.trailingAnchor.constraint(equalTo: clockColonLabel.leadingAnchor),
-            clockPrefixLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
 
             tabsArea.leadingAnchor.constraint(equalTo: pillView.trailingAnchor, constant: 14),
             tabsArea.trailingAnchor.constraint(lessThanOrEqualTo: clockPrefixLabel.leadingAnchor, constant: -12),
@@ -203,6 +229,14 @@ final class BottomBar: NSView {
         let bottom = tabsArea.bottomAnchor.constraint(equalTo: bottomAnchor)
         bottom.priority = NSLayoutConstraint.Priority(999)
         NSLayoutConstraint.activate([stretch, top, bottom])
+        // Everything outside the flow sits on the bottom tab row's axis — the
+        // folder label band above it is the tabs' own business. These yield
+        // too while the bar is hidden at height 0.
+        for view in [pillView, clockPrefixLabel, clockColonLabel, clockSuffixLabel, layoutButton, settingsButton] {
+            let axis = view.centerYAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottomRowAxis)
+            axis.priority = NSLayoutConstraint.Priority(999)
+            axis.isActive = true
+        }
     }
 
     private func configureIconButton(_ button: NSButton, symbol: String, action: Selector?) {
@@ -246,29 +280,59 @@ final class BottomBar: NSView {
         }
     }
 
-    /// One item the flow can place: a tab, a group separator, or a button.
+    /// One thing the flow places on a row: a run of one group's tabs inside a
+    /// folder cell, or one of the trailing buttons.
     private enum FlowItem {
-        case tab(SessionTabInfo)
-        case separator
+        case folder(FolderSegment)
         case overflow
         case add
+    }
 
-        func width(of bar: BottomBar) -> CGFloat {
-            switch self {
-            case .tab(let info): return SessionTabView.desiredWidth(for: info, isActive: info.index == bar.activeIndex)
-            case .separator: return 9
-            case .overflow, .add: return 26
-            }
+    /// A group's tabs on one row. A group wider than a row spills across two;
+    /// only its first segment wears the folder's label tab — the second is a
+    /// bare cell, the same folder continued.
+    private struct FolderSegment {
+        let groupKey: String
+        let label: String
+        let colorIndex: Int
+        let tabs: [SessionTabInfo]
+        let ordinal: Int
+        var poolKey: String { "\(groupKey)#\(ordinal)" }
+    }
+
+    private func tabWidth(_ info: SessionTabInfo) -> CGFloat {
+        SessionTabView.desiredWidth(for: info, isActive: info.index == activeIndex)
+    }
+
+    private func segmentWidth(_ tabs: [SessionTabInfo]) -> CGFloat {
+        Self.folderPadX * 2
+            + tabs.reduce(0) { $0 + tabWidth($1) }
+            + Self.tabGap * CGFloat(max(0, tabs.count - 1))
+    }
+
+    private func itemWidth(_ item: FlowItem) -> CGFloat {
+        switch item {
+        case .folder(let segment): return segmentWidth(segment.tabs)
+        case .overflow, .add: return 26
         }
     }
 
-    /// Lay tabs into one or two rows, never splitting a root group across rows
-    /// unless the group alone exceeds a full row. Beyond two rows, the remainder
-    /// collapses into a `»` menu — the bar must not grow into a third pane.
+    /// Spacing before `item` given what precedes it on the row: folders keep
+    /// a clear gap between them; buttons tuck in closer.
+    private func gap(after previous: FlowItem?, before item: FlowItem) -> CGFloat {
+        guard let previous else { return 0 }
+        if case .folder = previous, case .folder = item { return Self.folderGap }
+        return Self.buttonGap
+    }
+
+    /// Lay tabs into one or two rows of folders, never splitting a group
+    /// across rows unless the group alone exceeds a full row. Beyond two rows,
+    /// the remainder collapses into a `»` menu — the bar must not grow into a
+    /// third pane.
     ///
-    /// Tab views are reused by session id: frame changes glide (~200 ms) when
-    /// `animated`, so a title rewrite slides neighbors instead of snapping them
-    /// (MILESTONE_1 §12 risk 2, retired here).
+    /// Tab and folder views are reused by identity: frame changes glide
+    /// (~200 ms) when `animated`, so a title rewrite slides neighbors instead
+    /// of snapping them (MILESTONE_1 §12 risk 2, retired here).
     private func flowTabs(animated: Bool) {
         lastFlowWidth = tabsArea.bounds.width
         lastFlowHeight = tabsArea.bounds.height
@@ -284,42 +348,14 @@ final class BottomBar: NSView {
             }
         }
 
-        // Pack into at most two rows.
-        var rows: [[FlowItem]] = [[]]
-        var widths: [CGFloat] = [0]
-        var overflow: [SessionTabInfo] = []
-
-        func tryAppend(_ item: FlowItem) -> Bool {
-            let w = item.width(of: self) + (rows[rows.count - 1].isEmpty ? 0 : 4)
-            if widths[rows.count - 1] + w > rowWidth, !rows[rows.count - 1].isEmpty {
-                guard rows.count < 2 else { return false }
-                rows.append([])
-                widths.append(0)
-            }
-            rows[rows.count - 1].append(item)
-            widths[rows.count - 1] += w
-            return true
+        // Pack, reserving room on the last row for the `+` — and, if anything
+        // overflowed, for the `»` too (a second pass with the wider reserve).
+        var packed = pack(chunks: chunks, rowWidth: rowWidth, reserve: 26 + Self.buttonGap)
+        if !packed.overflow.isEmpty {
+            packed = pack(chunks: chunks, rowWidth: rowWidth, reserve: (26 + Self.buttonGap) * 2)
         }
-
-        outer: for (chunkIndex, chunk) in chunks.enumerated() {
-            let chunkWidth = chunk.reduce(0) { $0 + SessionTabView.desiredWidth(for: $1, isActive: $1.index == activeIndex) + 4 }
-            // Try to keep the whole group on one row: jump rows if it won't fit here.
-            if chunkWidth <= rowWidth, widths[rows.count - 1] + chunkWidth > rowWidth,
-               !rows[rows.count - 1].isEmpty, rows.count < 2 {
-                rows.append([])
-                widths.append(0)
-            }
-            for (i, tab) in chunk.enumerated() {
-                if chunkIndex > 0 && i == 0 {
-                    _ = tryAppend(.separator)
-                }
-                if !tryAppend(.tab(tab)) {
-                    overflow.append(contentsOf: chunk[i...])
-                    for rest in chunks[(chunkIndex + 1)...] { overflow.append(contentsOf: rest) }
-                    break outer
-                }
-            }
-        }
+        var rows = packed.rows
+        let overflow = packed.overflow
 
         if overflow.isEmpty {
             overflowButton.isHidden = true
@@ -337,9 +373,9 @@ final class BottomBar: NSView {
             } else {
                 overflowButton.contentTintColor = Theme.chromeMutedText
             }
-            _ = tryAppend(.overflow)
+            rows[rows.count - 1].append(.overflow)
         }
-        _ = tryAppend(.add)
+        rows[rows.count - 1].append(.add)
 
         place(rows: rows, animated: animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
 
@@ -350,56 +386,168 @@ final class BottomBar: NSView {
         }
     }
 
+    /// The packing itself: whole groups jump to a fresh row rather than split;
+    /// a group too wide for any row fills the row it's on and continues below;
+    /// what no row can hold overflows. `reserve` keeps the last row's trailing
+    /// buttons from being squeezed out.
+    private func pack(chunks: [[SessionTabInfo]], rowWidth: CGFloat, reserve: CGFloat)
+        -> (rows: [[FlowItem]], overflow: [SessionTabInfo]) {
+        var rows: [[FlowItem]] = [[]]
+        var widths: [CGFloat] = [0]
+        var overflow: [SessionTabInfo] = []
+
+        func limit() -> CGFloat { rows.count == 2 ? rowWidth - reserve : rowWidth }
+        func fits(_ width: CGFloat) -> Bool {
+            let lead: CGFloat = rows[rows.count - 1].isEmpty ? 0 : Self.folderGap
+            return widths[rows.count - 1] + lead + width <= limit()
+        }
+        func newRow() -> Bool {
+            guard rows.count < 2 else { return false }
+            rows.append([])
+            widths.append(0)
+            return true
+        }
+        func append(_ segment: FolderSegment) {
+            let lead: CGFloat = rows[rows.count - 1].isEmpty ? 0 : Self.folderGap
+            rows[rows.count - 1].append(.folder(segment))
+            widths[widths.count - 1] += lead + segmentWidth(segment.tabs)
+        }
+
+        outer: for (chunkIndex, chunk) in chunks.enumerated() {
+            let key = chunk[0].groupKey
+            let label = chunk[0].groupLabel
+            // Keep the whole group on one row when a fresh row would hold it.
+            if !rows[rows.count - 1].isEmpty, !fits(segmentWidth(chunk)), segmentWidth(chunk) <= limit() {
+                _ = newRow()
+            }
+            var pending = chunk[...]
+            var ordinal = 0
+            while !pending.isEmpty {
+                var take: [SessionTabInfo] = []
+                for tab in pending {
+                    if fits(segmentWidth(take + [tab])) { take.append(tab) } else { break }
+                }
+                if take.isEmpty {
+                    if rows[rows.count - 1].isEmpty {
+                        // A single tab wider than the row still gets placed —
+                        // overhang beats an unreachable session.
+                        take.append(pending[pending.startIndex])
+                    } else if newRow() {
+                        continue
+                    } else {
+                        overflow.append(contentsOf: pending)
+                        for rest in chunks[(chunkIndex + 1)...] { overflow.append(contentsOf: rest) }
+                        break outer
+                    }
+                }
+                append(FolderSegment(groupKey: key, label: label, colorIndex: chunkIndex, tabs: take, ordinal: ordinal))
+                ordinal += 1
+                pending = pending.dropFirst(take.count)
+                if !pending.isEmpty, !newRow() {
+                    overflow.append(contentsOf: pending)
+                    for rest in chunks[(chunkIndex + 1)...] { overflow.append(contentsOf: rest) }
+                    break outer
+                }
+            }
+        }
+        // The reserve only bites on the last row; a one-row strip must honor it too.
+        if rows.count == 1, widths[0] + reserve > rowWidth, rows[0].count > 1 {
+            // Spill the last folder to a second row rather than crowd the `+`.
+            if case .folder(let last) = rows[0].removeLast() {
+                rows.append([.folder(last)])
+            }
+        }
+        return (rows, overflow)
+    }
+
     /// Materialize the flow: persistent views move to their new frames (gliding
-    /// when animated), departed tabs fade out, arrivals fade in in place.
+    /// when animated), departed tabs and folders fade out, arrivals appear in
+    /// place.
     private func place(rows: [[FlowItem]], animated: Bool) {
-        var seen = Set<UUID>()
-        var separatorsUsed = 0
+        var seenTabs = Set<UUID>()
+        var seenFolders = Set<String>()
         var placements: [(NSView, CGRect)] = []
         var arrivals: [NSView] = []
 
         let areaHeight = tabsArea.bounds.height
         let contentHeight = rows.count > 1
-            ? Self.tabHeight * 2 + Self.rowGap
-            : Self.tabHeight
-        let topY = (areaHeight + contentHeight) / 2 - Self.tabHeight
+            ? Self.rowContentHeight * 2 + Self.rowGap
+            : Self.rowContentHeight
+        let contentTop = (areaHeight + contentHeight) / 2
 
         for (rowIndex, row) in rows.enumerated() {
+            let rowTop = contentTop - CGFloat(rowIndex) * (Self.rowContentHeight + Self.rowGap)
+            let cellTop = rowTop - Self.folderTabHeight
+            let cellBottom = cellTop - Self.cellHeight
+            let tabY = cellBottom + Self.folderPadY
             var x: CGFloat = 0
-            let y = topY - CGFloat(rowIndex) * (Self.tabHeight + Self.rowGap)
+            var previous: FlowItem?
             for item in row {
-                let width = item.width(of: self)
+                x += gap(after: previous, before: item)
+                let width = itemWidth(item)
                 switch item {
-                case .tab(let info):
-                    seen.insert(info.id)
-                    let view: SessionTabView
-                    if let existing = tabViews[info.id] {
-                        view = existing
+                case .folder(let segment):
+                    seenFolders.insert(segment.poolKey)
+                    let folder: FolderView
+                    if let existing = folderViews[segment.poolKey] {
+                        folder = existing
                     } else {
-                        view = SessionTabView(sessionId: info.id)
-                        wire(view)
-                        tabViews[info.id] = view
-                        tabsArea.addSubview(view)
-                        arrivals.append(view)
+                        folder = FolderView()
+                        folderViews[segment.poolKey] = folder
+                        // Below every tab — folders are the ground the tabs sit on.
+                        tabsArea.addSubview(folder, positioned: .below, relativeTo: nil)
+                        arrivals.append(folder)
                     }
-                    view.apply(info: info, isActive: info.index == activeIndex)
-                    placements.append((view, CGRect(x: x, y: y, width: width, height: Self.tabHeight)))
-                case .separator:
-                    let line = dequeueSeparator(at: separatorsUsed)
-                    separatorsUsed += 1
-                    placements.append((line, CGRect(x: x + 4, y: y + 3, width: 1, height: 14)))
+                    let removable = segment.groupKey.hasPrefix(WorktreeManager.base + "/")
+                    folder.apply(
+                        label: segment.ordinal == 0 ? segment.label : nil,
+                        fill: Theme.Folder.fill(segment.colorIndex),
+                        onRemove: removable ? { [weak self] in
+                            self?.delegate?.bottomBarDidRequestRemoveWorktree(at: segment.groupKey)
+                        } : nil
+                    )
+                    placements.append((folder, CGRect(
+                        x: x, y: cellBottom, width: width, height: Self.cellHeight + Self.folderTabHeight
+                    )))
+                    var tabX = x + Self.folderPadX
+                    for info in segment.tabs {
+                        seenTabs.insert(info.id)
+                        let view: SessionTabView
+                        if let existing = tabViews[info.id] {
+                            view = existing
+                        } else {
+                            view = SessionTabView(sessionId: info.id)
+                            wire(view)
+                            tabViews[info.id] = view
+                            tabsArea.addSubview(view)
+                            arrivals.append(view)
+                        }
+                        view.apply(info: info, isActive: info.index == activeIndex)
+                        let tabW = tabWidth(info)
+                        placements.append((view, CGRect(x: tabX, y: tabY, width: tabW, height: Self.tabHeight)))
+                        tabX += tabW + Self.tabGap
+                    }
                 case .overflow:
-                    placements.append((overflowButton, CGRect(x: x + 2, y: y, width: 22, height: Self.tabHeight)))
+                    placements.append((overflowButton, CGRect(x: x + 2, y: tabY, width: 22, height: Self.tabHeight)))
                 case .add:
-                    placements.append((addButton, CGRect(x: x + 2, y: y, width: 22, height: Self.tabHeight)))
+                    placements.append((addButton, CGRect(x: x + 2, y: tabY, width: 22, height: Self.tabHeight)))
                 }
-                x += width + 4
+                x += width
+                previous = item
             }
         }
 
-        // Departed tabs (closed, or pushed into the overflow menu).
-        for (id, view) in tabViews where !seen.contains(id) {
+        // Departed tabs (closed, or pushed into the overflow menu) and folders.
+        var departed: [NSView] = []
+        for (id, view) in tabViews where !seenTabs.contains(id) {
             tabViews[id] = nil
+            departed.append(view)
+        }
+        for (key, view) in folderViews where !seenFolders.contains(key) {
+            folderViews[key] = nil
+            departed.append(view)
+        }
+        for view in departed {
             if animated {
                 NSAnimationContext.runAnimationGroup({ ctx in
                     ctx.duration = 0.15
@@ -408,9 +556,6 @@ final class BottomBar: NSView {
             } else {
                 view.removeFromSuperview()
             }
-        }
-        for index in separatorsUsed..<separatorPool.count {
-            separatorPool[index].isHidden = true
         }
 
         let apply = {
@@ -459,19 +604,6 @@ final class BottomBar: NSView {
         }
     }
 
-    private func dequeueSeparator(at index: Int) -> NSView {
-        if index < separatorPool.count {
-            separatorPool[index].isHidden = false
-            return separatorPool[index]
-        }
-        let line = NSView()
-        line.wantsLayer = true
-        line.layer?.backgroundColor = Theme.Elevation.frameLine.cgColor
-        separatorPool.append(line)
-        tabsArea.addSubview(line)
-        return line
-    }
-
     private func wire(_ view: SessionTabView) {
         view.onSelect = { [weak self] idx in self?.delegate?.bottomBarDidSelectSession(at: idx) }
         view.onClose = { [weak self] idx in self?.delegate?.bottomBarDidRequestCloseSession(at: idx) }
@@ -496,7 +628,8 @@ final class BottomBar: NSView {
     private func overflowMenu(for tabs: [SessionTabInfo]) -> NSMenu {
         let menu = NSMenu()
         for tab in tabs {
-            let title = SessionTabView.label(for: tab)
+            // No folder in a menu: the ⎇ mark comes back on the row itself.
+            let title = (tab.isWorktree ? "⎇ " : "") + SessionTabView.label(for: tab)
             let item = NSMenuItem(title: title, action: #selector(overflowItemSelected(_:)), keyEquivalent: "")
             item.target = self
             item.tag = tab.index
@@ -558,7 +691,7 @@ final class BottomBar: NSView {
 
     @objc private func addTapped() { delegate?.bottomBarDidRequestNewSession() }
     @objc private func layoutTapped() { delegate?.bottomBarDidToggleLayout() }
-    @objc private func pillClicked() { delegate?.bottomBarDidClickPill(anchor: pillView) }
+    @objc private func settingsTapped() { delegate?.bottomBarDidRequestSettings() }
     @objc private func overflowTapped() {
         overflowButton.menu?.popUp(positioning: nil, at: NSPoint(x: 0, y: overflowButton.bounds.maxY), in: overflowButton)
     }
@@ -567,8 +700,7 @@ final class BottomBar: NSView {
     }
 }
 
-/// A single session tab: optional attention badge, ⎇ glyph for worktree
-/// sessions, ellipsized title. The active tab — and only the active tab —
+/// A single session tab: optional attention badge, ellipsized title. The active tab — and only the active tab —
 /// carries a close `×` at its leading edge, before the title: the tab you can
 /// close is the one you're looking at, and inactive tabs stay quiet. Click
 /// selects; double-click renames **in place** — the title becomes an editable
@@ -638,15 +770,16 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         return ceil(textWidth) + badge + (isActive ? 34 : 20)
     }
 
-    /// The tab's label: ⎇ marks worktree sessions, then the title, then the
-    /// `@host` mark for remote sessions — dropped when the title *is* the
-    /// host ("jarvis @jarvis" says it once). (Index numbering was tried and
-    /// dropped same day — the tmux reference was about presentation, not
+    /// The tab's label: the title, then the `@host` mark for remote sessions —
+    /// dropped when the title *is* the host ("jarvis @jarvis" says it once).
+    /// The worktree mark moved to the folder the tab sits in (2026-09-03);
+    /// only the `»` menu, which has no folder, puts ⎇ back. (Index numbering
+    /// was tried and dropped — the tmux reference was about presentation, not
     /// anatomy; owner call 2026-07-13.)
     static func label(for info: SessionTabInfo) -> String {
         let title = info.title.isEmpty ? "untitled" : info.title
         let host = info.remoteHost.flatMap { $0 == info.title ? nil : " @\($0)" } ?? ""
-        return (info.isWorktree ? "⎇ " : "") + title + host
+        return title + host
     }
 
     func apply(info: SessionTabInfo, isActive: Bool) {
@@ -927,6 +1060,99 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
 
 /// The active tab's close `×`: quiet at rest, full-strength under the pointer.
 /// Opacity only — no color change, no growth, no motion (§1.3).
+/// One worktree folder in the strip: a rounded cell that holds a group's tabs,
+/// with a label tab rising from its top-left edge — drawn as one continuous
+/// path in one fill so it reads as a folder, not a box wearing a badge. A
+/// continuation segment (a group split across rows) has no label tab.
+/// Right-click on the label offers to remove the worktree when it is one.
+private final class FolderView: NSView {
+    private static let radius: CGFloat = Theme.Elevation.radiusSmall
+    private static let tabHeight: CGFloat = 13
+    private var label: String?
+    private var fill: NSColor = .clear
+    private var onRemove: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func apply(label: String?, fill: NSColor, onRemove: (() -> Void)?) {
+        self.onRemove = onRemove
+        guard self.label != label || self.fill != fill else { return }
+        self.label = label
+        self.fill = fill
+        needsDisplay = true
+    }
+
+    private var labelAttributes: [NSAttributedString.Key: Any] {
+        [.font: Theme.Typography.mono(Theme.Typography.small, weight: .medium),
+         .foregroundColor: Theme.Folder.labelText]
+    }
+
+    /// The label tab's width: its text plus insets, never wider than the cell.
+    private func labelTabWidth() -> CGFloat {
+        guard let label else { return 0 }
+        let text = (label as NSString).size(withAttributes: labelAttributes).width
+        return min(ceil(text) + 14, bounds.width - Self.radius * 2)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let r = Self.radius
+        let width = bounds.width
+        let cellTop = bounds.height - Self.tabHeight
+        let path = NSBezierPath()
+        if label != nil {
+            let tabWidth = labelTabWidth()
+            let top = bounds.height
+            // Clockwise from the cell's bottom-left, around the cell, up the
+            // label tab, and back down its left edge.
+            path.move(to: NSPoint(x: r, y: 0))
+            path.appendArc(from: NSPoint(x: width, y: 0), to: NSPoint(x: width, y: cellTop), radius: r)
+            path.appendArc(from: NSPoint(x: width, y: cellTop), to: NSPoint(x: tabWidth, y: cellTop), radius: r)
+            path.line(to: NSPoint(x: tabWidth, y: cellTop))
+            path.appendArc(from: NSPoint(x: tabWidth, y: top), to: NSPoint(x: 0, y: top), radius: r)
+            path.appendArc(from: NSPoint(x: 0, y: top), to: NSPoint(x: 0, y: 0), radius: r)
+            path.appendArc(from: NSPoint(x: 0, y: 0), to: NSPoint(x: width, y: 0), radius: r)
+            path.close()
+        } else {
+            path.appendRoundedRect(NSRect(x: 0, y: 0, width: width, height: cellTop), xRadius: r, yRadius: r)
+        }
+        fill.setFill()
+        path.fill()
+
+        if let label {
+            let tabWidth = labelTabWidth()
+            let attributed = NSAttributedString(string: label, attributes: labelAttributes)
+            let size = attributed.size()
+            let rect = NSRect(
+                x: 7,
+                y: cellTop + (Self.tabHeight - size.height) / 2 + 0.5,
+                width: tabWidth - 14,
+                height: size.height
+            )
+            attributed.draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        }
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let onRemove, let label else { return nil }
+        let point = convert(event.locationInWindow, from: nil)
+        guard point.y >= bounds.height - Self.tabHeight, point.x <= labelTabWidth() else { return nil }
+        let menu = NSMenu()
+        let item = NSMenuItem(title: "Remove worktree \(label)…", action: #selector(removeTapped), keyEquivalent: "")
+        item.target = self
+        menu.addItem(item)
+        _ = onRemove
+        return menu
+    }
+
+    @objc private func removeTapped() { onRemove?() }
+}
+
 private final class HoverFadeButton: NSButton {
     static let restingAlpha: CGFloat = 0.55
     private var tracking: NSTrackingArea?

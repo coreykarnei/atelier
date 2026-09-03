@@ -16,15 +16,10 @@ enum Theme {
     /// 0.75 is the owner's own tuned value — dotfiles Ghostty
     /// `background-opacity` — and with the WindowServer blur pipeline
     /// (WindowBlur.swift) it *is* the net opacity, not an input to material
-    /// stacking. `ATELIER_FIELD_ALPHA` overrides it for live bisecting
-    /// (dev-only; run the bundle binary directly to inherit the shell env).
-    static let fieldAlpha: CGFloat = {
-        if let raw = ProcessInfo.processInfo.environment["ATELIER_FIELD_ALPHA"],
-           let value = Double(raw), (0.0...1.0).contains(value) {
-            return CGFloat(value)
-        }
-        return 0.75
-    }()
+    /// stacking. Owner-tunable from Settings (the slider posts
+    /// `Settings.didChange`; field surfaces re-read); `ATELIER_FIELD_ALPHA`
+    /// overrides for live bisecting.
+    static var fieldAlpha: CGFloat { Settings.fieldAlpha }
 
     /// Behind-window blur radius — dotfiles Ghostty `background-blur-radius`.
     static let backgroundBlurRadius = 20
@@ -107,6 +102,33 @@ enum Theme {
             shadow.shadowBlurRadius = blur
             shadow.shadowColor = NSColor.black.withAlphaComponent(alpha)
             return shadow
+        }
+    }
+
+    // MARK: Folders (MILESTONE_1 §7, revised 2026-09-03)
+
+    /// The tab strip's worktree folders: the main checkout on plain surface0,
+    /// each further group tinted a hair toward the next accent so two folders
+    /// never read the same. Half-alpha — the bar's translucency shows through.
+    enum Folder {
+        private static let tints: [UInt32] = [0x89B4FA, 0xCBA6F7, 0x94E2D5, 0xFAB387, 0xF5C2E7]
+        static let alpha: CGFloat = 0.6
+        static let labelText = chromeText
+
+        static func fill(_ index: Int) -> NSColor {
+            let base = Elevation.surface0
+            guard index > 0 else { return base.withAlphaComponent(alpha) }
+            return blend(base, nsColor(tints[(index - 1) % tints.count]), 0.22).withAlphaComponent(alpha)
+        }
+
+        private static func blend(_ a: NSColor, _ b: NSColor, _ t: CGFloat) -> NSColor {
+            let a = a.usingColorSpace(.sRGB) ?? a, b = b.usingColorSpace(.sRGB) ?? b
+            return NSColor(
+                srgbRed: a.redComponent + (b.redComponent - a.redComponent) * t,
+                green: a.greenComponent + (b.greenComponent - a.greenComponent) * t,
+                blue: a.blueComponent + (b.blueComponent - a.blueComponent) * t,
+                alpha: 1
+            )
         }
     }
 

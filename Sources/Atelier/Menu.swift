@@ -19,6 +19,8 @@ enum Menu {
         appItem.submenu = appMenu
         appMenu.addItem(withTitle: "About Atelier", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Settings…", action: #selector(AppDelegate.showSettings(_:)), keyEquivalent: ",")
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Atelier", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Atelier", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -66,7 +68,7 @@ enum Menu {
         viewMenu.addItem(.separator())
 
         viewMenu.addItem(withTitle: "New Project Tab", action: #selector(AppDelegate.newProject(_:)), keyEquivalent: "t")
-        viewMenu.addItem(chord("New Session", #selector(AppDelegate.newSession(_:)), "t", [.command, .option]))
+        viewMenu.addItem(chord("New Session…", #selector(AppDelegate.newSession(_:)), "t", [.command, .option]))
         viewMenu.addItem(withTitle: "Open IDE Here", action: #selector(AppDelegate.openIDEHere(_:)), keyEquivalent: "\r")
         viewMenu.addItem(withTitle: "Close Session", action: #selector(AppDelegate.closeSession(_:)), keyEquivalent: "w")
         // ⌘⇧T is the browser's reopen chord — muscle memory the close `×` earns.

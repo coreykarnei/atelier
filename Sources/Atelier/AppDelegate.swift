@@ -129,8 +129,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if !orphans.isEmpty {
             // A designed refusal (§5): Atelier speaks the sentence, the dead
-            // worktrees are named in mono, and one button opens the fan aimed
-            // at recreating the first of them.
+            // worktrees are named in mono, and one button opens the chooser
+            // aimed at recreating the first of them.
             let alert = NSAlert()
             alert.messageText = orphans.count == 1
                 ? "1 session wasn't restored"
@@ -145,7 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.addButton(withTitle: "Recreate…")
             let recreate = { [weak self] (response: NSApplication.ModalResponse) in
                 guard response == .alertSecondButtonReturn, let self else { return }
-                self.keyController?.showWorktreeFan(prefill: orphans.first?.branch)
+                self.keyController?.showWorktreeChooser(prefill: orphans.first?.branch)
             }
             if let window = NSApp.keyWindow {
                 alert.beginSheetModal(for: window, completionHandler: recreate)
@@ -295,6 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func newProject(_ sender: Any?) { openProjectWindow() }
     @objc func showPalette(_ sender: Any?) { keyController?.showPalette() }
+    @objc func showSettings(_ sender: Any?) { SettingsWindowController.shared.show() }
 
     /// Switch targets for the palette: every other project window, by title.
     func otherProjects(excluding: MainWindowController) -> [(String, NSWindow)] {
@@ -314,7 +315,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func toggleLayout(_ sender: Any?) { keyController?.toggleLayout() }
 
-    @objc func newSession(_ sender: Any?) { keyController?.addSessionOnMain() }
+    @objc func newSession(_ sender: Any?) { keyController?.requestNewSession() }
     @objc func openIDEHere(_ sender: Any?) { keyController?.promoteActiveSessionHere() }
     @objc func closeSession(_ sender: Any?) { keyController?.closeActiveSession() }
     @objc func reopenSession(_ sender: Any?) { keyController?.reopenClosedSession() }
