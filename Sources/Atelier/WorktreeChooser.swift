@@ -216,6 +216,17 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
             item.target = self
             item.representedObject = worktree.path
             item.state = worktree.path == selected.path ? .on : .off
+            if worktree.isPrimary {
+                // The primary checkout says so — its branch isn't always `main`.
+                let title = NSMutableAttributedString(string: worktree.branch, attributes: [
+                    .font: Theme.Typography.mono(Theme.Typography.body),
+                ])
+                title.append(NSAttributedString(string: "  main checkout", attributes: [
+                    .font: Theme.Typography.ui(Theme.Typography.small),
+                    .foregroundColor: NSColor.secondaryLabelColor,
+                ]))
+                item.attributedTitle = title
+            }
             menu.addItem(item)
         }
         menu.addItem(.separator())

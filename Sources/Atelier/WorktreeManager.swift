@@ -40,6 +40,9 @@ enum WorktreeManager {
     }
 
     /// All worktrees of the repo, primary first (git guarantees that ordering).
+    /// Prunable entries — a checkout whose directory is gone (a scratch
+    /// worktree left by some tool) — are dropped; a detached checkout is named
+    /// by its directory rather than "(detached)".
     static func list(repoRoot: String) -> [Worktree] {
         let result = git(["-C", repoRoot, "worktree", "list", "--porcelain"])
         guard result.status == 0 else { return [] }
@@ -47,12 +50,18 @@ enum WorktreeManager {
         var out: [Worktree] = []
         var path: String?
         var branch: String?
+        var isFirst = true
         func flush() {
-            if let p = path {
-                out.append(Worktree(path: p, branch: branch ?? "(detached)", isPrimary: out.isEmpty))
-            }
-            path = nil
-            branch = nil
+            defer { path = nil; branch = nil }
+            guard let p = path else { return }
+            let primary = isFirst
+            isFirst = false
+            guard FileManager.default.fileExists(atPath: p) else { return }
+            out.append(Worktree(
+                path: p,
+                branch: branch ?? "\((p as NSString).lastPathComponent) (detached)",
+                isPrimary: primary
+            ))
         }
         for line in result.out.components(separatedBy: "\n") {
             if line.hasPrefix("worktree ") {
