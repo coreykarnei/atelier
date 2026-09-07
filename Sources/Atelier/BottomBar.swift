@@ -12,6 +12,8 @@ protocol BottomBarDelegate: AnyObject {
     func bottomBarDidRequestRemoveWorktree(at path: String)
     /// The gear at the bar's far right.
     func bottomBarDidRequestSettings()
+    /// A tab was dragged to a new place: the full strip order, by session id.
+    func bottomBarDidReorderSessions(order: [UUID])
 }
 
 /// Everything one session tab needs to draw. `id` is the session's stable
@@ -51,9 +53,12 @@ struct SessionTabInfo {
 final class BottomBar: NSView {
     weak var delegate: BottomBarDelegate?
 
-    /// Bar heights: 1 px border + 3 pt margins around one or two folder rows.
-    static let rowHeight: CGFloat = 44
-    static let twoRowHeight: CGFloat = 86
+    /// Bar heights. One row is the tmux-status-bar 30: the folder label tabs
+    /// poke *up past the bar's top edge* over the pane content (owner call
+    /// 2026-09-07) rather than thickening the bar. Two rows house the lower
+    /// row's label band between the rows.
+    static let rowHeight: CGFloat = 30
+    static let twoRowHeight: CGFloat = 72
     private static let tabHeight: CGFloat = 20
     private static let tabGap: CGFloat = 4
     private static let rowGap: CGFloat = 4
@@ -65,10 +70,11 @@ final class BottomBar: NSView {
     private static let folderGap: CGFloat = 10
     private static let buttonGap: CGFloat = 6
     private static var cellHeight: CGFloat { tabHeight + folderPadY * 2 }
-    private static var rowContentHeight: CGFloat { cellHeight + folderTabHeight }
+    /// Row pitch: a cell, the gap, and the lower row's label band.
+    private static var rowPitch: CGFloat { cellHeight + rowGap + folderTabHeight }
     /// Where the bottom row's tabs are centered, measured from the bar's
     /// bottom edge — the pill, clock, and buttons sit on this axis.
-    private static var bottomRowAxis: CGFloat { 3 + folderPadY + tabHeight / 2 }
+    private static var bottomRowAxis: CGFloat { 15 }
 
     /// The bar's current natural height (one or two tab rows).
     private(set) var desiredHeight: CGFloat = BottomBar.rowHeight
@@ -78,7 +84,7 @@ final class BottomBar: NSView {
     private let pillView = NSView()
     private let pillLabel = NSTextField(labelWithString: "")
     /// Manual-layout home of the tab views; sits between pill and clock.
-    private let tabsArea = NSView()
+    private let tabsArea = TabsAreaView()
     private let addButton = NSButton()
     private let overflowButton = NSButton()
     private let clockPrefixLabel = NSTextField(labelWithString: "")
@@ -136,6 +142,22 @@ final class BottomBar: NSView {
     @objc private func accessibilityDisplayChanged() {
         layer?.backgroundColor = Theme.Elevation.mantle.cgColor
     }
+
+    /// The folder label tabs rise past the bar's top edge, and AppKit rejects
+    /// hits outside a view's frame before asking its subviews — so the strip
+    /// gets first refusal on any point, frame or not, and the label tabs are
+    /// grabbable along their whole height (owner report 2026-09-07).
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if let hit = tabsArea.hitTest(convert(point, from: superview).applying(.init(translationX: -tabsArea.frame.minX, y: -tabsArea.frame.minY)).applying(.identity), outsideFrame: true) {
+            return hit
+        }
+        return super.hitTest(point)
+    }
+
+    /// The window moves by its background (`isMovableByWindowBackground`), and
+    /// a non-opaque view says yes to that by default — which would let a tab
+    /// drag haul the whole window along. The bar is controls, not a handle.
+    override var mouseDownCanMoveWindow: Bool { false }
 
     private func build() {
         topBorder.boxType = .custom
@@ -252,7 +274,14 @@ final class BottomBar: NSView {
     // MARK: Update
 
     func update(tabs: [SessionTabInfo], activeIndex: Int, pill: String, mode: LayoutMode?) {
-        self.tabs = tabs
+        if drag != nil || groupDrag != nil {
+            // Mid-drag the strip's order is the pointer's, not the owner's
+            // (the title timer refreshes every 2 s): keep the local order.
+            let rank = Dictionary(uniqueKeysWithValues: self.tabs.enumerated().map { ($1.id, $0) })
+            self.tabs = tabs.sorted { (rank[$0.id] ?? .max) < (rank[$1.id] ?? .max) }
+        } else {
+            self.tabs = tabs
+        }
         self.activeIndex = activeIndex
 
         pillLabel.stringValue = pill
@@ -298,6 +327,16 @@ final class BottomBar: NSView {
         let tabs: [SessionTabInfo]
         let ordinal: Int
         var poolKey: String { "\(groupKey)#\(ordinal)" }
+    }
+
+    /// A folder's tint follows the *worktree*, not its position in the strip —
+    /// dragging folders past each other must not recolor them. Main (any root
+    /// outside the worktree base) is plain; worktrees hash to an accent.
+    private static func colorIndex(for groupKey: String) -> Int {
+        guard groupKey.hasPrefix(WorktreeManager.base + "/") || groupKey.hasPrefix("ssh://") else { return 0 }
+        var hash: UInt32 = 2166136261
+        for byte in groupKey.utf8 { hash = (hash ^ UInt32(byte)) &* 16777619 }
+        return 1 + Int(hash % 5)
     }
 
     private func tabWidth(_ info: SessionTabInfo) -> CGFloat {
@@ -469,16 +508,14 @@ final class BottomBar: NSView {
         var placements: [(NSView, CGRect)] = []
         var arrivals: [NSView] = []
 
+        // Cells stack from the bottom; the top row's label tabs rise past the
+        // area (and the bar) — nothing here clips, by design.
         let areaHeight = tabsArea.bounds.height
-        let contentHeight = rows.count > 1
-            ? Self.rowContentHeight * 2 + Self.rowGap
-            : Self.rowContentHeight
-        let contentTop = (areaHeight + contentHeight) / 2
+        let cellsHeight = Self.cellHeight * CGFloat(rows.count) + (Self.rowGap + Self.folderTabHeight) * CGFloat(rows.count - 1)
+        let base = (areaHeight - cellsHeight) / 2
 
         for (rowIndex, row) in rows.enumerated() {
-            let rowTop = contentTop - CGFloat(rowIndex) * (Self.rowContentHeight + Self.rowGap)
-            let cellTop = rowTop - Self.folderTabHeight
-            let cellBottom = cellTop - Self.cellHeight
+            let cellBottom = base + CGFloat(rows.count - 1 - rowIndex) * Self.rowPitch
             let tabY = cellBottom + Self.folderPadY
             var x: CGFloat = 0
             var previous: FlowItem?
@@ -493,22 +530,29 @@ final class BottomBar: NSView {
                         folder = existing
                     } else {
                         folder = FolderView()
+                        folder.onDragBegan = { [weak self] view, event in self?.folderDragBegan(view, event) }
+                        folder.onDragMoved = { [weak self] view, event in self?.folderDragMoved(view, event) }
+                        folder.onDragEnded = { [weak self] view in self?.folderDragEnded(view) }
                         folderViews[segment.poolKey] = folder
                         // Below every tab — folders are the ground the tabs sit on.
                         tabsArea.addSubview(folder, positioned: .below, relativeTo: nil)
                         arrivals.append(folder)
                     }
                     let removable = segment.groupKey.hasPrefix(WorktreeManager.base + "/")
+                    folder.groupKey = segment.groupKey
                     folder.apply(
                         label: segment.ordinal == 0 ? segment.label : nil,
-                        fill: Theme.Folder.fill(segment.colorIndex),
+                        fill: Theme.Folder.fill(Self.colorIndex(for: segment.groupKey)),
                         onRemove: removable ? { [weak self] in
                             self?.delegate?.bottomBarDidRequestRemoveWorktree(at: segment.groupKey)
                         } : nil
                     )
-                    placements.append((folder, CGRect(
-                        x: x, y: cellBottom, width: width, height: Self.cellHeight + Self.folderTabHeight
-                    )))
+                    let folderDragged = groupDrag?.key == segment.groupKey
+                    if !folderDragged {
+                        placements.append((folder, CGRect(
+                            x: x, y: cellBottom, width: width, height: Self.cellHeight + Self.folderTabHeight
+                        )))
+                    }
                     var tabX = x + Self.folderPadX
                     for info in segment.tabs {
                         seenTabs.insert(info.id)
@@ -524,7 +568,10 @@ final class BottomBar: NSView {
                         }
                         view.apply(info: info, isActive: info.index == activeIndex)
                         let tabW = tabWidth(info)
-                        placements.append((view, CGRect(x: tabX, y: tabY, width: tabW, height: Self.tabHeight)))
+                        // The tab under the pointer follows the pointer, not the flow.
+                        if drag?.id != info.id, !folderDragged {
+                            placements.append((view, CGRect(x: tabX, y: tabY, width: tabW, height: Self.tabHeight)))
+                        }
                         tabX += tabW + Self.tabGap
                     }
                 case .overflow:
@@ -609,6 +656,162 @@ final class BottomBar: NSView {
         view.onClose = { [weak self] idx in self?.delegate?.bottomBarDidRequestCloseSession(at: idx) }
         view.onRenameCommit = { [weak self] idx, title in self?.delegate?.bottomBarDidRenameSession(at: idx, title: title) }
         view.onRenameEnd = { [weak self] in self?.renameDidEnd() }
+        view.onDragBegan = { [weak self] tab, event in self?.dragBegan(tab, event) }
+        view.onDragMoved = { [weak self] tab, event in self?.dragMoved(tab, event) }
+        view.onDragEnded = { [weak self] tab in self?.dragEnded(tab) }
+    }
+
+    // MARK: Drag to reorder (MILESTONE_1 §7, 2026-09-07)
+
+    /// The tab under the pointer: it rides the pointer while the rest of the
+    /// strip re-flows live around the order it proposes.
+    private var drag: (id: UUID, grabOffset: CGFloat)?
+
+    private func dragBegan(_ tab: SessionTabView, _ event: NSEvent) {
+        let point = tabsArea.convert(event.locationInWindow, from: nil)
+        drag = (tab.sessionId, point.x - tab.frame.minX)
+        // Above everything else in the strip while it travels.
+        tabsArea.addSubview(tab)
+        tab.wantsLayer = true
+        tab.shadow = Theme.Elevation.raisedShadow
+    }
+
+    private func dragMoved(_ tab: SessionTabView, _ event: NSEvent) {
+        guard let drag, drag.id == tab.sessionId else { return }
+        let point = tabsArea.convert(event.locationInWindow, from: nil)
+        let x = min(max(point.x - drag.grabOffset, -tab.frame.width / 2), tabsArea.bounds.width - tab.frame.width / 2)
+        tab.frame.origin.x = x
+        let proposed = proposeOrder(dragging: drag.id, frame: tab.frame)
+        if proposed.map(\.id) != tabs.map(\.id) {
+            tabs = proposed
+            flowTabs(animated: true)
+        }
+    }
+
+    private func dragEnded(_ tab: SessionTabView) {
+        guard drag?.id == tab.sessionId else { return }
+        drag = nil
+        tab.shadow = nil
+        delegate?.bottomBarDidReorderSessions(order: tabs.map(\.id))
+        flowTabs(animated: true)
+    }
+
+    /// A folder dragged by its label tab: the whole group — cell and tabs —
+    /// rides the pointer, and swaps with a neighbor folder once its center
+    /// crosses the neighbor's.
+    private var groupDrag: (key: String, grabOffset: CGFloat)?
+
+    private func folderDragBegan(_ folder: FolderView, _ event: NSEvent) {
+        guard let key = folder.groupKey else { return }
+        let point = tabsArea.convert(event.locationInWindow, from: nil)
+        groupDrag = (key, point.x - folder.frame.minX)
+        // Lift the folder and its tabs above the rest of the strip.
+        tabsArea.addSubview(folder)
+        for info in tabs where info.groupKey == key { if let view = tabViews[info.id] { tabsArea.addSubview(view) } }
+        folder.shadow = Theme.Elevation.raisedShadow
+        NSCursor.closedHand.push()
+    }
+
+    private func folderDragMoved(_ folder: FolderView, _ event: NSEvent) {
+        guard let groupDrag, groupDrag.key == folder.groupKey else { return }
+        let point = tabsArea.convert(event.locationInWindow, from: nil)
+        let x = min(max(point.x - groupDrag.grabOffset, -folder.frame.width / 2), tabsArea.bounds.width - folder.frame.width / 2)
+        let dx = x - folder.frame.minX
+        folder.frame.origin.x = x
+        for info in tabs where info.groupKey == groupDrag.key { tabViews[info.id]?.frame.origin.x += dx }
+        let cell = CGRect(x: folder.frame.minX, y: folder.frame.minY, width: folder.frame.width, height: Self.cellHeight)
+        let proposed = proposeGroupOrder(dragging: groupDrag.key, frame: cell)
+        if proposed.map(\.id) != tabs.map(\.id) {
+            tabs = proposed
+            flowTabs(animated: true)
+        }
+    }
+
+    private func folderDragEnded(_ folder: FolderView) {
+        guard groupDrag?.key == folder.groupKey else { return }
+        groupDrag = nil
+        folder.shadow = nil
+        NSCursor.pop()
+        delegate?.bottomBarDidReorderSessions(order: tabs.map(\.id))
+        flowTabs(animated: true)
+    }
+
+    private func proposeGroupOrder(dragging key: String, frame: CGRect) -> [SessionTabInfo] {
+        var chunks: [[SessionTabInfo]] = []
+        for tab in tabs {
+            if let last = chunks.last, last.first?.groupKey == tab.groupKey {
+                chunks[chunks.count - 1].append(tab)
+            } else {
+                chunks.append([tab])
+            }
+        }
+        guard let g = chunks.firstIndex(where: { $0.first?.groupKey == key }) else { return tabs }
+        return (Self.swapNeighborFolder(chunks: chunks, at: g, dragged: frame, folderViews: folderViews) ?? chunks).flatMap { $0 }
+    }
+
+    /// How far past a neighbor's midpoint the dragged edge must travel before
+    /// the two trade places — a little past halfway, so the swap reads as
+    /// earned but never waits for a full pass.
+    private static let swapOvershoot: CGFloat = 6
+
+    /// The order the pointer is asking for. Within its folder the dragged tab
+    /// trades places with a sibling once its *leading edge* is a little past
+    /// the sibling's midpoint (owner call 2026-09-07). Pushed the same way
+    /// into a neighboring folder, the two *folders* swap — a session never
+    /// changes worktree by being dragged, so the group moves as one.
+    private func proposeOrder(dragging id: UUID, frame dragged: CGRect) -> [SessionTabInfo] {
+        var chunks: [[SessionTabInfo]] = []
+        for tab in tabs {
+            if let last = chunks.last, last.first?.groupKey == tab.groupKey {
+                chunks[chunks.count - 1].append(tab)
+            } else {
+                chunks.append([tab])
+            }
+        }
+        guard let g = chunks.firstIndex(where: { $0.contains { $0.id == id } }),
+              let position = chunks[g].firstIndex(where: { $0.id == id }) else { return tabs }
+        let rowTolerance = Self.cellHeight
+        func sameRow(_ frame: CGRect) -> Bool { abs(frame.midY - dragged.midY) < rowTolerance }
+
+        // Within the folder: one step at a time, against the immediate
+        // neighbor on each side — the flow re-lays after every step.
+        var chunk = chunks[g]
+        if position > 0, let left = tabViews[chunk[position - 1].id]?.frame, sameRow(left),
+           dragged.minX < left.midX - Self.swapOvershoot {
+            chunk.swapAt(position - 1, position)
+        } else if position + 1 < chunk.count, let right = tabViews[chunk[position + 1].id]?.frame, sameRow(right),
+                  dragged.maxX > right.midX + Self.swapOvershoot {
+            chunk.swapAt(position, position + 1)
+        }
+        chunks[g] = chunk
+
+        if let swapped = Self.swapNeighborFolder(chunks: chunks, at: g, dragged: dragged, folderViews: folderViews) {
+            chunks = swapped
+        }
+        return chunks.flatMap { $0 }
+    }
+
+    /// Shared by both drags: swap folder `g` with the neighbor whose midpoint
+    /// the dragged edge has passed (by `swapOvershoot`), same row only.
+    private static func swapNeighborFolder(
+        chunks: [[SessionTabInfo]], at g: Int, dragged: CGRect, folderViews: [String: FolderView]
+    ) -> [[SessionTabInfo]]? {
+        func cell(of chunk: [SessionTabInfo]) -> CGRect? {
+            guard let key = chunk.first?.groupKey, let frame = folderViews["\(key)#0"]?.frame else { return nil }
+            return CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: cellHeight)
+        }
+        var chunks = chunks
+        if g > 0, let left = cell(of: chunks[g - 1]), abs(left.midY - dragged.midY) < cellHeight,
+           dragged.minX < left.midX - swapOvershoot {
+            chunks.swapAt(g - 1, g)
+            return chunks
+        }
+        if g + 1 < chunks.count, let right = cell(of: chunks[g + 1]), abs(right.midY - dragged.midY) < cellHeight,
+           dragged.maxX > right.midX + swapOvershoot {
+            chunks.swapAt(g, g + 1)
+            return chunks
+        }
+        return nil
     }
 
     /// Start the inline rename on a session's tab (double-click does this
@@ -717,6 +920,11 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     var onClose: ((Int) -> Void)?
     var onRenameCommit: ((Int, String?) -> Void)?
     var onRenameEnd: (() -> Void)?
+    var onDragBegan: ((SessionTabView, NSEvent) -> Void)?
+    var onDragMoved: ((SessionTabView, NSEvent) -> Void)?
+    var onDragEnded: ((SessionTabView) -> Void)?
+    private var pressLocation: CGPoint?
+    private var isDragging = false
 
     private let titleLabel = NSTextField(labelWithString: "")
     private let closeButton = HoverFadeButton()
@@ -730,6 +938,8 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     private var rawTitle = ""
     private var editField: NSTextField?
     private var renameCancelled = false
+
+    override var mouseDownCanMoveWindow: Bool { false }
 
     init(sessionId: UUID) {
         self.sessionId = sessionId
@@ -1004,6 +1214,28 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
             beginRename()
         } else {
             onSelect?(index)
+            pressLocation = event.locationInWindow
+            isDragging = false
+        }
+    }
+
+    /// A few points of travel turns the press into a drag (MILESTONE_1 §7):
+    /// the tab follows the pointer; the strip re-flows around it.
+    override func mouseDragged(with event: NSEvent) {
+        guard editField == nil, let press = pressLocation else { return }
+        if !isDragging {
+            guard hypot(event.locationInWindow.x - press.x, event.locationInWindow.y - press.y) > 4 else { return }
+            isDragging = true
+            onDragBegan?(self, event)
+        }
+        onDragMoved?(self, event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        pressLocation = nil
+        if isDragging {
+            isDragging = false
+            onDragEnded?(self)
         }
     }
 
@@ -1060,9 +1292,22 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
 
 /// The active tab's close `×`: quiet at rest, full-strength under the pointer.
 /// Opacity only — no color change, no growth, no motion (§1.3).
+/// The tab strip's manual-layout host. Its children may overhang it (folder
+/// label tabs), so it can hit-test them without the frame check.
+private final class TabsAreaView: NSView {
+    /// `point` in this view's own coordinates.
+    func hitTest(_ point: NSPoint, outsideFrame: Bool) -> NSView? {
+        for sub in subviews.reversed() where !sub.isHidden {
+            if let hit = sub.hitTest(point) { return hit }
+        }
+        return nil
+    }
+}
+
 /// One worktree folder in the strip: a rounded cell that holds a group's tabs,
-/// with a label tab rising from its top-left edge — drawn as one continuous
-/// path in one fill so it reads as a folder, not a box wearing a badge. A
+/// with a label tab rising from its top-left edge — past the bar's top, over
+/// the pane content — drawn as one continuous path so it reads as a folder,
+/// not a box wearing a badge. A
 /// continuation segment (a group split across rows) has no label tab.
 /// Right-click on the label offers to remove the worktree when it is one.
 private final class FolderView: NSView {
@@ -1071,14 +1316,64 @@ private final class FolderView: NSView {
     private var label: String?
     private var fill: NSColor = .clear
     private var onRemove: (() -> Void)?
+    var groupKey: String?
+    var onDragBegan: ((FolderView, NSEvent) -> Void)?
+    var onDragMoved: ((FolderView, NSEvent) -> Void)?
+    var onDragEnded: ((FolderView) -> Void)?
+    private var pressLocation: CGPoint?
+    private var isDragging = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
     }
 
+    /// The label tab's hit region — the folder's handle.
+    private var labelRect: CGRect {
+        guard label != nil else { return .null }
+        return CGRect(x: 0, y: bounds.height - Self.tabHeight, width: labelTabWidth(), height: Self.tabHeight)
+    }
+
+    /// The handle promises a drag, so it wears the hand (the session tabs,
+    /// whose first act is select, don't).
+    override func resetCursorRects() {
+        let rect = labelRect
+        if !rect.isNull { addCursorRect(rect, cursor: .openHand) }
+    }
+
+    /// Only the label tab is interactive; the cell behind the tabs is ground.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let local = convert(point, from: superview)
+        return labelRect.contains(local) ? self : nil
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        pressLocation = event.locationInWindow
+        isDragging = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let press = pressLocation else { return }
+        if !isDragging {
+            guard hypot(event.locationInWindow.x - press.x, event.locationInWindow.y - press.y) > 4 else { return }
+            isDragging = true
+            onDragBegan?(self, event)
+        }
+        onDragMoved?(self, event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        pressLocation = nil
+        if isDragging {
+            isDragging = false
+            onDragEnded?(self)
+        }
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var mouseDownCanMoveWindow: Bool { false }
 
     func apply(label: String?, fill: NSColor, onRemove: (() -> Void)?) {
         self.onRemove = onRemove
@@ -1086,6 +1381,7 @@ private final class FolderView: NSView {
         self.label = label
         self.fill = fill
         needsDisplay = true
+        window?.invalidateCursorRects(for: self)
     }
 
     private var labelAttributes: [NSAttributedString.Key: Any] {
@@ -1126,6 +1422,15 @@ private final class FolderView: NSView {
 
         if let label {
             let tabWidth = labelTabWidth()
+            // The label tab rises over pane content: give it a second coat so
+            // it reads as the folder's edge sitting *on* the bar, not a stain.
+            let tabPath = NSBezierPath()
+            tabPath.move(to: NSPoint(x: 0, y: cellTop - r))
+            tabPath.appendArc(from: NSPoint(x: 0, y: bounds.height), to: NSPoint(x: tabWidth, y: bounds.height), radius: r)
+            tabPath.appendArc(from: NSPoint(x: tabWidth, y: bounds.height), to: NSPoint(x: tabWidth, y: cellTop - r), radius: r)
+            tabPath.line(to: NSPoint(x: tabWidth, y: cellTop - r))
+            tabPath.close()
+            tabPath.fill()
             let attributed = NSAttributedString(string: label, attributes: labelAttributes)
             let size = attributed.size()
             let rect = NSRect(

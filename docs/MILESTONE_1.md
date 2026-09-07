@@ -246,6 +246,10 @@ underneath.
 
 **Left — the project pill (static).** The project's name, unchanged across
 session switches. It no longer does anything on click (the fan is gone, §6).
+The bar is controls, not a window-drag handle (`mouseDownCanMoveWindow` is off
+across it); the titlebar wash re-speaks the system double-click action (zoom,
+or minimize per the user's setting) since the hidden-title titlebar passes
+clicks through to it.
 
 **Center — session tabs, in folders.**
 - **Text = the Claude session title** (the same summary `/resume` shows), read live
@@ -268,7 +272,18 @@ session switches. It no longer does anything on click (the fan is gone, §6).
   two, never split unless one folder alone exceeds a row (then its continuation
   is a bare, labelless cell); `+` rides the trailing edge of the last row. Hard
   ceiling of two rows — beyond that a `»` overflow menu, so the bar can't grow
-  into a third pane. Bar height is 44 (one row) / 86 (two) to house the label band.
+  into a third pane. The bar stays 30 high: the label tabs **poke up past the
+  bar's top edge over the pane content** (owner call 2026-09-07) rather than
+  thickening the bar; two rows (72) house the lower row's label band between
+  the rows.
+- **Drag to arrange** (2026-09-07): drag a session tab along the bar and the
+  strip re-flows live around it; it trades places with a sibling once its
+  leading edge is a little past the sibling's midpoint. Pushed into a
+  neighboring folder it does *not* join it (a session can't change worktree by
+  dragging) — the two **folders swap** instead. The folder's label tab is a
+  handle: drag it to move the whole group (open-hand cursor on hover; session
+  tabs, whose first act is select, wear none). The arrangement is the sessions'
+  array order, so it persists. Groups are no longer forced main-first.
 
 **Right cluster** (left→right): `line:col` (editor focus only) · `clock · date`
 with a blinking `:` (subtle 1 Hz) · the **layout toggle** · the **settings gear**

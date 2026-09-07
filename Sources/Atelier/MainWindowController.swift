@@ -40,6 +40,22 @@ private final class TitlebarWashView: NSView {
     @objc private func accessibilityDisplayChanged() {
         layer?.backgroundColor = Theme.Elevation.mantle.cgColor
     }
+
+    /// The hidden-title titlebar passes clicks through to this wash, so the
+    /// system's double-click-titlebar action has to be re-spoken here:
+    /// zoom (the default), or minimize when the user has set it so.
+    override func mouseDown(with event: NSEvent) {
+        guard event.clickCount == 2, let window else {
+            super.mouseDown(with: event)
+            return
+        }
+        let action = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)?["AppleActionOnDoubleClick"] as? String
+        switch action {
+        case "Minimize": window.performMiniaturize(nil)
+        case "None": break
+        default: window.performZoom(nil)
+        }
+    }
 }
 
 /// The app's window class: reports first-responder changes so the focus
@@ -877,8 +893,10 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         (NSApp.delegate as? AppDelegate)?.refreshDockBadge()
     }
 
-    /// Display order for the strip: tabs grouped by root, the project's main
-    /// checkout first, worktree groups in first-appearance order (MILESTONE_1 §7).
+    /// Display order for the strip: tabs grouped by root, groups in
+    /// first-appearance order — which is the sessions' array order, so a
+    /// dragged arrangement (tabs within a folder, folders past each other)
+    /// is exactly what persists (MILESTONE_1 §7).
     private func groupedTabs() -> [SessionTabInfo] {
         var groupOrder: [String] = []
         var groups: [String: [Int]] = [:]
@@ -891,10 +909,6 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
                 groupOrder.append(key)
             }
             groups[key]?.append(index)
-        }
-        if let root = projectRepoRoot, let mainIndex = groupOrder.firstIndex(of: root), mainIndex != 0 {
-            groupOrder.remove(at: mainIndex)
-            groupOrder.insert(root, at: 0)
         }
         return groupOrder.flatMap { key in
             (groups[key] ?? []).map { index in
@@ -1010,6 +1024,20 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     func bottomBarDidToggleLayout() { toggleLayout() }
     func bottomBarDidRequestRemoveWorktree(at path: String) { removeWorktree(atPath: path) }
     func bottomBarDidRequestSettings() { SettingsWindowController.shared.show() }
+
+    /// A tab drag ended: adopt the strip's order as the sessions' order. The
+    /// array order is what persists, so the arrangement survives relaunch.
+    func bottomBarDidReorderSessions(order: [UUID]) {
+        let activeId = activeSession?.id
+        let rank = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
+        sessions = sessions.enumerated().sorted { a, b in
+            (rank[a.element.id] ?? order.count + a.offset) < (rank[b.element.id] ?? order.count + b.offset)
+        }.map(\.element)
+        if let activeId, let index = sessions.firstIndex(where: { $0.id == activeId }) {
+            activeIndex = index
+        }
+        updateBottomBar()
+    }
 
     /// Inline rename committed on a tab: set a custom name that the live
     /// Claude title never overwrites; nil (empty input) reverts to auto.

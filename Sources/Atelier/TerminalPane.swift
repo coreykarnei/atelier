@@ -8,6 +8,14 @@ import SwiftTerm
 class FreezableTerminalView: LocalProcessTerminalView {
     private var deferredSize: NSSize?
 
+    /// SwiftTerm wears the text I-beam over the whole grid; these panes are
+    /// consoles, not documents — the pointer stays the arrow (owner call
+    /// 2026-09-07). Its cursor methods aren't `open`, so the substitution
+    /// happens where it registers the rect.
+    override func addCursorRect(_ rect: NSRect, cursor: NSCursor) {
+        super.addCursorRect(rect, cursor: .arrow)
+    }
+
     var resizeFrozen = false {
         didSet {
             guard !resizeFrozen, let size = deferredSize else { return }

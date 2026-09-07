@@ -54,3 +54,26 @@ values.
 Folder tint strength and the 44 pt bar height are eyeball calls. The
 `worktrees.enabled` default was left **on** in the owner's defaults after the
 test run (code default is off).
+
+## 2026-09-07 addendum — the owner's first live pass
+
+Five verdicts in one sitting, all landed:
+
+- **Titlebar double-click didn't zoom.** With `titleVisibility = .hidden` the
+  titlebar passes clicks to `TitlebarWashView`; it now re-speaks the system
+  `AppleActionOnDoubleClick` (zoom default, minimize if set).
+- **Folder labels poke over the content**, not into a taller bar: heights back
+  to 30 / 72, cells stack from the bottom, the top row's label tabs overhang.
+  Nothing clips — but AppKit rejects hits outside a view's frame, which made
+  the overhanging label a 2 pt target. `BottomBar.hitTest` now gives the strip
+  first refusal on any point and `TabsAreaView` tests children frame-free.
+- **Drag to arrange.** Tabs reorder within a folder; folders swap when pushed
+  past a neighbor; the label tab is a group handle with the open-hand cursor.
+  First driven attempt hauled the whole *window*: `isMovableByWindowBackground`
+  plus non-opaque views answering yes to `mouseDownCanMoveWindow`. The bar,
+  tabs, and folders now say no. Swap threshold moved from center-crossing to
+  leading-edge-past-midpoint (+6 pt) per the owner's feel. Folder tint is
+  keyed to the worktree (hash), not strip position, so swaps don't recolor.
+- **I-beam over terminals** → arrow. SwiftTerm's cursor methods aren't `open`;
+  the subclass overrides `addCursorRect` and substitutes the arrow.
+- **`make install`** symlinks the bundle into /Applications for Spotlight.
