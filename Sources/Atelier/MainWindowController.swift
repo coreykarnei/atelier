@@ -281,17 +281,19 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             sessionArea.topAnchor.constraint(equalTo: contentTop),
             sessionArea.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             sessionArea.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            sessionArea.bottomAnchor.constraint(equalTo: bottomBar.topAnchor),
+            // The bar's frame includes the folder labels' overhang band; the
+            // panes run under that band (it's transparent and pass-through).
+            sessionArea.bottomAnchor.constraint(equalTo: bottomBar.topAnchor, constant: BottomBar.overhang),
 
             bottomBar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             bottomBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             bottomBar.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
-        let height = bottomBar.heightAnchor.constraint(equalToConstant: BottomBar.rowHeight)
+        let height = bottomBar.heightAnchor.constraint(equalToConstant: BottomBar.rowHeight + BottomBar.overhang)
         height.isActive = true
         bottomBarHeight = height
         bottomBar.onDesiredHeightChange = { [weak self] newHeight in
-            self?.bottomBarHeight?.constant = newHeight
+            self?.bottomBarHeight?.constant = newHeight + BottomBar.overhang
         }
         // After an inline tab rename ends (commit or cancel), typing belongs
         // to the session again — but only when focus fell into limbo (↩/Esc
@@ -869,7 +871,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         // yet and nothing to switch. The bar appears with promotion or a second tab.
         let barHidden = sessions.count == 1 && sessions[0].state == .landing
         bottomBar.isHidden = barHidden
-        bottomBarHeight?.constant = barHidden ? 0 : bottomBar.desiredHeight
+        bottomBarHeight?.constant = barHidden ? 0 : bottomBar.desiredHeight + BottomBar.overhang
 
         // The pill is *static* per window: the project name once anchored, so
         // switching sessions never reflows the bar. Pre-anchor it shows where a
@@ -928,12 +930,12 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         }
     }
 
-    /// What a group's folder tab says: the branch for the main checkout (cached),
-    /// the worktree's directory (named for its branch) for a worktree, `@host`
-    /// for a remote group, the folder name otherwise.
+    /// What a group's folder tab says: the *worktree*, never the branch — the
+    /// repo name for the main checkout, `⎇ dir` for a linked worktree, `@host`
+    /// for a remote group. Folders are places; the branch checked out in one
+    /// is a state, revealed on hover (owner call 2026-09-07).
     private func folderLabel(for session: Session, key: String) -> String {
         if let host = session.location.host { return "@\(host)" }
-        if let root = projectRepoRoot, key == root { return mainBranchName ?? "main" }
         if session.isWorktree { return "⎇ \((session.cwd as NSString).lastPathComponent)" }
         return (session.cwd as NSString).lastPathComponent
     }

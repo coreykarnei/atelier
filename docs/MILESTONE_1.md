@@ -244,8 +244,8 @@ underneath.
  (static)
 ```
 
-**Left — the project pill (static).** The project's name, unchanged across
-session switches. It no longer does anything on click (the fan is gone, §6).
+**Left — (the project pill, retired 2026-09-07).** The main folder carries the
+repo name and the window title carries it again; a third copy earned nothing.
 The bar is controls, not a window-drag handle (`mouseDownCanMoveWindow` is off
 across it); the titlebar wash re-speaks the system double-click action (zoom,
 or minimize per the user's setting) since the hidden-title titlebar passes
@@ -261,8 +261,18 @@ clicks through to it.
 - **Grouped by worktree into folders** (owner call 2026-09-03): each root's tabs
   sit inside a rounded cell with a small **label tab rising from its top-left
   edge** — one continuous shape, one fill, so it reads as a folder, not a box with
-  a badge. The label is the main checkout's branch (read from git once, cached),
-  `⎇ dir` for a worktree, `@host` for a remote group. Main first; the main folder
+  a badge. The label names the **worktree, never the branch** (owner call
+  2026-09-07 — folders are places, a branch is a state): the repo name for the
+  main checkout, `⎇ dir` for a worktree, `@host` for a remote group. **The
+  branch is on inquiry**: rest the pointer on a label for ~350 ms and a
+  `⎇ branch` chip floats above it, over the pane content the label already
+  rises into; nothing in the strip moves; it's gone on exit. (Considered and
+  declined: an expanding label — hover reveals never shift text — and the
+  active branch in the pill slot — reflows the strip on every session switch
+  and speaks for one session only.) A folder cell is never narrower than its
+  label. The bar's frame includes the labels' overhang band (transparent,
+  pass-through) because AppKit clips hit-tests, tracking, and cursor rects to
+  visible bounds. Main first; the main folder
   is plain surface0 and each further folder is tinted a hair toward the next
   accent (blue, mauve, teal, peach, pink) so two never read the same. Fills are
   half-alpha — the bar's translucency shows through. The per-tab `⎇` glyph is

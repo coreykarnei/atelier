@@ -77,3 +77,21 @@ Five verdicts in one sitting, all landed:
 - **I-beam over terminals** → arrow. SwiftTerm's cursor methods aren't `open`;
   the subclass overrides `addCursorRect` and substitutes the arrow.
 - **`make install`** symlinks the bundle into /Applications for Spotlight.
+
+## 2026-09-07 addendum 2 — worktree names, branch on hover, pill retired
+
+The cabincrew chooser read `systems/phase-4` for the primary and the owner
+asked what worktrees even existed. Root cause was a naming inconsistency:
+main's folder wore its *branch*, linked folders wore their *directory*.
+Weighed three ways (branch everywhere / worktree everywhere / worktree with
+drift suffix) plus two owner ideas (branch in the pill slot; label expands on
+hover). Landed: folders name the worktree; the branch is a floating chip on
+hover (no reflow — the plan's hover rule); the pill is gone.
+
+Mechanics worth remembering: AppKit clips a view's hit-testing, tracking
+areas, *and* cursor rects to its visible bounds, so a label poking 10 pt
+above the bar had a 2 pt live region. The bar's frame now includes a
+transparent `overhang` band (the mantle backdrop stays 30), the session area
+overlaps it, and `hitTest` returns nil in the band unless a label is under
+the point. Prunable worktrees (directory gone) are filtered from the list;
+the chooser tags the primary "main checkout".

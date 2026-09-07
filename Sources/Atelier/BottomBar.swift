@@ -59,6 +59,13 @@ final class BottomBar: NSView {
     /// row's label band between the rows.
     static let rowHeight: CGFloat = 30
     static let twoRowHeight: CGFloat = 72
+    /// How far the top row's label tabs rise past the backdrop. The bar's
+    /// *frame* includes this band (AppKit clips hit-tests, tracking areas,
+    /// and cursor rects to a view's visible bounds); the band is transparent
+    /// and passes pointer events through to the pane beneath except over a
+    /// label. Owners size the bar `desiredHeight + overhang` and overlap the
+    /// session area by `overhang`.
+    static var overhang: CGFloat { folderTabHeight }
     private static let tabHeight: CGFloat = 20
     private static let tabGap: CGFloat = 4
     private static let rowGap: CGFloat = 4
@@ -93,6 +100,9 @@ final class BottomBar: NSView {
     private let layoutButton = NSButton()
     private let settingsButton = NSButton()
     private let topBorder = NSBox()
+    /// The mantle field — the visible bar. Pinned to the bottom `desiredHeight`.
+    private let backdrop = NSView()
+    private var backdropHeight: NSLayoutConstraint?
 
     private var tabs: [SessionTabInfo] = []
     private var activeIndex = 0
@@ -109,7 +119,8 @@ final class BottomBar: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+        backdrop.wantsLayer = true
+        backdrop.layer?.backgroundColor = Theme.Elevation.mantle.cgColor
         build()
         startClock()
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -136,21 +147,21 @@ final class BottomBar: NSView {
     }
 
     override func updateLayer() {
-        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+        backdrop.layer?.backgroundColor = Theme.Elevation.mantle.cgColor
     }
 
     @objc private func accessibilityDisplayChanged() {
-        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+        backdrop.layer?.backgroundColor = Theme.Elevation.mantle.cgColor
     }
 
-    /// The folder label tabs rise past the bar's top edge, and AppKit rejects
-    /// hits outside a view's frame before asking its subviews — so the strip
-    /// gets first refusal on any point, frame or not, and the label tabs are
-    /// grabbable along their whole height (owner report 2026-09-07).
+    /// The overhang band is transparent: a point up there is the pane's unless
+    /// a folder label tab is under it (owner report 2026-09-07).
     override func hitTest(_ point: NSPoint) -> NSView? {
-        if let hit = tabsArea.hitTest(convert(point, from: superview).applying(.init(translationX: -tabsArea.frame.minX, y: -tabsArea.frame.minY)).applying(.identity), outsideFrame: true) {
+        let local = convert(point, from: superview)
+        if let hit = tabsArea.hitTest(tabsArea.convert(local, from: self), outsideFrame: true) {
             return hit
         }
+        if local.y > desiredHeight { return nil }
         return super.hitTest(point)
     }
 
@@ -160,6 +171,8 @@ final class BottomBar: NSView {
     override var mouseDownCanMoveWindow: Bool { false }
 
     private func build() {
+        backdrop.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(backdrop)
         topBorder.boxType = .custom
         topBorder.fillColor = Theme.Elevation.frameLine
         topBorder.borderWidth = 0
@@ -170,7 +183,9 @@ final class BottomBar: NSView {
         pillView.layer?.backgroundColor = Theme.accentBlue.cgColor
         pillView.layer?.cornerRadius = Theme.Elevation.radiusSmall
         pillView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(pillView)
+        // The pill retired 2026-09-07: the main folder carries the repo name
+        // and the window title carries it again. (View kept for a reversal.)
+        pillView.isHidden = true
 
         // The pill carries the project name — a path component, so mono (§1.4).
         // Body size across the whole bar (owner call 2026-07-13): the tmux
@@ -209,18 +224,19 @@ final class BottomBar: NSView {
         settingsButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(settingsButton)
 
+        let backdropTop = backdrop.heightAnchor.constraint(equalToConstant: Self.rowHeight)
+        backdropTop.priority = NSLayoutConstraint.Priority(999)
+        backdropHeight = backdropTop
         NSLayoutConstraint.activate([
-            topBorder.topAnchor.constraint(equalTo: topAnchor),
+            backdrop.leadingAnchor.constraint(equalTo: leadingAnchor),
+            backdrop.trailingAnchor.constraint(equalTo: trailingAnchor),
+            backdrop.bottomAnchor.constraint(equalTo: bottomAnchor),
+            backdropTop,
+            topBorder.topAnchor.constraint(equalTo: backdrop.topAnchor),
             topBorder.leadingAnchor.constraint(equalTo: leadingAnchor),
             topBorder.trailingAnchor.constraint(equalTo: trailingAnchor),
             topBorder.heightAnchor.constraint(equalToConstant: 1),
 
-            pillView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            pillView.heightAnchor.constraint(equalToConstant: Self.tabHeight),
-            pillLabel.leadingAnchor.constraint(equalTo: pillView.leadingAnchor, constant: 8),
-            pillLabel.trailingAnchor.constraint(equalTo: pillView.trailingAnchor, constant: -8),
-            pillLabel.centerYAnchor.constraint(equalTo: pillView.centerYAnchor),
-            pillLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 220),
 
             settingsButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             settingsButton.widthAnchor.constraint(equalToConstant: 22),
@@ -237,7 +253,7 @@ final class BottomBar: NSView {
             clockColonLabel.trailingAnchor.constraint(equalTo: clockSuffixLabel.leadingAnchor),
             clockPrefixLabel.trailingAnchor.constraint(equalTo: clockColonLabel.leadingAnchor),
 
-            tabsArea.leadingAnchor.constraint(equalTo: pillView.trailingAnchor, constant: 14),
+            tabsArea.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             tabsArea.trailingAnchor.constraint(lessThanOrEqualTo: clockPrefixLabel.leadingAnchor, constant: -12),
         ])
         // The trailing equality must NOT be required: a closed required chain
@@ -246,7 +262,9 @@ final class BottomBar: NSView {
         let stretch = tabsArea.trailingAnchor.constraint(equalTo: clockPrefixLabel.leadingAnchor, constant: -12)
         stretch.priority = .defaultLow
         // And the vertical pins yield while the bar is hidden at height 0.
-        let top = tabsArea.topAnchor.constraint(equalTo: topAnchor, constant: 1)
+        // tabsArea spans the whole frame, overhang band included, so its
+        // children's tracking areas survive up there.
+        let top = tabsArea.topAnchor.constraint(equalTo: topAnchor)
         top.priority = NSLayoutConstraint.Priority(999)
         let bottom = tabsArea.bottomAnchor.constraint(equalTo: bottomAnchor)
         bottom.priority = NSLayoutConstraint.Priority(999)
@@ -254,7 +272,7 @@ final class BottomBar: NSView {
         // Everything outside the flow sits on the bottom tab row's axis — the
         // folder label band above it is the tabs' own business. These yield
         // too while the bar is hidden at height 0.
-        for view in [pillView, clockPrefixLabel, clockColonLabel, clockSuffixLabel, layoutButton, settingsButton] {
+        for view in [clockPrefixLabel, clockColonLabel, clockSuffixLabel, layoutButton, settingsButton] {
             let axis = view.centerYAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottomRowAxis)
             axis.priority = NSLayoutConstraint.Priority(999)
             axis.isActive = true
@@ -285,7 +303,6 @@ final class BottomBar: NSView {
         self.activeIndex = activeIndex
 
         pillLabel.stringValue = pill
-        pillView.isHidden = pill.isEmpty
 
         layoutButton.isHidden = mode == nil
         let symbol: String
@@ -343,10 +360,14 @@ final class BottomBar: NSView {
         SessionTabView.desiredWidth(for: info, isActive: info.index == activeIndex)
     }
 
+    /// A folder cell hugs its tabs — but never narrower than its own label
+    /// tab, so a one-tab folder still says its whole name.
     private func segmentWidth(_ tabs: [SessionTabInfo]) -> CGFloat {
-        Self.folderPadX * 2
+        let tabsWidth = Self.folderPadX * 2
             + tabs.reduce(0) { $0 + tabWidth($1) }
             + Self.tabGap * CGFloat(max(0, tabs.count - 1))
+        let labelWidth = tabs.first.map { FolderView.labelWidth(for: $0.groupLabel) } ?? 0
+        return max(tabsWidth, labelWidth + Theme.Elevation.radiusSmall * 2)
     }
 
     private func itemWidth(_ item: FlowItem) -> CGFloat {
@@ -421,6 +442,7 @@ final class BottomBar: NSView {
         let newHeight = rows.count > 1 ? Self.twoRowHeight : Self.rowHeight
         if newHeight != desiredHeight {
             desiredHeight = newHeight
+            backdropHeight?.constant = newHeight
             onDesiredHeightChange?(newHeight)
         }
     }
@@ -510,9 +532,9 @@ final class BottomBar: NSView {
 
         // Cells stack from the bottom; the top row's label tabs rise past the
         // area (and the bar) — nothing here clips, by design.
-        let areaHeight = tabsArea.bounds.height
+        let backdropInner = desiredHeight - 1 // minus the top border
         let cellsHeight = Self.cellHeight * CGFloat(rows.count) + (Self.rowGap + Self.folderTabHeight) * CGFloat(rows.count - 1)
-        let base = (areaHeight - cellsHeight) / 2
+        let base = (backdropInner - cellsHeight) / 2
 
         for (rowIndex, row) in rows.enumerated() {
             let cellBottom = base + CGFloat(rows.count - 1 - rowIndex) * Self.rowPitch
@@ -533,6 +555,8 @@ final class BottomBar: NSView {
                         folder.onDragBegan = { [weak self] view, event in self?.folderDragBegan(view, event) }
                         folder.onDragMoved = { [weak self] view, event in self?.folderDragMoved(view, event) }
                         folder.onDragEnded = { [weak self] view in self?.folderDragEnded(view) }
+                        let key = segment.groupKey
+                        folder.branchProvider = key.hasPrefix("ssh://") ? nil : { WorktreeManager.currentBranch(key) }
                         folderViews[segment.poolKey] = folder
                         // Below every tab — folders are the ground the tabs sit on.
                         tabsArea.addSubview(folder, positioned: .below, relativeTo: nil)
@@ -1317,6 +1341,11 @@ private final class FolderView: NSView {
     private var fill: NSColor = .clear
     private var onRemove: (() -> Void)?
     var groupKey: String?
+    /// Resolves the branch checked out in this folder's worktree, on inquiry.
+    var branchProvider: (() -> String?)?
+    private var hoverTimer: Timer?
+    private var reveal: BranchRevealView?
+    private var labelTracking: NSTrackingArea?
     var onDragBegan: ((FolderView, NSEvent) -> Void)?
     var onDragMoved: ((FolderView, NSEvent) -> Void)?
     var onDragEnded: ((FolderView) -> Void)?
@@ -1341,6 +1370,68 @@ private final class FolderView: NSView {
         if !rect.isNull { addCursorRect(rect, cursor: .openHand) }
     }
 
+    // MARK: Branch on inquiry (§1.3)
+
+    /// Resting on the label for a beat reveals the branch checked out there —
+    /// a chip floating *above* the label, over the pane content the label
+    /// already rises into. Nothing in the strip moves; it's gone on exit.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let labelTracking { removeTrackingArea(labelTracking) }
+        let rect = labelRect
+        guard !rect.isNull else { return }
+        let area = NSTrackingArea(rect: rect, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        labelTracking = area
+    }
+
+    /// The label rect depends on the frame, which lands after `apply` — so
+    /// re-register on every geometry change, not just on content change.
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        updateTrackingAreas()
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard branchProvider != nil, !isDragging else { return }
+        hoverTimer?.invalidate()
+        hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
+            self?.showReveal()
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoverTimer?.invalidate()
+        hoverTimer = nil
+        hideReveal()
+    }
+
+    private func showReveal() {
+        guard reveal == nil, let branch = branchProvider?(), let superview else { return }
+        let chip = BranchRevealView(branch: branch, fill: fill)
+        let size = chip.fittingSize
+        // Anchored to the label's left edge, sitting on its top edge.
+        let origin = convert(NSPoint(x: 0, y: bounds.height - 1), to: superview)
+        chip.frame = NSRect(x: origin.x, y: origin.y, width: size.width, height: size.height)
+        chip.alphaValue = 0
+        superview.addSubview(chip)
+        reveal = chip
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.12
+            chip.animator().alphaValue = 1
+        }
+    }
+
+    private func hideReveal() {
+        guard let chip = reveal else { return }
+        reveal = nil
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.1
+            chip.animator().alphaValue = 0
+        }, completionHandler: { chip.removeFromSuperview() })
+    }
+
     /// Only the label tab is interactive; the cell behind the tabs is ground.
     override func hitTest(_ point: NSPoint) -> NSView? {
         let local = convert(point, from: superview)
@@ -1350,6 +1441,8 @@ private final class FolderView: NSView {
     override func mouseDown(with event: NSEvent) {
         pressLocation = event.locationInWindow
         isDragging = false
+        hoverTimer?.invalidate()
+        hideReveal()
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -1382,18 +1475,24 @@ private final class FolderView: NSView {
         self.fill = fill
         needsDisplay = true
         window?.invalidateCursorRects(for: self)
+        updateTrackingAreas()
     }
 
-    private var labelAttributes: [NSAttributedString.Key: Any] {
-        [.font: Theme.Typography.mono(Theme.Typography.small, weight: .medium),
-         .foregroundColor: Theme.Folder.labelText]
+    private static let labelAttributes: [NSAttributedString.Key: Any] = [
+        .font: Theme.Typography.mono(Theme.Typography.small, weight: .medium),
+        .foregroundColor: Theme.Folder.labelText,
+    ]
+    private var labelAttributes: [NSAttributedString.Key: Any] { Self.labelAttributes }
+
+    /// A label tab's natural width: text plus insets. The flow sizes cells by it.
+    static func labelWidth(for label: String) -> CGFloat {
+        ceil((label as NSString).size(withAttributes: labelAttributes).width) + 14
     }
 
     /// The label tab's width: its text plus insets, never wider than the cell.
     private func labelTabWidth() -> CGFloat {
         guard let label else { return 0 }
-        let text = (label as NSString).size(withAttributes: labelAttributes).width
-        return min(ceil(text) + 14, bounds.width - Self.radius * 2)
+        return min(Self.labelWidth(for: label), bounds.width - Self.radius * 2)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -1532,4 +1631,35 @@ private extension DateFormatter {
         cache[format] = f
         return f
     }
+}
+
+/// The branch chip a folder label reveals on hover: `⎇ branch` in mono on
+/// the folder's own tint, opaque enough to read over pane content. Inert to
+/// the pointer — it answers, it doesn't offer.
+private final class BranchRevealView: NSView {
+    private let label: NSTextField
+
+    init(branch: String, fill: NSColor) {
+        label = NSTextField(labelWithString: "⎇ \(branch)")
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.backgroundColor = fill.withAlphaComponent(0.92).cgColor
+        layer?.cornerRadius = Theme.Elevation.radiusSmall
+        shadow = Theme.Elevation.raisedShadow
+        label.font = Theme.Typography.mono(Theme.Typography.small, weight: .medium)
+        label.textColor = Theme.chromeText
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 3),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -3),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
