@@ -95,3 +95,21 @@ transparent `overhang` band (the mantle backdrop stays 30), the session area
 overlaps it, and `hitTest` returns nil in the band unless a label is under
 the point. Prunable worktrees (directory gone) are filtered from the list;
 the chooser tags the primary "main checkout".
+
+## 2026-09-08 addendum — legibility, `main`, bare single group, tree glyph
+
+Pill restored ("an anchor"). Inactive tab titles to subtext0. Worktree
+folders tinted 42 % toward mauve/teal/pink/yellow/sky/lavender (never blue,
+green, peach — those already mean anchor, active, attention), hashed per
+worktree. Label coats darkened toward mantle so the text holds on any
+tint. Primary folder reads `main` (git's "main working tree"; `primary` is
+the fallback if the branch-name collision nags). One group → bare tabs.
+Worktree labels wear the SF `tree` glyph; `⎇` is reserved for the branch
+chip. Label tab tucks under the cell (coat stops at the cell edge).
+
+**Known startup race (not ours, worth a mitigation):** one launch deadlocked
+in `forkpty` — main thread waiting on dyld's fork lock while a
+UIIntelligenceSupport/libswiftXPC thread held the objc runtime lock during
+its own one-time init. Sampled 2026-09-08; the owner force-quit. Candidate
+mitigation: start the first PTY on the next run-loop turn, or serialize
+spawns behind a short delay after launch.

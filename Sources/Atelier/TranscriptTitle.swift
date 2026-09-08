@@ -12,13 +12,8 @@ enum TranscriptTitle {
     /// yet (a fresh session). Prefers Claude's generated `ai-title`; falls back to
     /// the user's first prompt.
     static func title(sessionId: String, cwd: String) -> String? {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let encoded = cwd
-            .replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: ".", with: "-")
-        let path = "\(home)/.claude/projects/\(encoded)/\(sessionId).jsonl"
-
-        guard let data = FileManager.default.contents(atPath: path),
+        guard let path = transcriptPath(sessionId: sessionId, cwd: cwd),
+              let data = FileManager.default.contents(atPath: path),
               let content = String(data: data, encoding: .utf8) else { return nil }
 
         var aiTitle: String?
@@ -34,6 +29,37 @@ enum TranscriptTitle {
         }
         return aiTitle ?? lastPrompt.map(firstLine)
     }
+
+    /// Where Claude keeps the transcript. Claude Code names the project
+    /// directory by replacing every character outside `[A-Za-z0-9]` with `-`
+    /// (`/Users/core/.local/share/worktrees/BCI_HW1/jashd` →
+    /// `-Users-core--local-share-worktrees-BCI-HW1-jashd`); an earlier reader
+    /// only swapped `/` and `.`, so repos with an underscore never titled
+    /// (owner report 2026-09-08). If the encoding drifts again, fall back to
+    /// finding the file by its session id — the id is unique per transcript.
+    static func transcriptPath(sessionId: String, cwd: String) -> String? {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let projects = "\(home)/.claude/projects"
+        let encoded = String(cwd.unicodeScalars.map { scalar -> Character in
+            CharacterSet.alphanumerics.contains(scalar) && scalar.isASCII ? Character(scalar) : "-"
+        })
+        let expected = "\(projects)/\(encoded)/\(sessionId).jsonl"
+        if FileManager.default.fileExists(atPath: expected) { return expected }
+        if let cached = resolved[sessionId] { return cached }
+        guard let dirs = try? FileManager.default.contentsOfDirectory(atPath: projects) else { return nil }
+        for dir in dirs {
+            let candidate = "\(projects)/\(dir)/\(sessionId).jsonl"
+            if FileManager.default.fileExists(atPath: candidate) {
+                resolved[sessionId] = candidate
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    /// Fallback lookups, remembered per session id (the scan touches every
+    /// project directory and this runs on a 2 s timer).
+    nonisolated(unsafe) private static var resolved: [String: String] = [:]
 
     private static func firstLine(_ s: String) -> String {
         s.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? s

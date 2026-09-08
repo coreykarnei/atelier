@@ -193,8 +193,14 @@ raise one small modal before the session spawns —
 ```
 
 - **Default is the main checkout**, so the fast path is *plus, enter*.
-- **The dropdown** lists the repo's worktrees (checkmark on the current pick)
-  and **New worktree…**, which swaps the dropdown for a name field in place;
+- **The suggestion is the worktree you're in** (2026-09-08), so the fast path
+  stays plus-enter wherever you are.
+- **The dropdown** unfolds an inline list inside the card (the card grows):
+  the repo's worktrees — the primary tagged *main checkout*, every other row
+  wearing a hover `×` that removes the worktree behind the guarded modal
+  (clean: "anything not pushed is lost with it"; dirty: the real status
+  lines, force required) — and **New worktree…**, which swaps the dropdown
+  for a name field in place;
   `↩` creates the worktree (existing local/remote branch → checked out; new
   name → branched from `main`) and starts the session in it. Naming a branch
   that already has a worktree simply picks it.
@@ -244,8 +250,10 @@ underneath.
  (static)
 ```
 
-**Left — (the project pill, retired 2026-09-07).** The main folder carries the
-repo name and the window title carries it again; a third copy earned nothing.
+**Left — the project pill (static).** The project's name, unchanged across
+session switches. Retired for a day (2026-09-07) as a third copy of the repo
+name; restored 2026-09-08 — the owner wants an anchor at the bar's left edge,
+redundant on purpose. It does nothing on click (the fan is gone, §6).
 The bar is controls, not a window-drag handle (`mouseDownCanMoveWindow` is off
 across it); the titlebar wash re-speaks the system double-click action (zoom,
 or minimize per the user's setting) since the hidden-title titlebar passes
@@ -262,8 +270,18 @@ clicks through to it.
   sit inside a rounded cell with a small **label tab rising from its top-left
   edge** — one continuous shape, one fill, so it reads as a folder, not a box with
   a badge. The label names the **worktree, never the branch** (owner call
-  2026-09-07 — folders are places, a branch is a state): the repo name for the
-  main checkout, `⎇ dir` for a worktree, `@host` for a remote group. **The
+  2026-09-07 — folders are places, a branch is a state): `main` for the main
+  working tree (git's term; the pill already names the repo), a drawn tree
+  silhouette (cloud canopy, forked trunk — the owner's reference) + `dir` for
+  a linked worktree, `@host` for a remote group. **One group draws
+  no folder chrome** — bare tabs; folders appear when a second group opens.
+  Label coats are the folder's hue pulled toward mantle and opaque, so the
+  label text holds at subtext0 on every tint. Worktree
+  folders are **tinted** (surface0 pulled 42 % toward the cool half of Mocha —
+  teal/mauve/sky/lavender/sapphire, nothing red-family, company for the green
+  active tab — assigned in key order so no two open folders share one) — never blue, green, or peach, which
+  already mean anchor, active, attention. Inactive tab titles sit at subtext0,
+  the §1.2 cap: over a folder fill, overlay0 fell below legible. **The
   branch is on inquiry**: rest the pointer on a label for ~350 ms and a
   `⎇ branch` chip floats above it, over the pane content the label already
   rises into; nothing in the strip moves; it's gone on exit. (Considered and

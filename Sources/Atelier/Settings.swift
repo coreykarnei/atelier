@@ -10,6 +10,7 @@ enum Settings {
 
     private static let alphaKey = "field.alpha"
     private static let worktreesKey = "worktrees.enabled"
+    private static let confirmCloseKey = "close.confirm"
 
     /// Field opacity over the behind-window blur (Theme.fieldAlpha). 0.75 is
     /// the owner's Ghostty parity value. `ATELIER_FIELD_ALPHA` still wins for
@@ -27,6 +28,17 @@ enum Settings {
             let clamped = min(max(newValue, 0.3), 1.0)
             guard clamped != fieldAlpha else { return }
             UserDefaults.standard.set(Double(clamped), forKey: alphaKey)
+            NotificationCenter.default.post(name: didChange, object: nil)
+        }
+    }
+
+    /// Ask before a tab's `×` closes a session (default on). The alert's
+    /// "Don't ask again" flips this; Settings flips it back.
+    static var confirmClose: Bool {
+        get { UserDefaults.standard.object(forKey: confirmCloseKey) as? Bool ?? true }
+        set {
+            guard newValue != confirmClose else { return }
+            UserDefaults.standard.set(newValue, forKey: confirmCloseKey)
             NotificationCenter.default.post(name: didChange, object: nil)
         }
     }
@@ -51,10 +63,11 @@ final class SettingsWindowController: NSWindowController {
     private let alphaSlider = NSSlider()
     private let alphaValue = NSTextField(labelWithString: "")
     private let worktreesToggle = NSButton(checkboxWithTitle: "Enable worktrees", target: nil, action: nil)
+    private let confirmCloseToggle = NSButton(checkboxWithTitle: "Ask before closing a session", target: nil, action: nil)
 
     private init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 150),
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 210),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -112,15 +125,30 @@ final class SettingsWindowController: NSWindowController {
         worktreesHint.lineBreakMode = .byWordWrapping
         worktreesHint.maximumNumberOfLines = 2
 
+        confirmCloseToggle.attributedTitle = NSAttributedString(string: "Ask before closing a session", attributes: [
+            .font: Theme.Typography.ui(Theme.Typography.body),
+            .foregroundColor: Theme.chromeText,
+        ])
+        confirmCloseToggle.state = Settings.confirmClose ? .on : .off
+        confirmCloseToggle.target = self
+        confirmCloseToggle.action = #selector(confirmCloseChanged)
+
+        let confirmHint = NSTextField(labelWithString: "The tab's × asks first. Its \"Don't ask again\" turns this off.")
+        confirmHint.font = Theme.Typography.ui(Theme.Typography.small)
+        confirmHint.textColor = Theme.chromeMutedText
+        confirmHint.lineBreakMode = .byWordWrapping
+        confirmHint.maximumNumberOfLines = 2
+
         let alphaRow = NSStackView(views: [alphaLabel, alphaSlider, alphaValue])
         alphaRow.orientation = .horizontal
         alphaRow.spacing = 10
 
-        let stack = NSStackView(views: [alphaRow, alphaHint, worktreesToggle, worktreesHint])
+        let stack = NSStackView(views: [alphaRow, alphaHint, worktreesToggle, worktreesHint, confirmCloseToggle, confirmHint])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 6
         stack.setCustomSpacing(18, after: alphaHint)
+        stack.setCustomSpacing(18, after: worktreesHint)
         stack.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(stack)
 
@@ -132,6 +160,7 @@ final class SettingsWindowController: NSWindowController {
             alphaRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             alphaHint.widthAnchor.constraint(equalTo: stack.widthAnchor),
             worktreesHint.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            confirmHint.widthAnchor.constraint(equalTo: stack.widthAnchor),
             alphaValue.widthAnchor.constraint(equalToConstant: 40),
         ])
     }
@@ -139,6 +168,7 @@ final class SettingsWindowController: NSWindowController {
     func show() {
         alphaSlider.doubleValue = Double(Settings.fieldAlpha)
         worktreesToggle.state = Settings.worktreesEnabled ? .on : .off
+        confirmCloseToggle.state = Settings.confirmClose ? .on : .off
         refreshAlphaValue()
         window?.center()
         showWindow(nil)
@@ -152,6 +182,10 @@ final class SettingsWindowController: NSWindowController {
     @objc private func alphaChanged() {
         Settings.fieldAlpha = CGFloat(alphaSlider.doubleValue)
         refreshAlphaValue()
+    }
+
+    @objc private func confirmCloseChanged() {
+        Settings.confirmClose = confirmCloseToggle.state == .on
     }
 
     @objc private func worktreesChanged() {

@@ -108,6 +108,7 @@ final class BottomBar: NSView {
     private var activeIndex = 0
     private var tabViews: [UUID: SessionTabView] = [:]
     private var folderViews: [String: FolderView] = [:]
+    private var foldersVisible = true
     private var lastFlowWidth: CGFloat = 0
     private var lastFlowHeight: CGFloat = 0
     /// First population per launch gets the restore stagger (§5); afterwards
@@ -183,9 +184,9 @@ final class BottomBar: NSView {
         pillView.layer?.backgroundColor = Theme.accentBlue.cgColor
         pillView.layer?.cornerRadius = Theme.Elevation.radiusSmall
         pillView.translatesAutoresizingMaskIntoConstraints = false
-        // The pill retired 2026-09-07: the main folder carries the repo name
-        // and the window title carries it again. (View kept for a reversal.)
-        pillView.isHidden = true
+        // Retired 2026-09-07, restored 2026-09-08 (owner: "an anchor") — the
+        // static project name at the bar's left edge, redundant on purpose.
+        addSubview(pillView)
 
         // The pill carries the project name — a path component, so mono (§1.4).
         // Body size across the whole bar (owner call 2026-07-13): the tmux
@@ -253,7 +254,13 @@ final class BottomBar: NSView {
             clockColonLabel.trailingAnchor.constraint(equalTo: clockSuffixLabel.leadingAnchor),
             clockPrefixLabel.trailingAnchor.constraint(equalTo: clockColonLabel.leadingAnchor),
 
-            tabsArea.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            pillView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            pillView.heightAnchor.constraint(equalToConstant: Self.tabHeight),
+            pillLabel.leadingAnchor.constraint(equalTo: pillView.leadingAnchor, constant: 8),
+            pillLabel.trailingAnchor.constraint(equalTo: pillView.trailingAnchor, constant: -8),
+            pillLabel.centerYAnchor.constraint(equalTo: pillView.centerYAnchor),
+            pillLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 220),
+            tabsArea.leadingAnchor.constraint(equalTo: pillView.trailingAnchor, constant: 14),
             tabsArea.trailingAnchor.constraint(lessThanOrEqualTo: clockPrefixLabel.leadingAnchor, constant: -12),
         ])
         // The trailing equality must NOT be required: a closed required chain
@@ -272,7 +279,7 @@ final class BottomBar: NSView {
         // Everything outside the flow sits on the bottom tab row's axis — the
         // folder label band above it is the tabs' own business. These yield
         // too while the bar is hidden at height 0.
-        for view in [clockPrefixLabel, clockColonLabel, clockSuffixLabel, layoutButton, settingsButton] {
+        for view in [pillView, clockPrefixLabel, clockColonLabel, clockSuffixLabel, layoutButton, settingsButton] {
             let axis = view.centerYAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottomRowAxis)
             axis.priority = NSLayoutConstraint.Priority(999)
             axis.isActive = true
@@ -303,6 +310,7 @@ final class BottomBar: NSView {
         self.activeIndex = activeIndex
 
         pillLabel.stringValue = pill
+        pillView.isHidden = pill.isEmpty
 
         layoutButton.isHidden = mode == nil
         let symbol: String
@@ -346,15 +354,27 @@ final class BottomBar: NSView {
         var poolKey: String { "\(groupKey)#\(ordinal)" }
     }
 
-    /// A folder's tint follows the *worktree*, not its position in the strip —
-    /// dragging folders past each other must not recolor them. Main (any root
-    /// outside the worktree base) is plain; worktrees hash to an accent.
-    private static func colorIndex(for groupKey: String) -> Int {
-        guard groupKey.hasPrefix(WorktreeManager.base + "/") || groupKey.hasPrefix("ssh://") else { return 0 }
-        var hash: UInt32 = 2166136261
-        for byte in groupKey.utf8 { hash = (hash ^ UInt32(byte)) &* 16777619 }
-        return 1 + Int(hash % 5)
+    /// A folder's tint is **locked for as long as the folder is open** (owner
+    /// call 2026-09-08): a new folder takes the lowest free accent and never
+    /// recolors a neighbor; a closed folder frees its accent. Dragging can't
+    /// change it either. Main (any root outside the worktree base) is plain.
+    /// Beyond the palette's count, accents repeat.
+    private var tintIndex: [String: Int] = [:]
+
+    private func refreshTintIndex() {
+        let open = Set(tabs.map(\.groupKey).filter {
+            $0.hasPrefix(WorktreeManager.base + "/") || $0.hasPrefix("ssh://")
+        })
+        tintIndex = tintIndex.filter { open.contains($0.key) }
+        // Newcomers in strip order, each taking the lowest accent not in use.
+        for key in tabs.map(\.groupKey) where open.contains(key) && tintIndex[key] == nil {
+            let used = Set(tintIndex.values)
+            let free = (1...Theme.Folder.tintCount).first { !used.contains($0) }
+            tintIndex[key] = free ?? (tintIndex.count % Theme.Folder.tintCount) + 1
+        }
     }
+
+    private func colorIndex(for groupKey: String) -> Int { tintIndex[groupKey] ?? 0 }
 
     private func tabWidth(_ info: SessionTabInfo) -> CGFloat {
         SessionTabView.desiredWidth(for: info, isActive: info.index == activeIndex)
@@ -407,6 +427,11 @@ final class BottomBar: NSView {
                 chunks.append([tab])
             }
         }
+
+        // Folder chrome earns its place by separating groups: one group draws
+        // bare tabs (owner call 2026-09-08).
+        foldersVisible = chunks.count > 1
+        refreshTintIndex()
 
         // Pack, reserving room on the last row for the `+` — and, if anything
         // overflowed, for the `»` too (a second pass with the wider reserve).
@@ -545,6 +570,29 @@ final class BottomBar: NSView {
                 x += gap(after: previous, before: item)
                 let width = itemWidth(item)
                 switch item {
+                case .folder(let segment) where !foldersVisible:
+                    // Bare tabs: no cell, no label; same geometry so a second
+                    // group arriving only fades folders in around them.
+                    var tabX = x + Self.folderPadX
+                    for info in segment.tabs {
+                        seenTabs.insert(info.id)
+                        let view: SessionTabView
+                        if let existing = tabViews[info.id] {
+                            view = existing
+                        } else {
+                            view = SessionTabView(sessionId: info.id)
+                            wire(view)
+                            tabViews[info.id] = view
+                            tabsArea.addSubview(view)
+                            arrivals.append(view)
+                        }
+                        view.apply(info: info, isActive: info.index == activeIndex)
+                        let tabW = tabWidth(info)
+                        if drag?.id != info.id {
+                            placements.append((view, CGRect(x: tabX, y: tabY, width: tabW, height: Self.tabHeight)))
+                        }
+                        tabX += tabW + Self.tabGap
+                    }
                 case .folder(let segment):
                     seenFolders.insert(segment.poolKey)
                     let folder: FolderView
@@ -566,7 +614,8 @@ final class BottomBar: NSView {
                     folder.groupKey = segment.groupKey
                     folder.apply(
                         label: segment.ordinal == 0 ? segment.label : nil,
-                        fill: Theme.Folder.fill(Self.colorIndex(for: segment.groupKey)),
+                        fill: Theme.Folder.fill(colorIndex(for: segment.groupKey)),
+                        coat: Theme.Folder.labelCoat(colorIndex(for: segment.groupKey)),
                         onRemove: removable ? { [weak self] in
                             self?.delegate?.bottomBarDidRequestRemoveWorktree(at: segment.groupKey)
                         } : nil
@@ -927,9 +976,10 @@ final class BottomBar: NSView {
     }
 }
 
-/// A single session tab: optional attention badge, ellipsized title. The active tab — and only the active tab —
-/// carries a close `×` at its leading edge, before the title: the tab you can
-/// close is the one you're looking at, and inactive tabs stay quiet. Click
+/// A single session tab: optional attention badge, ellipsized title. The
+/// active tab — and only the active tab — carries a close `×` at its trailing
+/// edge: the tab you can close is the one you're looking at, and inactive
+/// tabs stay quiet. Click
 /// selects; double-click renames **in place** — the title becomes an editable
 /// field under the cursor (Finder's gesture), `↩` commits, `Esc` cancels,
 /// empty reverts to the live auto title. Persistent across bar updates so its
@@ -1027,7 +1077,9 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
             // Active tab wears the tmux green; inactive tabs stay quiet.
             layer?.backgroundColor = (isActive ? Theme.accentGreen : .clear).cgColor
             titleLabel.font = Theme.Typography.mono(Theme.Typography.body, weight: isActive ? .semibold : .regular)
-            titleLabel.textColor = isActive ? Theme.accentTextDark : Theme.chromeMutedText
+            // Inactive titles at subtext0 (the §1.2 cap), not overlay0: over a
+            // folder fill, overlay0 fell below legible (owner call 2026-09-08).
+            titleLabel.textColor = isActive ? Theme.accentTextDark : Theme.chromeText
             closeButton.contentTintColor = Theme.accentTextDark
             closeButton.isHidden = !isActive
             // Invisible until the pointer is over the tab (owner call
@@ -1042,18 +1094,20 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
 
     override func layout() {
         super.layout()
+        // The close `×` sits at the trailing edge (owner call 2026-09-08); its
+        // slot is reserved by activeness, not visibility, so the hover reveal
+        // never shifts text.
         let closeWidth: CGFloat = 12
         if !closeButton.isHidden {
             closeButton.frame = CGRect(
-                x: 6,
+                x: bounds.width - 6 - closeWidth,
                 y: (bounds.height - closeWidth) / 2,
                 width: closeWidth,
                 height: closeWidth
             )
         }
-        // Everything else flows after the close `×` slot — reserved by
-        // activeness, not visibility, so the hover reveal never shifts text.
-        let leading: CGFloat = isActive ? 22 : 8
+        let leading: CGFloat = 8
+        let trailingSlot: CGFloat = isActive ? 22 : 8
         let hasBadge = badgeView != nil
         if let badge = badgeView {
             let size = badge.frame.size == .zero ? badge.fittingSize : badge.frame.size
@@ -1082,7 +1136,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         titleLabel.frame = CGRect(
             x: titleX,
             y: round((bounds.height - titleHeight) / 2),
-            width: max(0, bounds.width - titleX - 8),
+            width: max(0, bounds.width - titleX - trailingSlot),
             height: titleHeight
         )
         editField?.frame = editFieldFrame()
@@ -1339,6 +1393,7 @@ private final class FolderView: NSView {
     private static let tabHeight: CGFloat = 13
     private var label: String?
     private var fill: NSColor = .clear
+    private var coat: NSColor = .clear
     private var onRemove: (() -> Void)?
     var groupKey: String?
     /// Resolves the branch checked out in this folder's worktree, on inquiry.
@@ -1409,7 +1464,7 @@ private final class FolderView: NSView {
 
     private func showReveal() {
         guard reveal == nil, let branch = branchProvider?(), let superview else { return }
-        let chip = BranchRevealView(branch: branch, fill: fill)
+        let chip = BranchRevealView(branch: branch, fill: coat)
         let size = chip.fittingSize
         // Anchored to the label's left edge, sitting on its top edge.
         let origin = convert(NSPoint(x: 0, y: bounds.height - 1), to: superview)
@@ -1468,11 +1523,12 @@ private final class FolderView: NSView {
 
     override var mouseDownCanMoveWindow: Bool { false }
 
-    func apply(label: String?, fill: NSColor, onRemove: (() -> Void)?) {
+    func apply(label: String?, fill: NSColor, coat: NSColor, onRemove: (() -> Void)?) {
         self.onRemove = onRemove
-        guard self.label != label || self.fill != fill else { return }
+        guard self.label != label || self.fill != fill || self.coat != coat else { return }
         self.label = label
         self.fill = fill
+        self.coat = coat
         needsDisplay = true
         window?.invalidateCursorRects(for: self)
         updateTrackingAreas()
@@ -1484,9 +1540,53 @@ private final class FolderView: NSView {
     ]
     private var labelAttributes: [NSAttributedString.Key: Any] { Self.labelAttributes }
 
+    /// Worktree labels arrive as `⎇ dir`; the glyph is drawn as a tree symbol
+    /// (these are work*trees* — the branch glyph belongs to the branch chip).
+    private static let treeMarker = "⎇ "
+    private static let treeGlyphWidth: CGFloat = 13
+
+    private static func split(_ label: String) -> (tree: Bool, text: String) {
+        label.hasPrefix(treeMarker) ? (true, String(label.dropFirst(treeMarker.count))) : (false, label)
+    }
+
+    /// The tree, drawn: a conifer — three stacked tiers on a short trunk (the
+    /// owner's pick 2026-09-08; reads at 10 pt where a canopy turns to a
+    /// lollipop). One opaque fill; the trunk runs up into the lowest tier so
+    /// there is never a seam between them. `rect` is the glyph box.
+    private static func treePath(in rect: CGRect) -> NSBezierPath {
+        let path = NSBezierPath()
+        let w = rect.width, h = rect.height
+        func pt(_ x: CGFloat, _ y: CGFloat) -> NSPoint { NSPoint(x: rect.minX + x * w, y: rect.minY + y * h) }
+        func tier(top: CGFloat, bottom: CGFloat, half: CGFloat) {
+            let t = NSBezierPath()
+            t.move(to: pt(0.5, top))
+            t.line(to: pt(0.5 + half, bottom))
+            t.line(to: pt(0.5 - half, bottom))
+            t.close()
+            path.append(t)
+        }
+        // Two tiers, not three: at 10 pt three collapsed into one blob (owner
+        // call 2026-09-08). Narrow-ish top over a wide skirt, deep notch —
+        // the step is the whole silhouette at this size.
+        tier(top: 1.00, bottom: 0.50, half: 0.40)
+        tier(top: 0.62, bottom: 0.20, half: 0.50)
+        // The trunk winds the same way as the tiers (clockwise): under the
+        // non-zero rule an opposite-wound overlap cancels to a hole — which
+        // was the "gap between the log and the triangles".
+        let trunk = NSBezierPath()
+        trunk.move(to: pt(0.42, 0.32))
+        trunk.line(to: pt(0.58, 0.32))
+        trunk.line(to: pt(0.58, 0.0))
+        trunk.line(to: pt(0.42, 0.0))
+        trunk.close()
+        path.append(trunk)
+        return path
+    }
+
     /// A label tab's natural width: text plus insets. The flow sizes cells by it.
     static func labelWidth(for label: String) -> CGFloat {
-        ceil((label as NSString).size(withAttributes: labelAttributes).width) + 14
+        let (tree, text) = split(label)
+        return ceil((text as NSString).size(withAttributes: labelAttributes).width) + 14 + (tree ? treeGlyphWidth : 0)
     }
 
     /// The label tab's width: its text plus insets, never wider than the cell.
@@ -1521,21 +1621,32 @@ private final class FolderView: NSView {
 
         if let label {
             let tabWidth = labelTabWidth()
+            let (tree, text) = Self.split(label)
             // The label tab rises over pane content: give it a second coat so
             // it reads as the folder's edge sitting *on* the bar, not a stain.
+            // The coat stops at the cell's top edge — the tab tucks *under*
+            // the cell, the way a folder's tab does (owner call 2026-09-08).
             let tabPath = NSBezierPath()
-            tabPath.move(to: NSPoint(x: 0, y: cellTop - r))
+            tabPath.move(to: NSPoint(x: 0, y: cellTop))
             tabPath.appendArc(from: NSPoint(x: 0, y: bounds.height), to: NSPoint(x: tabWidth, y: bounds.height), radius: r)
-            tabPath.appendArc(from: NSPoint(x: tabWidth, y: bounds.height), to: NSPoint(x: tabWidth, y: cellTop - r), radius: r)
-            tabPath.line(to: NSPoint(x: tabWidth, y: cellTop - r))
+            tabPath.appendArc(from: NSPoint(x: tabWidth, y: bounds.height), to: NSPoint(x: tabWidth, y: cellTop), radius: r)
+            tabPath.line(to: NSPoint(x: tabWidth, y: cellTop))
             tabPath.close()
+            coat.setFill()
             tabPath.fill()
-            let attributed = NSAttributedString(string: label, attributes: labelAttributes)
+            var textX: CGFloat = 7
+            if tree {
+                let glyph = NSRect(x: 6.5, y: cellTop + (Self.tabHeight - 10) / 2, width: 10, height: 10)
+                Theme.Folder.labelText.setFill()
+                Self.treePath(in: glyph).fill()
+                textX += Self.treeGlyphWidth
+            }
+            let attributed = NSAttributedString(string: text, attributes: labelAttributes)
             let size = attributed.size()
             let rect = NSRect(
-                x: 7,
+                x: textX,
                 y: cellTop + (Self.tabHeight - size.height) / 2 + 0.5,
-                width: tabWidth - 14,
+                width: tabWidth - textX - 7,
                 height: size.height
             )
             attributed.draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
@@ -1643,7 +1754,7 @@ private final class BranchRevealView: NSView {
         label = NSTextField(labelWithString: "⎇ \(branch)")
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = fill.withAlphaComponent(0.92).cgColor
+        layer?.backgroundColor = fill.cgColor
         layer?.cornerRadius = Theme.Elevation.radiusSmall
         shadow = Theme.Elevation.raisedShadow
         label.font = Theme.Typography.mono(Theme.Typography.small, weight: .medium)

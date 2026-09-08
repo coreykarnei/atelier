@@ -930,14 +930,15 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         }
     }
 
-    /// What a group's folder tab says: the *worktree*, never the branch — the
-    /// repo name for the main checkout, `⎇ dir` for a linked worktree, `@host`
-    /// for a remote group. Folders are places; the branch checked out in one
-    /// is a state, revealed on hover (owner call 2026-09-07).
+    /// What a group's folder tab says: the *worktree*, never the branch —
+    /// `main` for the main working tree (git's own term for the primary; the
+    /// pill already says the repo's name), `⎇ dir` for a linked worktree,
+    /// `@host` for a remote group. Folders are places; the branch checked out
+    /// in one is a state, revealed on hover (owner calls 2026-09-07/08).
     private func folderLabel(for session: Session, key: String) -> String {
         if let host = session.location.host { return "@\(host)" }
         if session.isWorktree { return "⎇ \((session.cwd as NSString).lastPathComponent)" }
-        return (session.cwd as NSString).lastPathComponent
+        return "main"
     }
 
     // MARK: Attention (MILESTONE_1 §7.1)
@@ -1019,9 +1020,29 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
 
     func bottomBarDidSelectSession(at index: Int) { showSession(at: index) }
     func bottomBarDidRequestNewSession() { requestNewSession() }
+    /// The tab's `×`: confirm first (Settings → "Ask before closing a
+    /// session"; the alert's own "Don't ask again" turns it off). `↩`
+    /// confirms. `⌘W` stays immediate — a chord is already a decision.
     func bottomBarDidRequestCloseSession(at index: Int) {
         showSession(at: index)
-        closeActiveSession()
+        guard Settings.confirmClose, let window, let session = activeSession else {
+            closeActiveSession()
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Close \u{201C}\(session.displayTitle)\u{201D}?"
+        alert.informativeText = session.isRemote
+            ? "The remote shell and Claude keep running on \(session.location.host ?? "the host"); this tab detaches from them."
+            : "Its shell ends. The Claude conversation stays in its transcript and can be resumed."
+        alert.addButton(withTitle: "Close")
+        alert.addButton(withTitle: "Cancel")
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = "Don't ask again"
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .alertFirstButtonReturn else { return }
+            if alert.suppressionButton?.state == .on { Settings.confirmClose = false }
+            self.closeActiveSession()
+        }
     }
     func bottomBarDidToggleLayout() { toggleLayout() }
     func bottomBarDidRequestRemoveWorktree(at path: String) { removeWorktree(atPath: path) }
@@ -1118,8 +1139,14 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             mainBranchName = primary.branch == "(detached)" ? (mainBranchName ?? "main") : primary.branch
         }
 
-        let overlay = WorktreeChooserOverlay(worktrees: worktrees, prefill: prefill) { [weak self] in
+        // The suggestion is where you already are (owner call 2026-09-08).
+        let initial = worktrees.first { $0.path == activeSession?.cwd }
+        let overlay = WorktreeChooserOverlay(worktrees: worktrees, initial: initial, prefill: prefill) { [weak self] in
             self?.dismissChooser()
+        }
+        overlay.onRemove = { [weak self] worktree in
+            self?.dismissChooser()
+            self?.confirmRemoveWorktree(worktree, repoRoot: repoRoot)
         }
         overlay.onStart = { [weak self] worktree in
             self?.dismissChooser()
@@ -1235,8 +1262,10 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             }
             alert.addButton(withTitle: "Force Remove")
         } else {
+            alert.alertStyle = .warning
             alert.messageText = "Remove worktree ⎇ \(branch)?"
-            alert.informativeText = "The checkout at \(Self.abbreviate(worktree.path)) will be deleted."
+            alert.informativeText = "The checkout at \(Self.abbreviate(worktree.path)) will be deleted. "
+                + "Anything on this branch that hasn't been pushed to a remote is lost with it."
                 + (openSessions.isEmpty ? "" : " Its \(openSessions.count) open session(s) will close.")
             alert.addButton(withTitle: "Remove")
         }

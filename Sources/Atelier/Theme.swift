@@ -108,17 +108,41 @@ enum Theme {
     // MARK: Folders (MILESTONE_1 §7, revised 2026-09-03)
 
     /// The tab strip's worktree folders: the main checkout on plain surface0,
-    /// each further group tinted a hair toward the next accent so two folders
-    /// never read the same. Half-alpha — the bar's translucency shows through.
+    /// each worktree on surface0 pulled toward a Mocha accent — muted, but
+    /// unmistakably *a color*, so groups read apart at a glance (owner call
+    /// 2026-09-08). The accents that already mean something stay out: blue is
+    /// the anchor pill, green the active tab, peach attention. Half-alpha —
+    /// the bar's translucency shows through.
     enum Folder {
-        private static let tints: [UInt32] = [0x89B4FA, 0xCBA6F7, 0x94E2D5, 0xFAB387, 0xF5C2E7]
+        /// The cool half of Mocha — company for the green active tab, nothing
+        /// from the red family (owner call 2026-09-08). Ordered so neighbors
+        /// in the list never read alike.
+        private static let tints: [UInt32] = [
+            0x94E2D5, // teal
+            0xCBA6F7, // mauve
+            0xF9E2AF, // yellow
+            0x74C7EC, // sapphire
+            0xB4BEFE, // lavender
+        ]
+        static var tintCount: Int { tints.count }
         static let alpha: CGFloat = 0.6
         static let labelText = chromeText
 
         static func fill(_ index: Int) -> NSColor {
             let base = Elevation.surface0
             guard index > 0 else { return base.withAlphaComponent(alpha) }
-            return blend(base, nsColor(tints[(index - 1) % tints.count]), 0.22).withAlphaComponent(alpha)
+            return blend(base, nsColor(tints[(index - 1) % tints.count]), 0.48).withAlphaComponent(alpha)
+        }
+
+        /// The label tab's coat: the folder's hue pulled back toward mantle and
+        /// made opaque, so the label text sits on a band as dark as the neutral
+        /// folder's whatever the tint — legible at subtext0 everywhere (owner
+        /// call 2026-09-08). The cell body keeps the lighter tint.
+        static func labelCoat(_ index: Int) -> NSColor {
+            let mantle = nsColor(0x181825)
+            guard index > 0 else { return blend(Elevation.surface0, mantle, 0.2) }
+            let tinted = blend(Elevation.surface0, nsColor(tints[(index - 1) % tints.count]), 0.48)
+            return blend(tinted, mantle, 0.4)
         }
 
         private static func blend(_ a: NSColor, _ b: NSColor, _ t: CGFloat) -> NSColor {
