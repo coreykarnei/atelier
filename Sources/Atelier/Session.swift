@@ -297,10 +297,11 @@ final class Session: NSObject, NSSplitViewDelegate {
         }
 
         let claude = Session.resolveClaudeBinary()
-        // A restored session resumes its previous conversation — provided its
-        // transcript still exists; otherwise start fresh under the same id.
+        // Resume whenever Claude already has a transcript under this id (a
+        // restored session, or a reopened one); `--session-id` on a known id
+        // is refused as "already in use". Otherwise start fresh under the id.
         let args: [String]
-        if isRestored, Self.transcriptExists(sessionId: claudeSessionId, cwd: cwd) {
+        if Self.transcriptExists(sessionId: claudeSessionId, cwd: cwd) {
             args = ["--resume", claudeSessionId]
             agentPane.showResumingPlacard(title: displayTitle)
         } else {
@@ -364,14 +365,13 @@ final class Session: NSObject, NSSplitViewDelegate {
         }
     }
 
+    /// Whether Claude already holds a transcript under this id — the same
+    /// resolver the tab titles use (Claude's project-dir encoding turns every
+    /// non-alphanumeric character into `-`, underscores included; a private
+    /// copy here once kept `_` and sent restored BCI_HW1 sessions down the
+    /// `--session-id` path, which Claude refuses as "already in use").
     private static func transcriptExists(sessionId: String, cwd: String) -> Bool {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let encoded = cwd
-            .replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: ".", with: "-")
-        return FileManager.default.fileExists(
-            atPath: "\(home)/.claude/projects/\(encoded)/\(sessionId).jsonl"
-        )
+        TranscriptTitle.transcriptPath(sessionId: sessionId, cwd: cwd) != nil
     }
 
     /// Terminate the hosted processes when the session is closed.
