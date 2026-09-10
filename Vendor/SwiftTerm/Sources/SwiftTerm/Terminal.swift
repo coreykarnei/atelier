@@ -5656,13 +5656,18 @@ open class Terminal {
         case .x10:
             sendResponse(cc.CSI, "M", [UInt8(buttonFlags+32), min (UInt8(255), UInt8(32 + x+1)), min (UInt8(255), UInt8(32+y+1))])
         case .sgr:
-            let bflags : Int = ((buttonFlags & 3) == 3) ? (buttonFlags & ~3) : buttonFlags
-            let m = ((buttonFlags & 3) == 3) ? "m" : "M"
+            // Button code 3 means "release" only for a press/release report.
+            // With the motion bit (32) set it means "no button held", and the
+            // report must go out as `CSI < 35 ; x ; y M` — encoding it as a
+            // release (`… m`) makes any-event hover read as a click.
+            let isRelease = (buttonFlags & 3) == 3 && (buttonFlags & 32) == 0
+            let bflags : Int = isRelease ? (buttonFlags & ~3) : buttonFlags
+            let m = isRelease ? "m" : "M"
             sendResponse(cc.CSI, "<\(bflags);\(x+1);\(y+1)\(m)")
         case .sgrPixel:
-            let bflags : Int = ((buttonFlags & 3) == 3) ? (buttonFlags & ~3) : buttonFlags
-            let m = ((buttonFlags & 3) == 3) ? "m" : "M"
-            print ("\(pixelX);\(pixelY)")
+            let isRelease = (buttonFlags & 3) == 3 && (buttonFlags & 32) == 0
+            let bflags : Int = isRelease ? (buttonFlags & ~3) : buttonFlags
+            let m = isRelease ? "m" : "M"
             sendResponse(cc.CSI, "<\(bflags);\(pixelX);\(pixelY)\(m)")
             
         case .urxvt:
