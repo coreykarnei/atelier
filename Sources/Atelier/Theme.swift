@@ -114,35 +114,34 @@ enum Theme {
     /// the anchor pill, green the active tab, peach attention. Half-alpha —
     /// the bar's translucency shows through.
     enum Folder {
-        /// The cool half of Mocha — company for the green active tab, nothing
-        /// from the red family (owner call 2026-09-08). Ordered so neighbors
-        /// in the list never read alike.
-        private static let tints: [UInt32] = [
-            0x94E2D5, // teal
-            0xCBA6F7, // mauve
-            0xF9E2AF, // yellow
-            0x74C7EC, // sapphire
-            0xB4BEFE, // lavender
-        ]
-        static var tintCount: Int { tints.count }
+        /// Worktree folders share the base folder's colour and differ only in
+        /// lightness, stepping outward as they arrive: normal, slightly
+        /// lighter, slightly darker, lighter still, darker still (owner call
+        /// 2026-09-10 — one family, no hues competing with the green active tab
+        /// and the blue anchor). Index 0 is the main checkout; odd indices go
+        /// light, even go dark, each pair one rung further out.
+        static let tintCount = 4
         static let alpha: CGFloat = 0.6
         static let labelText = chromeText
+        private static let lighterPole = nsColor(0x6C7086) // overlay0
+        private static let darkerPole = nsColor(0x11111B)  // crust
 
-        static func fill(_ index: Int) -> NSColor {
+        private static func body(_ index: Int) -> NSColor {
             let base = Elevation.surface0
-            guard index > 0 else { return base.withAlphaComponent(alpha) }
-            return blend(base, nsColor(tints[(index - 1) % tints.count]), 0.48).withAlphaComponent(alpha)
+            guard index > 0 else { return base }
+            let rung = CGFloat((index + 1) / 2)          // 1, 1, 2, 2, …
+            let t = min(1, 0.32 * rung)
+            return index % 2 == 1 ? blend(base, lighterPole, t) : blend(base, darkerPole, t)
         }
 
-        /// The label tab's coat: the folder's hue pulled back toward mantle and
-        /// made opaque, so the label text sits on a band as dark as the neutral
-        /// folder's whatever the tint — legible at subtext0 everywhere (owner
-        /// call 2026-09-08). The cell body keeps the lighter tint.
+        static func fill(_ index: Int) -> NSColor {
+            body(index).withAlphaComponent(alpha)
+        }
+
+        /// The label tab's coat: the body pulled a step toward mantle and made
+        /// opaque, so subtext0 label text reads on every rung.
         static func labelCoat(_ index: Int) -> NSColor {
-            let mantle = nsColor(0x181825)
-            guard index > 0 else { return blend(Elevation.surface0, mantle, 0.2) }
-            let tinted = blend(Elevation.surface0, nsColor(tints[(index - 1) % tints.count]), 0.48)
-            return blend(tinted, mantle, 0.4)
+            blend(body(index), nsColor(0x181825), index > 0 && index % 2 == 0 ? 0.3 : 0.2)
         }
 
         private static func blend(_ a: NSColor, _ b: NSColor, _ t: CGFloat) -> NSColor {

@@ -1051,8 +1051,14 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         let font = Theme.Typography.mono(Theme.Typography.body, weight: .semibold)
         let textWidth = (label(for: info) as NSString).size(withAttributes: [.font: font]).width
         let badge: CGFloat = info.attention == .none ? 0 : 11
-        return ceil(textWidth) + badge + (isActive ? 34 : 20)
+        // +4: NSTextFieldCell pads 2pt each side beyond the glyph width.
+        return ceil(textWidth) + badge + 8 + (isActive ? closeSlot : 8) + 4
     }
+
+    /// The `×` sits close: 3pt off the title, 4pt off the edge (owner call
+    /// 2026-09-10 — the old 8/6 read as dead space).
+    static let closeMargin: CGFloat = 4
+    static let closeSlot: CGFloat = 3 + 12 + closeMargin
 
     /// The tab's label: the title, then the `@host` mark for remote sessions —
     /// dropped when the title *is* the host ("jarvis @jarvis" says it once).
@@ -1100,14 +1106,14 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         let closeWidth: CGFloat = 12
         if !closeButton.isHidden {
             closeButton.frame = CGRect(
-                x: bounds.width - 6 - closeWidth,
+                x: bounds.width - Self.closeMargin - closeWidth,
                 y: (bounds.height - closeWidth) / 2,
                 width: closeWidth,
                 height: closeWidth
             )
         }
         let leading: CGFloat = 8
-        let trailingSlot: CGFloat = isActive ? 22 : 8
+        let trailingSlot: CGFloat = isActive ? Self.closeSlot : 8
         let hasBadge = badgeView != nil
         if let badge = badgeView {
             let size = badge.frame.size == .zero ? badge.fittingSize : badge.frame.size

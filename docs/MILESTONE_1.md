@@ -246,7 +246,7 @@ underneath.
 │ ┌───────┐ │ Fix copy bug · Wire palette │ │ Refactor auth │  +     12:34·Sep03  ⊞ ⚙ │
 │ └atelier┘ └────────────────────────────┘ └───────────────┘                          │
 └────────────────────────────────────────────────────────────────────────────────────┘
-   pill        main folder (surface0)        worktree folder (tinted)   clock  toggle gear
+   pill        main folder (surface0)        worktree folder (lighter/darker)   clock  toggle gear
  (static)
 ```
 
@@ -275,11 +275,13 @@ clicks through to it.
   silhouette (cloud canopy, forked trunk — the owner's reference) + `dir` for
   a linked worktree, `@host` for a remote group. **One group draws
   no folder chrome** — bare tabs; folders appear when a second group opens.
-  Label coats are the folder's hue pulled toward mantle and opaque, so the
-  label text holds at subtext0 on every tint. Worktree
-  folders are **tinted** (surface0 pulled 42 % toward the cool half of Mocha —
-  teal/mauve/sky/lavender/sapphire, nothing red-family, company for the green
-  active tab — assigned in key order so no two open folders share one) — never blue, green, or peach, which
+  Label coats are the folder's body pulled toward mantle and opaque, so the
+  label text holds at subtext0 on every rung. Worktree folders share the
+  main folder's colour and differ only in **lightness** (owner call
+  2026-09-10, replacing the earlier hue tints): the main checkout is plain
+  surface0; further folders step outward as they arrive — slightly lighter,
+  slightly darker, lighter still, darker still — one family, locked per
+  worktree while it is open. No hue is spent here: blue, green, and peach
   already mean anchor, active, attention. Inactive tab titles sit at subtext0,
   the §1.2 cap: over a folder fill, overlay0 fell below legible. **The
   branch is on inquiry**: rest the pointer on a label for ~350 ms and a
@@ -290,10 +292,8 @@ clicks through to it.
   and speaks for one session only.) A folder cell is never narrower than its
   label. The bar's frame includes the labels' overhang band (transparent,
   pass-through) because AppKit clips hit-tests, tracking, and cursor rects to
-  visible bounds. Main first; the main folder
-  is plain surface0 and each further folder is tinted a hair toward the next
-  accent (blue, mauve, teal, peach, pink) so two never read the same. Fills are
-  half-alpha — the bar's translucency shows through. The per-tab `⎇` glyph is
+  visible bounds. Fills are
+  0.6-alpha — the bar's translucency shows through. The per-tab `⎇` glyph is
   gone: the folder *is* the mark (it returns only inside the `»` menu, which has
   no folder). Right-click a worktree folder's label → *Remove worktree…*.
 - **Two-row, group-aware wrap** when the strip fills: whole folders flow to row

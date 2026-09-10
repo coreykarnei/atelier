@@ -62,8 +62,8 @@ visible: blue dot working, peach dot waiting-on-you, peach `!` explicitly
 blocked, green dot unseen-completion → waiting on focus; fed by hooks carrying
 `session_id`, banner clicks focus the exact session), **worktree folders** in
 the tab strip (2026-09-03: each root's tabs sit in a folder-shaped cell whose
-label tab names the worktree — main's branch / `⎇ dir` / `@host` — tinted per
-group; two-row group-aware wrap + `»` overflow, overflowed tabs keep their
+label tab names the worktree — `main` / `⎇ dir` / `@host` — stepped lighter/
+darker per group off the main folder's colour; two-row group-aware wrap + `»` overflow, overflowed tabs keep their
 ⎇/attention marks in the menu, and the `»` wears the loudest overflowed
 state), a **Settings window** (`⌘,` / the bar's gear: field-opacity slider
 applied live via `Settings.didChange`, Enable worktrees), and inline tab rename (double-click edits the title in place — ↩
