@@ -15,6 +15,12 @@ class FreezableTerminalView: LocalProcessTerminalView {
         addCursorRect(bounds, cursor: .arrow)
     }
 
+    /// SwiftTerm also sets the I-beam directly on every cursor-update event,
+    /// bypassing the rects — same call, arrow.
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.arrow.set()
+    }
+
     /// The owner's Ghostty ⌘-chords (dotfiles `ghostty/config`), reproduced
     /// byte for byte so muscle memory carries over: ⌘⌫ kills the line (^U),
     /// ⌘←/→ are Home/End, ⌘⇧←/→ select to line start/end, ⌘↑/↓ are ⌃↑/⌃↓.
