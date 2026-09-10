@@ -388,27 +388,19 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         refreshWindowTitle()
     }
 
-    /// `repo — branch` (§4): Mission Control thumbnails legible at a glance.
-    /// The branch appears when the active session lives on a worktree; the
-    /// worktree directory is named for its branch (slashes dashed), which
-    /// keeps this off the subprocess path.
+    /// The project's name, nothing else (owner call 2026-09-10): the worktree
+    /// and the session live in the bottom bar; the window tab says which repo
+    /// (or host) this is. Mission Control thumbnails stay legible either way.
     private func refreshWindowTitle() {
         if let session = activeSession, case .remote(let host) = session.location {
-            window?.title = session.cwd == "~"
-                ? host
-                : "\(host) — \((session.cwd as NSString).lastPathComponent)"
+            window?.title = host
             return
         }
         guard let root = projectRepoRoot else {
             window?.title = "New Tab"
             return
         }
-        let repo = (root as NSString).lastPathComponent
-        if let session = activeSession, session.isWorktree {
-            window?.title = "\(repo) — \((session.cwd as NSString).lastPathComponent)"
-        } else {
-            window?.title = repo
-        }
+        window?.title = (root as NSString).lastPathComponent
     }
 
     /// Kill every session's hosted processes (window closing / app quitting) —

@@ -612,8 +612,12 @@ final class BottomBar: NSView {
                     }
                     let removable = segment.groupKey.hasPrefix(WorktreeManager.base + "/")
                     folder.groupKey = segment.groupKey
+                    // The main checkout's folder is the ground everything else
+                    // stands on — grouped, but unlabeled (owner call 2026-09-10);
+                    // worktree and host folders wear their name on the tab.
+                    let isMain = colorIndex(for: segment.groupKey) == 0
                     folder.apply(
-                        label: segment.ordinal == 0 ? segment.label : nil,
+                        label: segment.ordinal == 0 && !isMain ? segment.label : nil,
                         fill: Theme.Folder.fill(colorIndex(for: segment.groupKey)),
                         coat: Theme.Folder.labelCoat(colorIndex(for: segment.groupKey)),
                         onRemove: removable ? { [weak self] in

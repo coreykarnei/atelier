@@ -16,6 +16,9 @@ struct PersistedSession: Codable {
     /// Set for remote sessions: the ssh host; `cwd` is then the *remote* dir.
     /// Optional so pre-remote snapshots still decode.
     var remoteHost: String? = nil
+    /// The tab's attention state at quit (`Session.Attention` raw value), so a
+    /// relaunch shows what you hadn't seen yet. Optional: older snapshots.
+    var attention: String? = nil
 }
 
 struct PersistedWindow: Codable {

@@ -33,7 +33,7 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// never raises its voice. Elapsed time is available **on inquiry** (the
     /// tab tooltip), never pushed. Any change that makes one of these states
     /// loudness-vary over time is wrong by rule, not by taste.
-    enum Attention {
+    enum Attention: String {
         case none
         case working      // agent mid-turn (blue dot)
         case waiting      // turn done, your move (peach dot)
@@ -173,6 +173,14 @@ final class Session: NSObject, NSSplitViewDelegate {
         self.isRestored = true
         self.location = restored.remoteHost.map { .remote(host: $0) } ?? .local
         self.state = restored.isIDE ? .ide : .landing
+        // What relaunch can honestly say: a resumed agent is idle, so a turn
+        // that was mid-flight or blocked comes back as plain waiting; an
+        // unseen completion stays unseen until you look (owner ask 2026-09-10).
+        switch restored.attention.flatMap(Attention.init(rawValue:)) ?? .none {
+        case .doneUnseen: self.attention = .doneUnseen
+        case .waiting, .working, .needsInput: self.attention = .waiting
+        case .none: break
+        }
         let restoredMode = LayoutMode(rawValue: restored.layoutMode) ?? .triptych
         self.layoutMode = restored.remoteHost == nil
             ? restoredMode
@@ -211,7 +219,8 @@ final class Session: NSObject, NSSplitViewDelegate {
             claudeSessionId: claudeSessionId,
             dividers: dividers.mapValues { Double($0) },
             openFile: editorPane.filePath,
-            remoteHost: location.host
+            remoteHost: location.host,
+            attention: attention.rawValue
         )
     }
 
