@@ -24,3 +24,7 @@ a PR; when one lands, drop it here and note the version.
    motion report (any-event tracking, `?1003`) is `CSI <35;x;y M`, not a
    release `… m`. Claude Code 2.1.26x uses `?1003` for hover highlighting and
    read every hover as a click.
+4. **`showsScroller`** (`Mac/MacTerminalView.swift`): hosts can drop the
+   trailing legacy scroller; the grid takes the full width.
+5. **`wheelPrecisionMultiplier`**: feel knob for trackpad wheel deltas
+   (Ghostty's `mouse-scroll-multiplier.precision`), default 1.

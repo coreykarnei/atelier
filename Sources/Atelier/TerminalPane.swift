@@ -8,6 +8,18 @@ import SwiftTerm
 class FreezableTerminalView: LocalProcessTerminalView {
     private var deferredSize: NSSize?
 
+    /// Consoles, not documents: no scroller at the trailing edge (owner call
+    /// 2026-09-10 — a bar that never scrolls anything full-screen is noise).
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        showsScroller = false
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        showsScroller = false
+    }
+
     /// SwiftTerm wears the text I-beam over the whole grid; these panes are
     /// consoles, not documents — the pointer stays the arrow (owner call
     /// 2026-09-07). `resetCursorRects` is `open` in the vendored copy.

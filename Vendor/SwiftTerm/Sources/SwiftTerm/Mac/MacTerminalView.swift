@@ -532,6 +532,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         scroller.scrollerStyle = scrollerStyle
         scroller.knobProportion = 0.1
         scroller.isEnabled = false
+        scroller.isHidden = !showsScroller
         if let progressBarView {
             addSubview(progressBarView, positioned: .above, relativeTo: scroller)
         }
@@ -559,8 +560,21 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         terminalDelegate?.send (source: self, data: data)
     }
         
+    /// Whether the legacy scroller is shown at the trailing edge. Off, the
+    /// grid takes the full width and the scroller is hidden — for hosts that
+    /// present the terminal as a console (full-screen programs, no scrollback
+    /// affordance) rather than a document.
+    public var showsScroller: Bool = true {
+        didSet {
+            guard showsScroller != oldValue else { return }
+            scroller?.isHidden = !showsScroller
+            if cellDimension != nil, terminal != nil { _ = processSizeChange(newSize: frame.size) }
+            needsDisplay = true
+        }
+    }
+
     private var scrollerWidth: CGFloat {
-        NSScroller.scrollerWidth(for: .regular, scrollerStyle: scrollerStyle)
+        showsScroller ? NSScroller.scrollerWidth(for: .regular, scrollerStyle: scrollerStyle) : 0
     }
 
     /**
@@ -2212,10 +2226,14 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     /// time instead of never.
     private var wheelRemainder: CGFloat = 0
 
+    /// Feel multiplier for precise (trackpad) wheel deltas before they are
+    /// quantised into lines — Ghostty's `mouse-scroll-multiplier.precision`.
+    public var wheelPrecisionMultiplier: CGFloat = 1
+
     private func forwardWheel(_ event: NSEvent, _ emit: (_ up: Bool, _ hit: (grid: Position, pixels: Position)) -> Void) {
         let lines: Int
         if event.hasPreciseScrollingDeltas {
-            wheelRemainder += event.scrollingDeltaY / max(1, cellDimension.height)
+            wheelRemainder += event.scrollingDeltaY * wheelPrecisionMultiplier / max(1, cellDimension.height)
             lines = Int(wheelRemainder.rounded(.towardZero))
             wheelRemainder -= CGFloat(lines)
         } else {
@@ -2224,7 +2242,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         }
         guard lines != 0 else { return }
         let hit = calculateMouseHit(with: event)
-        for _ in 0..<min(abs(lines), 8) {
+        for _ in 0..<min(abs(lines), 256) {
             emit(lines > 0, hit)
         }
     }
