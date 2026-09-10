@@ -15,6 +15,31 @@ class FreezableTerminalView: LocalProcessTerminalView {
         addCursorRect(bounds, cursor: .arrow)
     }
 
+    /// The owner's Ghostty ⌘-chords (dotfiles `ghostty/config`), reproduced
+    /// byte for byte so muscle memory carries over: ⌘⌫ kills the line (^U),
+    /// ⌘←/→ are Home/End, ⌘⇧←/→ select to line start/end, ⌘↑/↓ are ⌃↑/⌃↓.
+    /// Host-level, as in Ghostty — a keymap, not emulator behaviour.
+    private static let commandChords: [(key: Character, shift: Bool, bytes: String)] = [
+        ("\u{7f}", false, "\u{15}"),
+        (Character(UnicodeScalar(NSLeftArrowFunctionKey)!), false, "\u{1b}OH"),
+        (Character(UnicodeScalar(NSRightArrowFunctionKey)!), false, "\u{1b}OF"),
+        (Character(UnicodeScalar(NSLeftArrowFunctionKey)!), true, "\u{1b}[1;4H"),
+        (Character(UnicodeScalar(NSRightArrowFunctionKey)!), true, "\u{1b}[1;4F"),
+        (Character(UnicodeScalar(NSUpArrowFunctionKey)!), false, "\u{1b}[1;5A"),
+        (Character(UnicodeScalar(NSDownArrowFunctionKey)!), false, "\u{1b}[1;5B"),
+    ]
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard window?.firstResponder === self else { return super.performKeyEquivalent(with: event) }
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard mods.contains(.command), !mods.contains(.control), !mods.contains(.option),
+              let key = event.charactersIgnoringModifiers?.first,
+              let chord = Self.commandChords.first(where: { $0.key == key && $0.shift == mods.contains(.shift) })
+        else { return super.performKeyEquivalent(with: event) }
+        send(txt: chord.bytes)
+        return true
+    }
+
     var resizeFrozen = false {
         didSet {
             guard !resizeFrozen, let size = deferredSize else { return }
