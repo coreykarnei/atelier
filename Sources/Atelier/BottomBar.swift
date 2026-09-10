@@ -1058,7 +1058,8 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     /// The `×` sits close: 3pt off the title, 4pt off the edge (owner call
     /// 2026-09-10 — the old 8/6 read as dead space).
     static let closeMargin: CGFloat = 4
-    static let closeSlot: CGFloat = 3 + 12 + closeMargin
+    static let closeGap: CGFloat = 0   // the 12pt box already insets its 8pt glyph
+    static let closeSlot: CGFloat = closeGap + 12 + closeMargin
 
     /// The tab's label: the title, then the `@host` mark for remote sessions —
     /// dropped when the title *is* the host ("jarvis @jarvis" says it once).
@@ -1104,17 +1105,22 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         // slot is reserved by activeness, not visibility, so the hover reveal
         // never shifts text.
         let closeWidth: CGFloat = 12
+        let leading: CGFloat = 8
+        let trailingSlot: CGFloat = isActive ? Self.closeSlot : 8
+        let hasBadge = badgeView != nil
         if !closeButton.isHidden {
+            // Hug the title's real end, not the tab's edge: the width estimate
+            // carries a few points of slack, and that slack belongs outside
+            // the ×, not between it and the text (owner call 2026-09-10).
+            let titleEnd = leading + (hasBadge ? 11 : 0) + ceil(titleLabel.fittingSize.width)
+            let x = min(titleEnd + Self.closeGap, bounds.width - Self.closeMargin - closeWidth)
             closeButton.frame = CGRect(
-                x: bounds.width - Self.closeMargin - closeWidth,
+                x: x,
                 y: (bounds.height - closeWidth) / 2,
                 width: closeWidth,
                 height: closeWidth
             )
         }
-        let leading: CGFloat = 8
-        let trailingSlot: CGFloat = isActive ? Self.closeSlot : 8
-        let hasBadge = badgeView != nil
         if let badge = badgeView {
             let size = badge.frame.size == .zero ? badge.fittingSize : badge.frame.size
             badge.frame = CGRect(
