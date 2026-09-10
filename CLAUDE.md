@@ -21,7 +21,10 @@ behind-window blur, text never; opaque under Reduce Transparency).
 
 What exists today:
 - A **SwiftPM macOS app** (Swift 6 toolchain, language mode v5) using **AppKit** +
-  **SwiftTerm**. Three targets: `Atelier` (the app), `atelier-notify` (the hook
+  **SwiftTerm** — vendored at `Vendor/SwiftTerm` (1.13.0 plus Atelier's
+  terminal-side patches; `ATELIER.md` there lists them). Terminal decisions
+  (wheel routing, cursor, input encoding) go in the vendored copy, never as
+  app-side overrides or event monitors, and each patch is meant for upstream. Three targets: `Atelier` (the app), `atelier-notify` (the hook
   CLI), and `AtelierIPC` (shared socket/message contract).
 - A **single window** with two PTY-backed SwiftTerm panes — `zsh` (left) and the
   hosted `claude` binary (right) — Catppuccin Mocha palette, native blur.

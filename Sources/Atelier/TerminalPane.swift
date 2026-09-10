@@ -10,10 +10,9 @@ class FreezableTerminalView: LocalProcessTerminalView {
 
     /// SwiftTerm wears the text I-beam over the whole grid; these panes are
     /// consoles, not documents — the pointer stays the arrow (owner call
-    /// 2026-09-07). Its cursor methods aren't `open`, so the substitution
-    /// happens where it registers the rect.
-    override func addCursorRect(_ rect: NSRect, cursor: NSCursor) {
-        super.addCursorRect(rect, cursor: .arrow)
+    /// 2026-09-07). `resetCursorRects` is `open` in the vendored copy.
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .arrow)
     }
 
     var resizeFrozen = false {

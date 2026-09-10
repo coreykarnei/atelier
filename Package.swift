@@ -7,7 +7,9 @@ let package = Package(
         .macOS(.v14)
     ],
     dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.13.0"),
+        // Vendored copy of SwiftTerm 1.13.0 with Atelier's terminal-side
+        // patches (wheel routing, open view hooks) — see Vendor/SwiftTerm/ATELIER.md.
+        .package(path: "Vendor/SwiftTerm"),
         // The M2 editor base (TECHNICAL_PLAN §3.3): TextKit-2 source editor
         // with incremental tree-sitter highlighting and multi-cursor support.
         .package(url: "https://github.com/CodeEditApp/CodeEditSourceEditor.git", from: "0.11.0"),
