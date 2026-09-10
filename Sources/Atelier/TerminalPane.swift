@@ -13,11 +13,17 @@ class FreezableTerminalView: LocalProcessTerminalView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         showsScroller = false
+        wheelPrecisionMultiplier = Self.wheelFeel
     }
+
+    /// Trackpad wheel feel over the Ghostty-equivalent 1.0 (owner: "still
+    /// feels slow", 2026-09-10).
+    static let wheelFeel: CGFloat = 1.5
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         showsScroller = false
+        wheelPrecisionMultiplier = Self.wheelFeel
     }
 
     /// SwiftTerm wears the text I-beam over the whole grid; these panes are
