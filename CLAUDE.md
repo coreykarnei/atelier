@@ -35,7 +35,12 @@ Truthful copy is working in both panes (shell via soft-wrap join; agent via
 transcript-aligned markdown — see the M0 devlog).
 
 Milestone 1 (built; see `docs/MILESTONE_1.md`):
-- **Projects as native tabbed windows** (`⌘T` new project tab, `⌘1..9`),
+- **Projects as tabs of the one workspace window** (`⌘T` new project tab,
+  `⌘1..9`, `⌃⇥`/`⌃⇧⇥` cycle, `⌥⌘W` close; since 2026-09-10 Atelier draws its
+  own full-width tab row under the titlebar — `WorkspaceWindowController` +
+  `ProjectStrip.swift`, replacing native window tabbing — rounded selected
+  chip, each tab carrying its sessions' attention marks; `ProjectController`
+  owns everything below the row),
   **sessions as bottom-bar tabs** (`⌥⌘T` sibling on the same root; `⌘⇧T` reopens
   the last-closed session; the active tab carries a leading close `×`), each hosting
   its own pinned `claude --session-id` whose transcript `ai-title` labels the tab.

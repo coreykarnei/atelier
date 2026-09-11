@@ -7,7 +7,7 @@ Claude Code stack that worked, but leaked.
 
 **State:** the workspace is built; the editor pane is next.
 
-- **Projects are native tabbed windows; sessions are tabs** within them — each
+- **Projects are tabs of one window; sessions are tabs** within them — each
   session a fixed pane shape (editor / shell / agent) hosting its own unchanged
   `claude` process, its tab titled live from Claude's own session summary.
 - **Truthful copy** — selecting agent text yields clean logical markdown,

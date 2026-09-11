@@ -1,18 +1,19 @@
 import AppKit
 import AtelierIPC
 
-/// One app, N project windows (MILESTONE_1 §2): each `MainWindowController` is one
-/// project; macOS native window tabbing draws the always-visible project strip in
-/// the titlebar. `⌘T` opens a new project tab (a Landing, which *becomes* the
-/// project when promoted); session-level actions route to the key window.
+/// One app, one workspace window, N project tabs (MILESTONE_1 §2, single
+/// window since 2026-09-10): each `ProjectController` is one project;
+/// `WorkspaceWindowController` draws the always-visible project strip in the
+/// titlebar. `⌘T` opens a new project tab (a Landing, which *becomes* the
+/// project when promoted); session-level actions route to the active project.
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var controllers: [MainWindowController] = []
+    private var workspace: WorkspaceWindowController?
     private let notificationServer = NotificationServer()
 
-    /// The controller behind the key window — where session-level menu actions land.
-    private var keyController: MainWindowController? {
-        (NSApp.keyWindow?.windowController as? MainWindowController) ?? controllers.last
-    }
+    private var projects: [ProjectController] { workspace?.projects ?? [] }
+
+    /// The project on screen — where session-level menu actions land.
+    private var keyController: ProjectController? { workspace?.activeProject }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = Menu.build()
@@ -24,13 +25,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // session; banner clicks focus that session's tab.
         notificationServer.onAgentEvent = { [weak self] message in
             guard let self, message.sessionId != nil else { return }
-            for controller in self.controllers where controller.applyAgentEvent(message) {
+            for controller in self.projects where controller.applyAgentEvent(message) {
                 break
             }
         }
         notificationServer.onNotificationClick = { [weak self] sessionId in
             guard let self else { return }
-            for controller in self.controllers where controller.focusSession(claudeSessionId: sessionId) {
+            for controller in self.projects where controller.focusSession(claudeSessionId: sessionId) {
                 NSApp.activate(ignoringOtherApps: true)
                 break
             }
@@ -44,14 +45,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Persistence (MILESTONE_1 §9)
 
-    /// Snapshot before windows tear down — `applicationWillTerminate` is too late,
-    /// the controllers are already gone by then. Closing every window by hand
-    /// quits without a snapshot; that's deliberate ("I closed my projects").
+    /// Snapshot before the window tears down — `applicationWillTerminate` is
+    /// too late, the projects are already gone by then. Closing the window by
+    /// hand quits without a snapshot; that's deliberate ("I closed my projects").
     ///
     /// Dirty editor buffers get the informative refusal first (M2.1's ⌘W
     /// guard, at quit scale): the files are named, saving is one button away.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        let dirty = controllers.flatMap { $0.dirtyBufferPaths }
+        let dirty = projects.flatMap { $0.dirtyBufferPaths }
         if !dirty.isEmpty {
             let alert = NSAlert()
             alert.messageText = dirty.count == 1
@@ -71,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             switch alert.runModal() {
             case .alertFirstButtonReturn:
                 do {
-                    for controller in controllers { try controller.saveAllDirtyBuffers() }
+                    for controller in projects { try controller.saveAllDirtyBuffers() }
                 } catch {
                     let failure = NSAlert()
                     failure.alertStyle = .warning
@@ -88,8 +89,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let state = PersistedState(
-            windows: controllers.map { $0.persisted() },
-            activeWindow: controllers.firstIndex { $0.window === NSApp.keyWindow } ?? 0
+            windows: projects.map { $0.persisted() },
+            activeWindow: workspace?.activeIndex ?? 0
         )
         SessionStore.save(state)
         isTerminating = true
@@ -101,7 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// reparented, or resurrected.
     private func restoreOrOpenFresh() {
         guard let state = SessionStore.load(), !state.windows.isEmpty else {
-            openProjectWindow()
+            openProject()
             return
         }
 
@@ -122,10 +123,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             var pruned = window
             pruned.sessions = valid
             pruned.activeIndex = min(window.activeIndex, valid.count - 1)
-            restoreProjectWindow(pruned)
+            restoreProject(pruned)
             restoredAny = true
         }
-        if !restoredAny { openProjectWindow() }
+        if !restoredAny {
+            openProject()
+        } else {
+            // Back on the tab that was up at quit (clamped: orphans may have
+            // dropped a project).
+            workspace?.activate(index: min(state.activeWindow, projects.count - 1))
+        }
 
         if !orphans.isEmpty {
             // A designed refusal (§5): Atelier speaks the sentence, the dead
@@ -155,40 +162,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func restoreProjectWindow(_ persisted: PersistedWindow) {
-        let controller = MainWindowController(restored: persisted)
-        controllers.append(controller)
-        if let window = controller.window {
-            NotificationCenter.default.addObserver(
-                self, selector: #selector(windowWillClose(_:)),
-                name: NSWindow.willCloseNotification, object: window
-            )
-            if let anchor = controllers.dropLast().last?.window {
-                anchor.addTabbedWindow(window, ordered: .above)
-            }
-        }
-        controller.showWindow(nil)
-        controller.startProcesses()
+    private func restoreProject(_ persisted: PersistedWindow) {
+        let project = ProjectController(restored: persisted)
+        ensureWorkspace().add(project, activate: false)
+        project.startProcesses()
     }
 
     /// A command from the `atelier` CLI: route to the project window anchored to
     /// the target's primary checkout, opening one if none exists.
     private func handle(_ command: CommandMessage) {
         let root = WorktreeManager.repoRoot(for: command.path) ?? command.path
-        let controller = controllers.first { $0.projectRepoRoot == root }
+        let controller = projects.first { $0.projectRepoRoot == root }
 
         switch command.verb {
         case .open:
-            let target = controller ?? openProjectWindow(root: root)
-            target.window?.makeKeyAndOrderFront(nil)
+            let target = controller ?? openProject(root: root)
+            target.activate()
         case .worktreeAdd:
             guard let branch = command.branch else { return }
-            let target = controller ?? openProjectWindow(root: root)
-            target.window?.makeKeyAndOrderFront(nil)
+            let target = controller ?? openProject(root: root)
+            target.activate()
             target.openWorktree(branch: branch)
         case .worktreeRemove:
             guard let branch = command.branch, let controller else { return }
-            controller.window?.makeKeyAndOrderFront(nil)
+            controller.activate()
             controller.removeWorktree(branch: branch)
         }
         NSApp.activate(ignoringOtherApps: true)
@@ -199,7 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// explicit blocks only. Not blue (the agent is fine without you), not
     /// plain peach (you saw it finish). Zero shows no badge.
     func refreshDockBadge() {
-        let count = controllers.reduce(0) { $0 + $1.actionableSessionCount }
+        let count = projects.reduce(0) { $0 + $1.actionableSessionCount }
         NSApp.dockTile.badgeLabel = count == 0 ? nil : String(count)
     }
 
@@ -220,12 +217,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let name = "atelier-\(index)-\(window.title.isEmpty ? "untitled" : window.title).png"
                 try? png.write(to: dir.appendingPathComponent(name))
             }
-            let state = controllers.map(\.debugWashState).joined(separator: "\n")
+            let state = projects.map(\.debugWashState).joined(separator: "\n")
             try? state.write(to: dir.appendingPathComponent("state.txt"), atomically: true, encoding: .utf8)
             NSLog("Atelier: debug snapshot written to \(debug.path)")
         case .lspProbe:
             let path = debug.path
-            let controller = keyController ?? controllers.first
+            let controller = keyController ?? projects.first
             guard let controller else {
                 try? "lspProbe: no window controller".write(toFile: path, atomically: true, encoding: .utf8)
                 return
@@ -238,7 +235,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         // Quitting: remote work stays alive on its hosts (reattach on relaunch).
-        for controller in controllers { controller.terminateAllSessions(killRemote: false) }
+        for controller in projects { controller.terminateAllSessions(killRemote: false) }
         LSPRegistry.terminateAll()
         RemoteLink.terminateAll()
         notificationServer.stop()
@@ -255,62 +252,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var isTerminating = false
 
-    // MARK: Project windows
+    // MARK: Projects
 
-    /// Open a new project tab — a Landing, or directly on `root` (CLI). Joins the
-    /// key window's native tab group so projects line up in the titlebar strip.
-    @discardableResult
-    private func openProjectWindow(root: String? = nil) -> MainWindowController {
-        let controller = MainWindowController(root: root)
-        controllers.append(controller)
-
-        if let window = controller.window {
+    /// The one window, created on first need and shown.
+    private func ensureWorkspace() -> WorkspaceWindowController {
+        if let workspace { return workspace }
+        let created = WorkspaceWindowController()
+        workspace = created
+        if let window = created.window {
             NotificationCenter.default.addObserver(
                 self, selector: #selector(windowWillClose(_:)),
                 name: NSWindow.willCloseNotification, object: window
             )
-            if let anchor = NSApp.keyWindow ?? controllers.dropLast().last?.window {
-                anchor.addTabbedWindow(window, ordered: .above)
-            }
         }
-        controller.showWindow(nil)
-        controller.window?.makeKeyAndOrderFront(nil)
-        controller.startProcesses()
-        return controller
+        created.showWindow(nil)
+        return created
+    }
+
+    /// Open a new project tab — a Landing, or directly on `root` (CLI) — and
+    /// bring it on screen.
+    @discardableResult
+    private func openProject(root: String? = nil) -> ProjectController {
+        let project = ProjectController(root: root)
+        let workspace = ensureWorkspace()
+        workspace.add(project, activate: true)
+        workspace.window?.makeKeyAndOrderFront(nil)
+        project.startProcesses()
+        return project
     }
 
     @objc private func windowWillClose(_ note: Notification) {
-        guard let window = note.object as? NSWindow else { return }
+        guard let window = note.object as? NSWindow, window === workspace?.window else { return }
         NotificationCenter.default.removeObserver(self, name: NSWindow.willCloseNotification, object: window)
-        if let index = controllers.firstIndex(where: { $0.window === window }) {
-            // A by-hand window close is deliberate ("I closed my projects") and
-            // kills remote work too; during quit the snapshot already promised
-            // these sessions back, so their remote side must survive.
-            controllers[index].terminateAllSessions(killRemote: !isTerminating)
-            controllers.remove(at: index)
-        }
+        // A by-hand window close is deliberate ("I closed my projects") and
+        // kills remote work too; during quit the snapshot already promised
+        // these sessions back, so their remote side must survive.
+        for project in projects { project.terminateAllSessions(killRemote: !isTerminating) }
+        workspace = nil
     }
 
     // MARK: Menu actions (responder chain)
 
-    @objc func newProject(_ sender: Any?) { openProjectWindow() }
+    @objc func newProject(_ sender: Any?) { openProject() }
+    @objc func closeProject(_ sender: Any?) {
+        guard let workspace, let project = workspace.activeProject else { return }
+        workspace.close(project)
+    }
+    @objc func nextProject(_ sender: Any?) { workspace?.activateNext() }
+    @objc func prevProject(_ sender: Any?) { workspace?.activatePrevious() }
     @objc func showPalette(_ sender: Any?) { keyController?.showPalette() }
     @objc func showSettings(_ sender: Any?) { SettingsWindowController.shared.show() }
 
-    /// Switch targets for the palette: every other project window, by title.
-    func otherProjects(excluding: MainWindowController) -> [(String, NSWindow)] {
-        controllers.compactMap { controller in
-            guard controller !== excluding, let window = controller.window else { return nil }
-            return (window.title, window)
-        }
+    /// Switch targets for the palette: every other project tab.
+    func otherProjects(excluding: ProjectController) -> [ProjectController] {
+        projects.filter { $0 !== excluding }
     }
 
     /// `⌘1..9` — focus the Nth project tab (menu item tag carries N).
     @objc func selectProject(_ sender: NSMenuItem) {
-        let windows = NSApp.keyWindow?.tabGroup?.windows ?? controllers.compactMap(\.window)
-        let index = sender.tag - 1
-        guard windows.indices.contains(index) else { return }
-        windows[index].makeKeyAndOrderFront(nil)
+        workspace?.activate(index: sender.tag - 1)
     }
 
     @objc func toggleLayout(_ sender: Any?) { keyController?.toggleLayout() }

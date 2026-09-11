@@ -67,6 +67,14 @@ context, and native window tabbing if you ever want them collapsed into one fram
 The always-visible project row the author wanted is delivered by putting project
 tabs **in the titlebar** (§4), at zero extra vertical cost.
 
+> **Revised 2026-09-10:** projects are now tabs of a single workspace window,
+> in an Atelier-drawn full-width row under the titlebar (`ProjectStrip.swift`).
+> Native window tabbing couldn't be tinted, rounded, or made to carry the
+> sessions' attention marks — and the marks (every live agent's state, visible
+> from any project) turned out to be the row's whole point. The chords stayed
+> (`⌘T`, `⌘1..9`, `⌃⇥`), `⌥⌘W` closes a project, and VISION's single window
+> became literal.
+
 ### 2.1 The Landing (added during M1.2)
 
 A session does not start as the full pane shape — it starts as a **Landing** and

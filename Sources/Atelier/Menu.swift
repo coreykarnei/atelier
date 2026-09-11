@@ -68,6 +68,7 @@ enum Menu {
         viewMenu.addItem(.separator())
 
         viewMenu.addItem(withTitle: "New Project Tab", action: #selector(AppDelegate.newProject(_:)), keyEquivalent: "t")
+        viewMenu.addItem(chord("Close Project", #selector(AppDelegate.closeProject(_:)), "w", [.command, .option]))
         viewMenu.addItem(chord("New Session…", #selector(AppDelegate.newSession(_:)), "t", [.command, .option]))
         viewMenu.addItem(withTitle: "Open IDE Here", action: #selector(AppDelegate.openIDEHere(_:)), keyEquivalent: "\r")
         viewMenu.addItem(withTitle: "Close Session", action: #selector(AppDelegate.closeSession(_:)), keyEquivalent: "w")
@@ -75,6 +76,8 @@ enum Menu {
         viewMenu.addItem(chord("Reopen Closed Session", #selector(AppDelegate.reopenSession(_:)), "t", [.command, .shift]))
         viewMenu.addItem(chord("Next Session", #selector(AppDelegate.nextSession(_:)), "]", [.command, .shift]))
         viewMenu.addItem(chord("Previous Session", #selector(AppDelegate.prevSession(_:)), "[", [.command, .shift]))
+        viewMenu.addItem(chord("Next Project", #selector(AppDelegate.nextProject(_:)), "\t", [.control]))
+        viewMenu.addItem(chord("Previous Project", #selector(AppDelegate.prevProject(_:)), "\t", [.control, .shift]))
         viewMenu.addItem(.separator())
 
         viewMenu.addItem(chord("Focus Left", #selector(AppDelegate.focusLeft(_:)), "h", [.command, .control]))
@@ -94,9 +97,8 @@ enum Menu {
         viewMenu.addItem(withTitle: "Smaller Text", action: #selector(AppDelegate.smallerText(_:)), keyEquivalent: "-")
         viewMenu.addItem(withTitle: "Reset Text Size", action: #selector(AppDelegate.resetTextSize(_:)), keyEquivalent: "0")
 
-        // Window menu. AppKit auto-inserts the native tab commands (Show Next Tab,
-        // Merge All Windows, …) once this is registered as NSApp.windowsMenu.
-        // ⌘1..⌘9 focus the Nth project tab (MILESTONE_1 §5).
+        // Window menu. ⌘1..⌘9 focus the Nth project tab (MILESTONE_1 §5);
+        // ⌃⇥ / ⌃⇧⇥ cycle them (View menu), as native tabs did.
         let windowItem = NSMenuItem()
         main.addItem(windowItem)
         let windowMenu = NSMenu(title: "Window")

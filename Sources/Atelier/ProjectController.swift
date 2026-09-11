@@ -4,80 +4,28 @@ import AtelierIPC
 /// Direction for the `⌃⌘+hjkl` focus manager.
 enum FocusDirection { case left, right, up, down }
 
-/// The mantle wash under the titlebar / native project tab strip (§3.1).
-/// Mirrors the field surfaces' translucency handling.
-private final class TitlebarWashView: NSView {
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
-        NSWorkspace.shared.notificationCenter.addObserver(
-            self,
-            selector: #selector(accessibilityDisplayChanged),
-            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
-            object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(accessibilityDisplayChanged),
-            name: Settings.didChange,
-            object: nil
-        )
+/// One project: hosts *sessions* (each an instance of the fixed pane shape),
+/// shows one at a time, and carries the bottom bar with the session tab strip
+/// (MILESTONE_1 §2, §7). Projects are tabs of the single workspace window
+/// (`WorkspaceWindowController` owns the window and the titlebar strip; this
+/// owns everything under it in `view`). Persistence snapshots/restores the
+/// whole project → session tree (§9); overlays (chooser, palette, ⌘P, ⌘⇧F)
+/// mount on the project view and restore pre-overlay focus on dismissal.
+final class ProjectController: NSObject, BottomBarDelegate {
+    /// The project's whole content below the titlebar strip. Hidden while
+    /// another project is the active tab; the sessions keep running.
+    let view = NSView()
+    /// The workspace window this project is a tab of.
+    weak var host: ProjectHost?
+    /// Whether this project is the one on screen. Focus requests from a
+    /// hidden project are dropped — a hidden pane must never steal the caret.
+    var isActive = false
+    /// The tab's name: the repo (or host); `New Tab` before promotion.
+    private(set) var title = "New Tab" {
+        didSet { if oldValue != title { host?.projectDidChangeTitle(self) } }
     }
+    var window: NSWindow? { view.window }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    deinit {
-        NSWorkspace.shared.notificationCenter.removeObserver(self)
-        NotificationCenter.default.removeObserver(self)
-    }
-
-    override func updateLayer() {
-        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
-    }
-
-    @objc private func accessibilityDisplayChanged() {
-        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
-    }
-
-    /// The hidden-title titlebar passes clicks through to this wash, so the
-    /// system's double-click-titlebar action has to be re-spoken here:
-    /// zoom (the default), or minimize when the user has set it so.
-    override func mouseDown(with event: NSEvent) {
-        guard event.clickCount == 2, let window else {
-            super.mouseDown(with: event)
-            return
-        }
-        let action = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)?["AppleActionOnDoubleClick"] as? String
-        switch action {
-        case "Minimize": window.performMiniaturize(nil)
-        case "None": break
-        default: window.performZoom(nil)
-        }
-    }
-}
-
-/// The app's window class: reports first-responder changes so the focus
-/// articulation (hairline + caret truth) can track clicks as well as chords.
-final class AtelierWindow: NSWindow {
-    var onFirstResponderChange: (() -> Void)?
-
-    override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
-        let accepted = super.makeFirstResponder(responder)
-        if accepted { onFirstResponderChange?() }
-        return accepted
-    }
-
-}
-
-/// One project window: hosts *sessions* (each an instance of the fixed pane
-/// shape), shows one at a time, and carries the bottom bar with the session
-/// tab strip (MILESTONE_1 §2, §7). Projects are native tabbed windows
-/// (`tabbingMode = .preferred`); persistence snapshots/restores the whole
-/// window → session tree (§9); overlays (chooser, palette, ⌘P, ⌘⇧F) mount on the
-/// content view and restore pre-overlay focus on dismissal.
-final class MainWindowController: NSWindowController, BottomBarDelegate {
     private var sessions: [Session] = []
     private var activeIndex = 0
     private var processesStarted = false
@@ -125,7 +73,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         }
     }
 
-    /// Rebuild a window from a snapshot (sessions are pre-validated by the caller).
+    /// Rebuild a project from a snapshot (sessions are pre-validated by the caller).
     convenience init(restored: PersistedWindow) {
         self.init(chrome: ())
         for persisted in restored.sessions {
@@ -138,90 +86,40 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         }
     }
 
-    /// Shared window + chrome setup; sessions are the caller's job.
+    /// Shared chrome setup; sessions are the caller's job.
     private convenience init(chrome: Void) {
-        let window = AtelierWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "New Tab"
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
-        window.isMovableByWindowBackground = true
-        // §2.9: transparent, native blur — the aesthetic is a spec
-        // requirement. The titlebar region still reads mantle via
-        // TitlebarWashView, translucent over the blur like every field
-        // surface.
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.titlebarSeparatorStyle = .none
-        // Projects are native window tabs (MILESTONE_1 §2): the OS draws the
-        // always-visible project strip in the titlebar.
-        window.tabbingMode = .preferred
-
-        // The blur is the WindowServer's, not a material (see
-        // WindowBlur.swift): NSVisualEffectView materials carry their own
-        // near-opaque tint, and two attempts at "more translucent" materials
-        // still compounded to a window the owner read as fully opaque. The
-        // content view is a bare clear container; the fields' fieldAlpha
-        // wash over the blurred desktop is the whole look — Ghostty's
-        // pipeline, which is the target feel.
-        let container = NSView()
-        container.wantsLayer = true
-        window.contentView = container
-        window.appearance = NSAppearance(named: .darkAqua)
-
-        self.init(window: window)
-        window.center()
-        window.setFrameAutosaveName("AtelierMainWindow")
-        if !WindowBackgroundBlur.apply(to: window, radius: Theme.backgroundBlurRadius) {
-            // No CGS symbols (future-macOS insurance): fall back to the
-            // material blur rather than a raw see-through window.
-            NSLog("Atelier: CGS window blur unavailable; falling back to NSVisualEffectView")
-            let blur = NSVisualEffectView()
-            blur.material = .hudWindow
-            blur.blendingMode = .behindWindow
-            blur.state = .active
-            blur.translatesAutoresizingMaskIntoConstraints = false
-            container.addSubview(blur, positioned: .below, relativeTo: nil)
-            NSLayoutConstraint.activate([
-                blur.topAnchor.constraint(equalTo: container.topAnchor),
-                blur.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-                blur.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-                blur.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            ])
-        }
-        buildChrome(in: container)
-        observeFocus(of: window)
+        self.init()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        buildChrome(in: view)
     }
 
     // MARK: Focus articulation (POLISH_PLAN Phase 1)
 
-    private func observeFocus(of window: NSWindow) {
-        // Every focus change funnels through makeFirstResponder — ours and
-        // AppKit's (clicks) — so the subclass hook is the one reliable signal.
-        (window as? AtelierWindow)?.onFirstResponderChange = { [weak self] in
-            self?.refreshFocusArticulation()
-        }
-        let center = NotificationCenter.default
-        center.addObserver(self, selector: #selector(windowKeyDidChange),
-                           name: NSWindow.didBecomeKeyNotification, object: window)
-        center.addObserver(self, selector: #selector(windowKeyDidChange),
-                           name: NSWindow.didResignKeyNotification, object: window)
-    }
-
-    @objc private func windowKeyDidChange() {
-        refreshFocusArticulation()
-    }
-
     /// Re-aim the hairline and caret truth at the current first responder.
-    private func refreshFocusArticulation() {
+    /// The workspace window calls this on every first-responder / key change
+    /// for the active project.
+    func refreshFocusArticulation() {
         guard let window, let session = activeSession else { return }
         session.updateFocusArticulation(firstResponder: window.firstResponder, windowIsKey: window.isKeyWindow)
         session.syncCaretFocus(firstResponder: window.firstResponder, windowIsKey: window.isKeyWindow)
     }
+
+    /// Focus a view — only while this project is on screen.
+    @discardableResult
+    private func focus(_ target: NSView?) -> Bool {
+        guard isActive, let window else { return false }
+        return window.makeFirstResponder(target)
+    }
+
+    /// What should hold the caret when this project comes on screen: an open
+    /// overlay's field, else the active session's default pane.
+    var preferredFocusView: NSView? {
+        palette?.focusField ?? filePicker?.focusField ?? repoSearch?.focusField
+            ?? chooserOverlay?.focusField ?? activeSession?.defaultFocusView
+    }
+
+    /// Bring this project on screen (the window comes forward too).
+    func activate() { host?.activate(self) }
 
     /// Snapshot for the session store.
     func persisted() -> PersistedWindow {
@@ -232,7 +130,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     /// geometry plus every translucent-painting view in the window, for
     /// reconciling snapshot alpha probes with the live tree.
     var debugWashState: String {
-        var lines = [activeSession.map { "\(window?.title ?? "?"): \($0.shellPane.debugWashState)" } ?? "no session"]
+        var lines = [activeSession.map { "\(title): \($0.shellPane.debugWashState)" } ?? "no session"]
         func walk(_ view: NSView, depth: Int) {
             let bg = view.layer?.backgroundColor
             let alpha = bg?.alpha ?? 0
@@ -243,7 +141,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             }
             for sub in view.subviews { walk(sub, depth: depth + 1) }
         }
-        if let root = window?.contentView { walk(root, depth: 0) }
+        if window?.contentView != nil { walk(view, depth: 0) }
         return lines.joined(separator: "\n")
     }
 
@@ -259,23 +157,9 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         container.addSubview(sessionArea)
         container.addSubview(bottomBar)
 
-        // Pin below the titlebar/tab bar, not the window top: with
-        // .fullSizeContentView the contentView extends under the chrome, and the
-        // panes would draw straight through the project tab strip.
-        let contentTop = (window?.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? container.topAnchor
-
-        // §3.1: the titlebar/tab-strip region gets the same mantle-over-blur
-        // wash as the bottom bar — one material language from the top edge
-        // down. The native tab chrome draws above this, on our material.
-        let titlebarWash = TitlebarWashView()
-        titlebarWash.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(titlebarWash)
-        NSLayoutConstraint.activate([
-            titlebarWash.topAnchor.constraint(equalTo: container.topAnchor),
-            titlebarWash.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            titlebarWash.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            titlebarWash.bottomAnchor.constraint(equalTo: contentTop),
-        ])
+        // The project view already sits below the titlebar strip (the
+        // workspace window pins it to the content layout guide).
+        let contentTop = container.topAnchor
 
         NSLayoutConstraint.activate([
             sessionArea.topAnchor.constraint(equalTo: contentTop),
@@ -302,17 +186,17 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         bottomBar.onRenameDidEnd = { [weak self] in
             guard let self, let window = self.window else { return }
             if window.firstResponder == nil || window.firstResponder === window {
-                window.makeFirstResponder(self.activeSession?.defaultFocusView)
+                self.focus(self.activeSession?.defaultFocusView)
             }
         }
     }
 
-    /// Start the hosted processes for every session. Called once the window is on
+    /// Start the hosted processes for every session. Called once the project is on
     /// screen (deferred so terminals get a real size first).
     func startProcesses() {
         processesStarted = true
         for session in sessions { session.start() }
-        window?.makeFirstResponder(activeSession?.defaultFocusView)
+        focus(activeSession?.defaultFocusView)
         startTitleTimer()
     }
 
@@ -359,7 +243,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             if let session {
                 self.noteProjectRoot(for: session)
                 if session === self.activeSession {
-                    self.window?.makeFirstResponder(session.defaultFocusView)
+                    self.focus(session.defaultFocusView)
                 }
             }
             self.updateBottomBar()
@@ -378,29 +262,29 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         // A remote dir is not a local repo root — anchoring the window to it
         // would aim ⌥⌘T and the worktree chooser at a path that isn't here.
         guard session.state == .ide, !session.isRemote else {
-            refreshWindowTitle()
+            refreshTitle()
             return
         }
         if projectRepoRoot == nil {
             projectRepoRoot = WorktreeManager.repoRoot(for: session.cwd) ?? session.cwd
             refreshMainBranch()
         }
-        refreshWindowTitle()
+        refreshTitle()
     }
 
     /// The project's name, nothing else (owner call 2026-09-10): the worktree
-    /// and the session live in the bottom bar; the window tab says which repo
-    /// (or host) this is. Mission Control thumbnails stay legible either way.
-    private func refreshWindowTitle() {
+    /// and the session live in the bottom bar; the project tab says which repo
+    /// (or host) this is.
+    private func refreshTitle() {
         if let session = activeSession, case .remote(let host) = session.location {
-            window?.title = host
+            title = host
             return
         }
         guard let root = projectRepoRoot else {
-            window?.title = "New Tab"
+            title = "New Tab"
             return
         }
-        window?.title = (root as NSString).lastPathComponent
+        title = (root as NSString).lastPathComponent
     }
 
     /// Kill every session's hosted processes (window closing / app quitting) —
@@ -501,7 +385,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
 
     private func revertToLanding() {
         projectRepoRoot = nil
-        window?.title = "New Tab"
+        title = "New Tab"
         addSession()
         landingFromRevert = sessions.last
     }
@@ -638,7 +522,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
                 }
                 if session === self.activeSession {
                     if session.layoutMode == .split { self.toggleLayout() }
-                    self.window?.makeFirstResponder(session.editorPane.focusView)
+                    self.focus(session.editorPane.focusView)
                 }
             } catch {
                 self.presentError(title: "Couldn't open \(url.lastPathComponent)", error: error)
@@ -652,8 +536,8 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
 
     func showFilePicker() {
         guard filePicker == nil, palette == nil, repoSearch == nil,
-              let session = activeSession, session.state == .ide,
-              let container = window?.contentView else { return }
+              let session = activeSession, session.state == .ide else { return }
+        let container = view
 
         let overlay = FilePicker(
             root: session.cwd,
@@ -662,7 +546,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         )
         overlay.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(overlay)
-        let contentTop = (window?.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? container.topAnchor
+        let contentTop = container.topAnchor
         NSLayoutConstraint.activate([
             overlay.topAnchor.constraint(equalTo: contentTop),
             overlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -671,7 +555,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         ])
         filePicker = overlay
         captureFocusForOverlay()
-        window?.makeFirstResponder(overlay.focusField)
+        focus(overlay.focusField)
         overlay.animateIn()
     }
 
@@ -687,8 +571,8 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
 
     func showRepoSearch() {
         guard repoSearch == nil, palette == nil, filePicker == nil,
-              let session = activeSession, session.state == .ide,
-              let container = window?.contentView else { return }
+              let session = activeSession, session.state == .ide else { return }
+        let container = view
 
         let overlay = RepoSearchOverlay(
             root: session.cwd,
@@ -699,7 +583,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         )
         overlay.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(overlay)
-        let contentTop = (window?.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? container.topAnchor
+        let contentTop = container.topAnchor
         NSLayoutConstraint.activate([
             overlay.topAnchor.constraint(equalTo: contentTop),
             overlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -708,7 +592,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         ])
         repoSearch = overlay
         captureFocusForOverlay()
-        window?.makeFirstResponder(overlay.focusField)
+        focus(overlay.focusField)
         overlay.animateIn()
     }
 
@@ -765,7 +649,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             guard let self, let target = targets.first else { return }
             if target.path == path {
                 session.editorPane.reveal(line: target.line, column: target.column)
-                self.window?.makeFirstResponder(session.editorPane.focusView)
+                self.focus(session.editorPane.focusView)
             } else {
                 self.openInEditor(
                     url: URL(fileURLWithPath: target.path),
@@ -797,8 +681,23 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             session.container.trailingAnchor.constraint(equalTo: sessionArea.trailingAnchor),
         ])
         session.refreshLanding()
-        window?.makeFirstResponder(session.defaultFocusView)
-        refreshWindowTitle()
+        focus(session.defaultFocusView)
+        refreshTitle()
+        updateBottomBar()
+    }
+
+    /// The project tab's marks: every session's attention, tab order, the
+    /// silent ones dropped.
+    var attentionMarks: [Session.Attention] {
+        sessions.map(\.attention).filter { $0 != .none }
+    }
+
+    /// The project came on screen (tab switch): seeing the active session's
+    /// unseen completion turns it into *waiting* (§7.1), as focusing its tab
+    /// would.
+    func didBecomeVisible() {
+        guard let session = activeSession, session.attention == .doneUnseen else { return }
+        session.attention = .waiting
         updateBottomBar()
     }
 
@@ -849,7 +748,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             if distance < bestDistance { bestDistance = distance; best = pane }
         }
         if let best {
-            window.makeFirstResponder(best.focusView)
+            focus(best.focusView)
             // A directional jump earns the ~150 ms glow-then-settle (§3); the
             // KVO has already re-laid the hairline by the time we get here.
             activeSession?.glowFocus()
@@ -883,8 +782,10 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
             pill: pill,
             mode: mode
         )
-        // Every attention change passes through here — the Dock badge rides along.
+        // Every attention change passes through here — the Dock badge and the
+        // project tab's dots ride along.
         (NSApp.delegate as? AppDelegate)?.refreshDockBadge()
+        host?.projectDidChangeSessions(self)
     }
 
     /// Display order for the strip: tabs grouped by root, groups in
@@ -946,7 +847,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
               let index = sessions.firstIndex(where: { $0.claudeSessionId == sessionId }) else {
             return false
         }
-        let onScreen = index == activeIndex && (window?.isKeyWindow ?? false)
+        let onScreen = index == activeIndex && isActive && (window?.isKeyWindow ?? false)
         switch message.kind {
         case .working:
             sessions[index].attention = .working
@@ -968,13 +869,13 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         return true
     }
 
-    /// Notification click-to-focus: bring this window forward on the right tab.
+    /// Notification click-to-focus: bring this project forward on the right tab.
     @discardableResult
     func focusSession(claudeSessionId: String) -> Bool {
         guard let index = sessions.firstIndex(where: { $0.claudeSessionId == claudeSessionId }) else {
             return false
         }
-        window?.makeKeyAndOrderFront(nil)
+        activate()
         showSession(at: index)
         return true
     }
@@ -1092,9 +993,9 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
 
     private func restorePreOverlayFocus() {
         if let view = preOverlayFocus, view.window === window {
-            window?.makeFirstResponder(view)
+            focus(view)
         } else {
-            window?.makeFirstResponder(activeSession?.defaultFocusView)
+            focus(activeSession?.defaultFocusView)
         }
         preOverlayFocus = nil
     }
@@ -1115,8 +1016,8 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     }
 
     func showWorktreeChooser(prefill: String? = nil) {
-        guard chooserOverlay == nil, palette == nil, filePicker == nil, repoSearch == nil,
-              let container = window?.contentView else { return }
+        guard chooserOverlay == nil, palette == nil, filePicker == nil, repoSearch == nil else { return }
+        let container = view
         guard let repoRoot = projectRepoRoot
                 ?? activeSession.flatMap({ WorktreeManager.repoRoot(for: $0.cwd) }) else {
             NSSound.beep() // landing on a non-repo: nothing to choose from
@@ -1150,7 +1051,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         }
         overlay.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(overlay)
-        let contentTop = (window?.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? container.topAnchor
+        let contentTop = container.topAnchor
         NSLayoutConstraint.activate([
             overlay.topAnchor.constraint(equalTo: contentTop),
             overlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -1159,7 +1060,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         ])
         chooserOverlay = overlay
         captureFocusForOverlay()
-        window?.makeFirstResponder(overlay.focusField)
+        focus(overlay.focusField)
         overlay.animateIn()
     }
 
@@ -1296,15 +1197,15 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
     private var palette: CommandPalette?
 
     func showPalette() {
-        guard palette == nil, filePicker == nil, repoSearch == nil,
-              let container = window?.contentView else { return }
+        guard palette == nil, filePicker == nil, repoSearch == nil else { return }
+        let container = view
 
         let overlay = CommandPalette(commands: paletteCommands()) { [weak self] in
             self?.dismissPalette()
         }
         overlay.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(overlay)
-        let contentTop = (window?.contentLayoutGuide as? NSLayoutGuide)?.topAnchor ?? container.topAnchor
+        let contentTop = container.topAnchor
         NSLayoutConstraint.activate([
             overlay.topAnchor.constraint(equalTo: contentTop),
             overlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -1313,7 +1214,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         ])
         palette = overlay
         captureFocusForOverlay()
-        window?.makeFirstResponder(overlay.focusField)
+        focus(overlay.focusField)
         overlay.animateIn()
     }
 
@@ -1375,9 +1276,9 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         commands.append(PaletteCommand(id: "project.new", title: "Project: New Tab", key: "⌘T") {
             (NSApp.delegate as? AppDelegate)?.newProject(nil)
         })
-        for (title, window) in (NSApp.delegate as? AppDelegate)?.otherProjects(excluding: self) ?? [] {
-            commands.append(PaletteCommand(id: "project.switch.\(title)", title: "Project: Switch to \(title)", key: nil) {
-                window.makeKeyAndOrderFront(nil)
+        for (n, project) in ((NSApp.delegate as? AppDelegate)?.otherProjects(excluding: self) ?? []).enumerated() {
+            commands.append(PaletteCommand(id: "project.switch.\(n)", title: "Project: Switch to \(project.title)", key: nil) {
+                project.activate()
             })
         }
 
@@ -1422,7 +1323,7 @@ final class MainWindowController: NSWindowController, BottomBarDelegate {
         for (name, pane) in focusTargets {
             guard let pane else { continue }
             commands.append(PaletteCommand(id: "view.focus.\(name)", title: "View: Focus \(name)", key: nil) { [weak self] in
-                self?.window?.makeFirstResponder(pane.focusView)
+                self?.focus(pane.focusView)
             })
         }
 
