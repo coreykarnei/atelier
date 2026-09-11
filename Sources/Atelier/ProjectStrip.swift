@@ -18,15 +18,15 @@ struct ProjectTabInfo {
 /// sessions' attention marks after the title (blue working, peach waiting,
 /// peach `!` blocked, green unseen completion), so a project you're not
 /// looking at still says where its agents stand. `+` opens a new project
-/// tab; the active tab's `×` closes it. Gaps pass clicks through to the
+/// tab; the active tab's leading `×` closes it. Gaps pass clicks through to the
 /// wash (drag to move, double-click to zoom).
 final class ProjectStripView: NSView {
     var onSelect: ((ObjectIdentifier) -> Void)?
     var onClose: ((ObjectIdentifier) -> Void)?
     var onNew: (() -> Void)?
 
-    static let rowHeight: CGFloat = 28
-    static let tabHeight: CGFloat = 22
+    static let rowHeight: CGFloat = 32
+    static let tabHeight: CGFloat = 26
     static let gap: CGFloat = 4
     static let plusWidth: CGFloat = 28
 
@@ -99,8 +99,9 @@ final class ProjectStripView: NSView {
     @objc private func newTapped() { onNew?() }
 }
 
-/// A single project tab: title, the sessions' marks, the `×` on the active
-/// tab (revealed on hover, slot reserved so nothing shifts).
+/// A single project tab: title and the sessions' marks centered, the `×` at
+/// the leading edge of the active tab (revealed on hover; the group is
+/// centered against symmetric slots so nothing shifts).
 private final class ProjectTabView: NSView {
     let id: ObjectIdentifier
     var onSelect: (() -> Void)?
@@ -128,7 +129,7 @@ private final class ProjectTabView: NSView {
         layer?.cornerRadius = Theme.Elevation.radiusMedium
 
         titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.font = Theme.Typography.mono(Theme.Typography.small, weight: .medium)
+        titleLabel.font = Theme.Typography.mono(Theme.Typography.body, weight: .medium)
         addSubview(titleLabel)
 
         closeButton.bezelStyle = .regularSquare
@@ -142,6 +143,7 @@ private final class ProjectTabView: NSView {
         closeButton.isHidden = true
         closeButton.alphaValue = 0
         addSubview(closeButton)
+        installTracking()
     }
 
     @available(*, unavailable)
@@ -221,8 +223,9 @@ private final class ProjectTabView: NSView {
             x += Self.dot + Self.dotGap
         }
         if !closeButton.isHidden {
+            // Leading, where macOS puts a tab's close (owner call 2026-09-10).
             closeButton.frame = CGRect(
-                x: bounds.width - 6 - Self.closeWidth,
+                x: 8,
                 y: (bounds.height - Self.closeWidth) / 2,
                 width: Self.closeWidth,
                 height: Self.closeWidth
@@ -230,12 +233,14 @@ private final class ProjectTabView: NSView {
         }
     }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
+    /// Installed at init: AppKit only asks a view to update tracking areas
+    /// once it has one. `.inVisibleRect` keeps the rect on the view's bounds
+    /// as tabs re-share the row.
+    private func installTracking() {
         if let tracking { removeTrackingArea(tracking) }
         let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow],
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
             owner: self,
             userInfo: nil
         )
@@ -265,12 +270,22 @@ private final class StripHoverButton: NSButton {
     static let restingAlpha: CGFloat = 0.55
     private var tracking: NSTrackingArea?
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        installTracking()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Installed at init: AppKit only asks a view to update tracking areas
+    /// once it has one. `.inVisibleRect` keeps the rect on the view's bounds
+    /// as tabs re-share the row.
+    private func installTracking() {
         if let tracking { removeTrackingArea(tracking) }
         let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow],
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
             owner: self,
             userInfo: nil
         )
