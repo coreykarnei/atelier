@@ -28,3 +28,11 @@ a PR; when one lands, drop it here and note the version.
    trailing legacy scroller; the grid takes the full width.
 5. **`wheelPrecisionMultiplier`**: feel knob for trackpad wheel deltas
    (Ghostty's `mouse-scroll-multiplier.precision`), default 1.
+6. **`copyOnSelect`** (`Mac/MacTerminalView.swift`): a finished mouse
+   selection (drag, double/triple click) goes through `copy(_:)` — Ghostty's
+   `copy-on-select = clipboard`. Off by default.
+7. **OSC 52 forwarding** (`Mac/MacTerminalView.swift`): `TerminalView`'s
+   `TerminalDelegate.clipboardCopy` now forwards to `terminalDelegate`; the
+   request used to die in the protocol's empty default, so the local-process
+   view's pasteboard write never ran.
+

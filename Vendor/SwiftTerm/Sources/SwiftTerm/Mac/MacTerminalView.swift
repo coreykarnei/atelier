@@ -2011,6 +2011,10 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     }
     
     var didSelectionDrag: Bool = false
+
+    /// When set, finishing a mouse selection (drag, double- or triple-click)
+    /// copies it via `copy(_:)` — Ghostty's `copy-on-select = clipboard`.
+    public var copyOnSelect: Bool = false
     
     public override func mouseUp(with event: NSEvent) {
         let hit = calculateMouseHit(with: event).grid
@@ -2024,11 +2028,10 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             return
         }
         
-        #if DEBUG
-        // let hit = calculateMouseHit(with: event)
-        //print ("Up at col=\(hit.col) row=\(hit.row) count=\(event.clickCount) selection.active=\(selection.active) didSelectionDrag=\(didSelectionDrag) ")
-        #endif
-        
+        if copyOnSelect, selection.active, didSelectionDrag || event.clickCount > 1,
+           !selection.getSelectedText().isEmpty {
+            copy(self)
+        }
         didSelectionDrag = false
     }
     
@@ -2379,6 +2382,13 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     
     public func setTerminalTitle(source: Terminal, title: String) {
         terminalDelegate?.setTerminalTitle(source: self, title: title)
+    }
+
+    /// OSC 52: the program asked to put text on the clipboard. Forwarded to
+    /// the view delegate (the local-process view writes the pasteboard);
+    /// without this the parsed request died in the protocol's empty default.
+    public func clipboardCopy(source: Terminal, content: Data) {
+        terminalDelegate?.clipboardCopy(source: self, content: content)
     }
     
     public func sizeChanged(source: Terminal) {

@@ -110,7 +110,7 @@ enum RemoteCommand {
     /// own conf — deterministic status-off/TERM without ever touching the
     /// host's tmux.conf. Versioned filename: changing the conf below must also
     /// bump the name so existing hosts rewrite it.
-    static let tmuxConfPath = "~/.config/atelier/tmux-v4.conf"
+    static let tmuxConfPath = "~/.config/atelier/tmux-v5.conf"
     private static let tmuxConfLines = [
         "set -g status off",
         "set -g escape-time 0",
@@ -126,6 +126,12 @@ enum RemoteCommand {
         "set -g exit-empty on",
         // Claude Code asks for this on attach; SwiftTerm sends focus reports.
         "set -g focus-events on",
+        // OSC 52 out of the inner program (Claude Code's "c to copy" on a
+        // remote host) reaches Atelier's pasteboard only if tmux knows the
+        // outer terminal takes it: xterm-256color's terminfo lacks Ms, so
+        // declare it (owner report 2026-09-10).
+        "set -g set-clipboard on",
+        "set -as terminal-overrides ',xterm-256color:Ms=\\E]52;%p1%s;%p2%s\\007'",
     ]
 
     /// Shared client options for every ssh we spawn.
@@ -179,7 +185,11 @@ enum RemoteCommand {
         // new file.
         var script = "mkdir -p ~/.config/atelier && { [ -f \(tmuxConfPath) ] || { printf '%s\\n' "
         script += tmuxConfLines.map(quoted).joined(separator: " ")
-        script += " > \(tmuxConfPath).$$ && mv \(tmuxConfPath).$$ \(tmuxConfPath); }; }; exec tmux -f \(tmuxConfPath) -L atelier"
+        script += " > \(tmuxConfPath).$$ && mv \(tmuxConfPath).$$ \(tmuxConfPath); }; };"
+        // A server already running from an older conf keeps its options;
+        // re-source so a conf bump reaches live hosts (no-op with no server).
+        script += " tmux -L atelier source-file \(tmuxConfPath) >/dev/null 2>&1;"
+        script += " exec tmux -f \(tmuxConfPath) -L atelier"
         script += " new-session -A -s \(tmuxSession) -c \(quotedRemoteDir(remoteDir))"
         if let command {
             script += " \(quoted(command))"

@@ -14,6 +14,7 @@ class FreezableTerminalView: LocalProcessTerminalView {
         super.init(frame: frame)
         showsScroller = false
         wheelPrecisionMultiplier = Self.wheelFeel
+        copyOnSelect = true // Ghostty parity: highlight is copy (owner call 2026-09-10)
     }
 
     /// Trackpad wheel feel over the Ghostty-equivalent 1.0 (owner: "still
@@ -24,6 +25,7 @@ class FreezableTerminalView: LocalProcessTerminalView {
         super.init(coder: coder)
         showsScroller = false
         wheelPrecisionMultiplier = Self.wheelFeel
+        copyOnSelect = true // Ghostty parity: highlight is copy (owner call 2026-09-10)
     }
 
     /// SwiftTerm wears the text I-beam over the whole grid; these panes are
