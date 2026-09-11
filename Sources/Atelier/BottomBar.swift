@@ -1005,7 +1005,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     private var isDragging = false
 
     private let titleLabel = NSTextField(labelWithString: "")
-    private let closeButton = HoverFadeButton()
+    private let closeButton = HoverPadButton()
     private var badgeView: NSView?
     private var attention: Session.Attention = .none
     private var attentionSince: Date?
@@ -1031,15 +1031,13 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         titleLabel.lineBreakMode = .byTruncatingTail
         addSubview(titleLabel)
 
-        closeButton.bezelStyle = .regularSquare
-        closeButton.isBordered = false
-        closeButton.imagePosition = .imageOnly
         closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close session")
+        closeButton.hoverFill = NSColor.black.withAlphaComponent(0.15) // over the active tab's green
         closeButton.symbolConfiguration = .init(pointSize: 8, weight: .medium)
         closeButton.target = self
         closeButton.action = #selector(closeTapped)
         closeButton.isHidden = true
-        closeButton.alphaValue = HoverFadeButton.restingAlpha
+        closeButton.alphaValue = HoverPadButton.restingAlpha
         addSubview(closeButton)
     }
 
@@ -1062,8 +1060,9 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     /// The `×` sits close: 3pt off the title, 4pt off the edge (owner call
     /// 2026-09-10 — the old 8/6 read as dead space).
     static let closeMargin: CGFloat = 4
-    static let closeGap: CGFloat = 0   // the 12pt box already insets its 8pt glyph
-    static let closeSlot: CGFloat = closeGap + 12 + closeMargin
+    static let closeGap: CGFloat = 0   // the 16pt pad already insets its 8pt glyph
+    static let closeWidth: CGFloat = 16
+    static let closeSlot: CGFloat = closeGap + closeWidth + closeMargin
 
     /// The tab's label: the title, then the `@host` mark for remote sessions —
     /// dropped when the title *is* the host ("jarvis @jarvis" says it once).
@@ -1108,7 +1107,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         // The close `×` sits at the trailing edge (owner call 2026-09-08); its
         // slot is reserved by activeness, not visibility, so the hover reveal
         // never shifts text.
-        let closeWidth: CGFloat = 12
+        let closeWidth = Self.closeWidth
         let leading: CGFloat = 8
         let trailingSlot: CGFloat = isActive ? Self.closeSlot : 8
         let hasBadge = badgeView != nil
@@ -1333,7 +1332,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         }
     }
 
-    // The close `×` reveals on tab hover (its own HoverFadeButton tracking
+    // The close `×` reveals on tab hover (its own HoverPadButton tracking
     // then takes it to full strength under the pointer).
     private var tabTracking: NSTrackingArea?
 
@@ -1351,7 +1350,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        if !closeButton.isHidden { closeButton.alphaValue = HoverFadeButton.restingAlpha }
+        if !closeButton.isHidden { closeButton.alphaValue = HoverPadButton.restingAlpha }
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -1682,27 +1681,6 @@ private final class FolderView: NSView {
     }
 
     @objc private func removeTapped() { onRemove?() }
-}
-
-private final class HoverFadeButton: NSButton {
-    static let restingAlpha: CGFloat = 0.55
-    private var tracking: NSTrackingArea?
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let tracking { removeTrackingArea(tracking) }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-        tracking = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { alphaValue = 1.0 }
-    override func mouseExited(with event: NSEvent) { alphaValue = Self.restingAlpha }
 }
 
 /// A 6 pt attention dot drawn as a centered sublayer, so scale animations

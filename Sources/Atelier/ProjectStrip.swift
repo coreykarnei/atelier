@@ -31,16 +31,14 @@ final class ProjectStripView: NSView {
     static let plusWidth: CGFloat = 28
 
     private var tabs: [ProjectTabView] = []
-    private let newButton = StripHoverButton()
+    private let newButton = HoverPadButton()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        newButton.bezelStyle = .regularSquare
-        newButton.isBordered = false
-        newButton.imagePosition = .imageOnly
         newButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "New project tab")
         newButton.symbolConfiguration = .init(pointSize: 10, weight: .medium)
         newButton.contentTintColor = Theme.chromeMutedText
+        newButton.alphaValue = HoverPadButton.restingAlpha
         newButton.toolTip = "New Project Tab  ⌘T"
         newButton.target = self
         newButton.action = #selector(newTapped)
@@ -108,14 +106,14 @@ private final class ProjectTabView: NSView {
     var onClose: (() -> Void)?
 
     private let titleLabel = NSTextField(labelWithString: "")
-    private let closeButton = StripHoverButton()
+    private let closeButton = HoverPadButton()
     private var markViews: [NSView] = []
     private var isActive = false
     private var hovered = false
     private var tracking: NSTrackingArea?
 
-    private static let closeWidth: CGFloat = 12
-    private static let closeSlot: CGFloat = 6 + 12 + 6
+    private static let closeWidth: CGFloat = 16
+    private static let closeSlot: CGFloat = 6 + 16 + 6
     private static let markGap: CGFloat = 6
     private static let dot: CGFloat = 5
     private static let dotGap: CGFloat = 3
@@ -132,9 +130,6 @@ private final class ProjectTabView: NSView {
         titleLabel.font = Theme.Typography.mono(Theme.Typography.body, weight: .medium)
         addSubview(titleLabel)
 
-        closeButton.bezelStyle = .regularSquare
-        closeButton.isBordered = false
-        closeButton.imagePosition = .imageOnly
         closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close project")
         closeButton.symbolConfiguration = .init(pointSize: 8, weight: .medium)
         closeButton.contentTintColor = Theme.chromeText
@@ -180,7 +175,7 @@ private final class ProjectTabView: NSView {
         titleLabel.textColor = isActive ? Theme.chromeSelectedText : Theme.chromeText
         // Invisible until the pointer is over the tab (the session tabs'
         // rule); the slot stays reserved so the title never shifts.
-        closeButton.alphaValue = hovered ? StripHoverButton.restingAlpha : 0
+        closeButton.alphaValue = hovered ? HoverPadButton.restingAlpha : 0
     }
 
     private static func makeMark(_ attention: Session.Attention) -> NSView {
@@ -225,7 +220,7 @@ private final class ProjectTabView: NSView {
         if !closeButton.isHidden {
             // Leading, where macOS puts a tab's close (owner call 2026-09-10).
             closeButton.frame = CGRect(
-                x: 8,
+                x: 6,
                 y: (bounds.height - Self.closeWidth) / 2,
                 width: Self.closeWidth,
                 height: Self.closeWidth
@@ -263,36 +258,4 @@ private final class ProjectTabView: NSView {
     }
 
     @objc private func closeTapped() { onClose?() }
-}
-
-/// A borderless symbol button that rests dim and brightens under the pointer.
-private final class StripHoverButton: NSButton {
-    static let restingAlpha: CGFloat = 0.55
-    private var tracking: NSTrackingArea?
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        installTracking()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    /// Installed at init: AppKit only asks a view to update tracking areas
-    /// once it has one. `.inVisibleRect` keeps the rect on the view's bounds
-    /// as tabs re-share the row.
-    private func installTracking() {
-        if let tracking { removeTrackingArea(tracking) }
-        let area = NSTrackingArea(
-            rect: .zero,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-        tracking = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { alphaValue = 1.0 }
-    override func mouseExited(with event: NSEvent) { alphaValue = Self.restingAlpha }
 }
