@@ -40,6 +40,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notificationServer.start()
 
         restoreOrOpenFresh()
+        if ProcessInfo.processInfo.environment["ATELIER_DEBUG_ATTENTION"] != nil {
+            keyController?.debugSeedAttention()
+        }
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -220,6 +223,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let state = projects.map(\.debugWashState).joined(separator: "\n")
             try? state.write(to: dir.appendingPathComponent("state.txt"), atomically: true, encoding: .utf8)
             NSLog("Atelier: debug snapshot written to \(debug.path)")
+        case .seedAttention:
+            keyController?.debugSeedAttention()
         case .lspProbe:
             let path = debug.path
             let controller = keyController ?? projects.first

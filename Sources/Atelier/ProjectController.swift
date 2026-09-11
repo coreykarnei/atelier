@@ -701,6 +701,26 @@ final class ProjectController: NSObject, BottomBarDelegate {
         updateBottomBar()
     }
 
+    /// Dev-only (`ATELIER_DEBUG_ATTENTION=1` at launch, or the `seedAttention`
+    /// debug message): one session per attention state, so the marks can be
+    /// judged side by side. Adds Landings until there are four; the active
+    /// tab takes *working* so nothing here flips on focus. Real hook events
+    /// overwrite the seed as they arrive.
+    func debugSeedAttention() {
+        let states: [Session.Attention] = [.working, .waiting, .needsInput, .doneUnseen]
+        let active = sessions.firstIndex { $0 === activeSession } ?? 0
+        if sessions.count < states.count {
+            while sessions.count < states.count { addSession() }
+            showSession(at: active) // the seed must not move you off your tab
+        }
+        var pool = states
+        for (offset, session) in sessions.enumerated() where offset != active {
+            session.attention = pool.count > 1 ? pool.remove(at: 1) : .none
+        }
+        sessions[active].attention = .working
+        updateBottomBar()
+    }
+
     /// Sessions whose state means "your move is the bottleneck" — unseen
     /// completions and explicit blocks. Feeds the Dock badge (§4); plain
     /// peach waiting and working deliberately don't count.
