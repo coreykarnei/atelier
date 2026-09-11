@@ -13,7 +13,8 @@ struct ProjectTabInfo {
 /// The project tab row under the titlebar (2026-09-10): Atelier's own tabs,
 /// replacing native window tabbing — same shape (a full-width row, tabs
 /// dividing it equally, shown once there are two), our material. The
-/// active tab is a rounded chip on the mantle wash; every tab carries its
+/// active tab is a rounded chip in the panes' base, flush with the content;
+/// the others sit darker in crust. Every tab carries its
 /// sessions' attention marks after the title (blue working, peach waiting,
 /// peach `!` blocked, green unseen completion), so a project you're not
 /// looking at still says where its agents stand. `+` opens a new project
@@ -168,16 +169,13 @@ private final class ProjectTabView: NSView {
     }
 
     private func restyle() {
-        let fill: NSColor
-        if isActive {
-            fill = Theme.Elevation.surface0
-        } else if hovered {
-            fill = NSColor.white.withAlphaComponent(0.05)
-        } else {
-            fill = .clear
-        }
+        // Ghostty's read (owner call 2026-09-10): the selected tab is flush
+        // with the app's surface — the panes' base — while the others sit
+        // darker (crust) in the mantle row. Three rungs of the z-ramp, the
+        // selected one continuous with the content below it.
+        let fill: NSColor = isActive ? Theme.Elevation.base : Theme.Elevation.crust
         layer?.backgroundColor = fill.cgColor
-        titleLabel.textColor = (isActive || hovered) ? Theme.chromeText : Theme.chromeMutedText
+        titleLabel.textColor = isActive ? Theme.chromeSelectedText : Theme.chromeText
         // Invisible until the pointer is over the tab (the session tabs'
         // rule); the slot stays reserved so the title never shifts.
         closeButton.alphaValue = hovered ? StripHoverButton.restingAlpha : 0

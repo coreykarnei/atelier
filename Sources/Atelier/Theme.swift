@@ -260,6 +260,9 @@ enum Theme {
     }
 
     static let chromeText = nsColor(0xA6ADC8)      // subtext0 — the §1.2 cap
+    /// The one thing that is current (the selected project tab): the only
+    /// chrome allowed above the §1.2 cap (owner call 2026-09-10).
+    static let chromeSelectedText = nsColor(0xCDD6F4) // text
     static let chromeMutedText = nsColor(0x6C7086) // overlay0
     static let accentBlue = nsColor(0x89B4FA)      // blue
     static let accentGreen = nsColor(0xA6E3A1)     // green
