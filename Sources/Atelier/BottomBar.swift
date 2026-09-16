@@ -920,7 +920,7 @@ final class BottomBar: NSView {
     }
 
     /// The tab badges, translated to menu-item images: the same 6 pt dot, the
-    /// same inanimate peach `!` disc. `none` gets a clear placeholder so titles
+    /// same colours. `none` gets a clear placeholder so titles
     /// align whether or not a session has state.
     private static func menuBadgeImage(for attention: Session.Attention) -> NSImage {
         let size = NSSize(width: 10, height: 10)
@@ -928,9 +928,7 @@ final class BottomBar: NSView {
             switch attention {
             case .none:
                 break
-            case .needsInput:
-                BlockedMarkView.draw(in: rect)
-            case .working, .waiting, .doneUnseen:
+            case .working, .waiting, .doneUnseen, .needsInput:
                 Theme.attentionColor(attention).setFill()
                 NSBezierPath(ovalIn: NSRect(x: 2, y: 2, width: 6, height: 6)).fill()
             }
@@ -978,8 +976,9 @@ final class BottomBar: NSView {
 /// empty reverts to the live auto title. Persistent across bar updates so its
 /// state changes can animate:
 /// attention cross-fades (~250 ms), a green arrival does one soft scale-in,
-/// the working blue carries the ~4 s subliminal pulse, and the peach `!`
-/// **never** animates — urgency reads as stillness (§1.3).
+/// the working blue carries the ~4 s subliminal pulse, an unseen completion
+/// pulses clearly until seen, and the peach block **never** animates —
+/// urgency reads as stillness (§1.3).
 private final class SessionTabView: NSView, NSTextFieldDelegate {
     let sessionId: UUID
     private(set) var index: Int = -1
@@ -1115,10 +1114,8 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         }
         if let badge = badgeView {
             let size = badge.frame.size == .zero ? badge.fittingSize : badge.frame.size
-            // Centered on the 6 pt dot's spot, so the larger blocked disc
-            // grows both ways instead of shoving the title.
             badge.frame = CGRect(
-                x: leading + (6 - size.width) / 2,
+                x: leading,
                 y: (bounds.height - size.height) / 2,
                 width: size.width,
                 height: size.height
@@ -1212,8 +1209,8 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     /// No escalation (§1.3, rule standing): states swap by ~250 ms cross-fade;
     /// the other motions live in `AttentionDotView` (working's subliminal
     /// pulse, unseen-done's clear one) plus the green arrival's single
-    /// scale-in here. Nothing raises its voice with age; the peach `!` is
-    /// deliberately inanimate.
+    /// scale-in here. Nothing raises its voice with age; peach and plain green
+    /// are deliberately still.
     private func setAttention(_ newAttention: Session.Attention, animated: Bool) {
         guard newAttention != attention || !applied else { return }
         attention = newAttention
@@ -1261,9 +1258,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     }
 
     private static func makeBadge(for attention: Session.Attention) -> NSView {
-        attention == .needsInput
-            ? BlockedMarkView(diameter: 8)
-            : AttentionDotView(attention: attention, diameter: 6)
+        AttentionDotView(attention: attention, diameter: 6)
     }
 
     override func mouseDown(with event: NSEvent) {

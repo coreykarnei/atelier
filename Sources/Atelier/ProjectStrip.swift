@@ -16,7 +16,7 @@ struct ProjectTabInfo {
 /// active tab is a rounded chip in the panes' base, flush with the content;
 /// the others sit darker in crust. Every tab carries its
 /// sessions' attention marks after the title (blue working, green done,
-/// pulsing green unseen completion, peach `!` blocked), so a project you're not
+/// pulsing green unseen completion, peach blocked), so a project you're not
 /// looking at still says where its agents stand. `+` opens a new project
 /// tab; the active tab's leading `×` closes it. Gaps pass clicks through to the
 /// wash (drag to move, double-click to zoom).
@@ -117,8 +117,6 @@ private final class ProjectTabView: NSView {
     private static let closeSlot: CGFloat = 6 + 16 + 6
     private static let markGap: CGFloat = 6
     private static let dot: CGFloat = 5
-    /// The blocked disc: a size up from a dot, so the `!` inside resolves.
-    private static let blockedDot: CGFloat = 7
     private static let dotGap: CGFloat = 3
 
     override var mouseDownCanMoveWindow: Bool { false }
@@ -150,8 +148,7 @@ private final class ProjectTabView: NSView {
     private var marksWidth: CGFloat {
         guard !markViews.isEmpty else { return 0 }
         let n = CGFloat(markViews.count)
-        let blocked = CGFloat(markViews.filter { $0 is BlockedMarkView }.count)
-        return Self.markGap + (n - blocked) * Self.dot + blocked * Self.blockedDot + (n - 1) * Self.dotGap
+        return Self.markGap + n * Self.dot + (n - 1) * Self.dotGap
     }
 
     func apply(_ info: ProjectTabInfo) {
@@ -188,9 +185,7 @@ private final class ProjectTabView: NSView {
     }
 
     private static func makeMark(_ attention: Session.Attention) -> NSView {
-        attention == .needsInput
-            ? BlockedMarkView(diameter: blockedDot)
-            : AttentionDotView(attention: attention, diameter: dot)
+        AttentionDotView(attention: attention, diameter: dot)
     }
 
     override func layout() {
@@ -205,9 +200,8 @@ private final class ProjectTabView: NSView {
         titleLabel.frame = CGRect(x: x, y: round((bounds.height - textHeight) / 2), width: textWidth, height: textHeight)
         x += textWidth + Self.markGap
         for view in markViews {
-            let w = view is BlockedMarkView ? Self.blockedDot : Self.dot
-            view.frame = CGRect(x: x, y: round((bounds.height - w) / 2), width: w, height: w)
-            x += w + Self.dotGap
+            view.frame = CGRect(x: x, y: round((bounds.height - Self.dot) / 2), width: Self.dot, height: Self.dot)
+            x += Self.dot + Self.dotGap
         }
         if !closeButton.isHidden {
             // Leading, where macOS puts a tab's close (owner call 2026-09-10).

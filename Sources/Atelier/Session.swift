@@ -36,9 +36,9 @@ final class Session: NSObject, NSSplitViewDelegate {
     enum Attention: String {
         case none
         case working      // agent mid-turn (blue dot)
-        case waiting      // turn done, your move (peach dot)
-        case needsInput   // agent explicitly blocked — permission/question (peach !)
-        case doneUnseen   // finished while you were elsewhere (green dot → waiting on focus)
+        case waiting      // turn done, your move (green dot)
+        case needsInput   // agent explicitly blocked — permission/question (peach dot)
+        case doneUnseen   // finished while you were elsewhere (pulsing green → waiting on focus)
     }
 
     let id = UUID()
