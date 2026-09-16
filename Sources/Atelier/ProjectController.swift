@@ -234,6 +234,10 @@ final class ProjectController: NSObject, BottomBarDelegate {
     }
 
     private func adopt(_ session: Session, at index: Int? = nil) {
+        session.editorPane.onOpenRequest = { [weak self, weak session] url, commit in
+            guard let self, let session else { return }
+            self.openInEditor(url: url, session: session, preview: !commit)
+        }
         session.onRemoteRequested = { [weak self, weak session] host, dir in
             guard let self, let session else { return }
             self.replaceLanding(session, withRemote: host, dir: dir)
@@ -493,6 +497,13 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// session's cwd; Split mode flips back to the Triptych so the buffer is
     /// actually on screen. (`⌘P`'s summon picker replaces this as the fast
     /// path in M2.2; the panel stays as the native fallback.)
+    /// ⌘B — the editor's file tree, shown or hidden for every session.
+    func toggleExplorer() {
+        guard let session = activeSession, session.state == .ide, !session.isRemote else { return }
+        session.editorPane.toggleExplorer()
+        if session.layoutMode == .split { toggleLayout() }
+    }
+
     func openFileInEditor() {
         guard let session = activeSession, session.state == .ide, let window else { return }
         let panel = NSOpenPanel()
@@ -507,7 +518,9 @@ final class ProjectController: NSObject, BottomBarDelegate {
 
     /// The one buffer is precious (M2.1): opening over unsaved edits gets the
     /// same refusal closing does. `cursor` lands a search hit (M2.3).
-    private func openInEditor(url: URL, session: Session, cursor: (line: Int, column: Int)? = nil) {
+    private func openInEditor(
+        url: URL, session: Session, cursor: (line: Int, column: Int)? = nil, preview: Bool = false
+    ) {
         guardDirtyBuffer(
             in: session,
             saveButton: "Save and Open",
@@ -516,13 +529,13 @@ final class ProjectController: NSObject, BottomBarDelegate {
             guard let self else { return }
             do {
                 session.editorPane.lspRoot = session.cwd
-                try session.editorPane.open(path: url.path)
+                try session.editorPane.open(path: url.path, preview: preview)
                 if let cursor {
                     session.editorPane.reveal(line: cursor.line, column: cursor.column)
                 }
                 if session === self.activeSession {
                     if session.layoutMode == .split { self.toggleLayout() }
-                    self.focus(session.editorPane.focusView)
+                    if !preview { self.focus(session.editorPane.focusView) }
                 }
             } catch {
                 self.presentError(title: "Couldn't open \(url.lastPathComponent)", error: error)
@@ -1312,6 +1325,11 @@ final class ProjectController: NSObject, BottomBarDelegate {
             commands.append(PaletteCommand(id: "editor.open", title: "Editor: Open File…", key: "⌘O") { [weak self] in
                 self?.openFileInEditor()
             })
+            if !(activeSession?.isRemote ?? true) {
+                commands.append(PaletteCommand(id: "editor.explorer", title: "Editor: Toggle Explorer", key: "⌘B") { [weak self] in
+                    self?.toggleExplorer()
+                })
+            }
             if editorHasFile {
                 commands.append(PaletteCommand(id: "editor.save", title: "Editor: Save", key: "⌘S") { [weak self] in
                     self?.saveEditor()

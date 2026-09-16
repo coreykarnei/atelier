@@ -14,8 +14,31 @@ import CodeEditLanguages
 /// summon picker is M2.2); `⌘S` saves; edits mark the buffer dirty until
 /// saved. The open file rides session persistence.
 final class EditorPane: NSView, WorkspacePane {
-    var focusView: NSView { controller?.textView ?? self }
+    /// The committed buffer when there is one, else the tree — so ⌃⌘H lands
+    /// somewhere useful before the first file opens. A preview is the tree's
+    /// buffer; focus stays with the tree.
+    var focusView: NSView {
+        if let controller, !isPreview { return controller.textView }
+        return explorerExpanded ? explorer.focusView : (controller?.textView ?? self)
+    }
     override var acceptsFirstResponder: Bool { controller == nil }
+
+    /// The tree down the left edge (M2.6). Opens route through the host so
+    /// the dirty-buffer guard applies; `commit` distinguishes double-click/↩
+    /// (open for real) from a single click (preview).
+    let explorer = FileExplorerView(frame: .zero)
+    var onOpenRequest: ((URL, _ commit: Bool) -> Void)?
+    /// Everything right of the tree: the empty-state line, then the buffer.
+    private let contentHost = NSView()
+    private var contentLeading: NSLayoutConstraint!
+    private var explorerWidth: NSLayoutConstraint!
+    /// Wide (browsing) or folded to the rail (a file is open for real).
+    private var explorerExpanded = true
+    /// The buffer is a click-preview: soft-wrapped, read-only, not the
+    /// session's file — persistence and the language server ignore it.
+    private(set) var isPreview = false
+    /// What the session persists: the committed file only.
+    var committedFilePath: String? { isPreview ? nil : filePath }
 
     /// Absolute path of the open file, nil when the well is empty.
     private(set) var filePath: String?
@@ -34,7 +57,7 @@ final class EditorPane: NSView, WorkspacePane {
     /// didSave and diagnostics underlines, other languages stay plain.
     var lspRoot: String?
     private var lspClient: LSPClient? {
-        guard let lspRoot, isSwiftBuffer else { return nil }
+        guard let lspRoot, isSwiftBuffer, !isPreview else { return nil }
         return LSPRegistry.client(for: lspRoot)
     }
     private var isSwiftBuffer = false
@@ -44,7 +67,10 @@ final class EditorPane: NSView, WorkspacePane {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = Theme.Elevation.crust.cgColor
+        buildChrome()
         buildEmptyState()
+        explorer.onOpen = { [weak self] url, commit in self?.onOpenRequest?(url, commit) }
+        explorer.onToggle = { [weak self] in self?.toggleExplorer() }
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
             selector: #selector(accessibilityDisplayChanged),
@@ -76,7 +102,7 @@ final class EditorPane: NSView, WorkspacePane {
 
     /// ⌘+/⌘−/⌘0 — the buffer rides the same content scale as the terminals.
     @objc private func typeScaleChanged() {
-        controller?.configuration = Self.configuration()
+        controller?.configuration = Self.configuration(preview: isPreview)
     }
 
     override func updateLayer() {
@@ -85,25 +111,80 @@ final class EditorPane: NSView, WorkspacePane {
 
     @objc private func accessibilityDisplayChanged() {
         layer?.backgroundColor = Theme.Elevation.crust.cgColor
+        layoutExplorer()
+    }
+
+    /// Tree on the left, content host filling the rest. The tree is wide
+    /// while browsing, a rail once a file is open for real, absent before a
+    /// root exists.
+    private func buildChrome() {
+        explorer.translatesAutoresizingMaskIntoConstraints = false
+        contentHost.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(explorer)
+        addSubview(contentHost)
+        contentLeading = contentHost.leadingAnchor.constraint(equalTo: leadingAnchor)
+        explorerWidth = explorer.widthAnchor.constraint(equalToConstant: FileExplorerView.width)
+        NSLayoutConstraint.activate([
+            explorer.topAnchor.constraint(equalTo: topAnchor),
+            explorer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            explorer.bottomAnchor.constraint(equalTo: bottomAnchor),
+            explorerWidth,
+            contentHost.topAnchor.constraint(equalTo: topAnchor),
+            contentHost.trailingAnchor.constraint(equalTo: trailingAnchor),
+            contentHost.bottomAnchor.constraint(equalTo: bottomAnchor),
+            contentLeading,
+        ])
+        layoutExplorer()
+    }
+
+    private func layoutExplorer() {
+        let hasRoot = explorer.root != nil
+        explorer.isHidden = !hasRoot
+        explorer.setCollapsed(!explorerExpanded)
+        let width = !hasRoot ? 0 : (explorerExpanded ? FileExplorerView.width : FileExplorerView.railWidth)
+        explorerWidth.constant = width
+        contentLeading.constant = width
+    }
+
+    /// The session's directory: what the tree shows and what the language
+    /// server is scoped to. Set on promote/restore, before any open.
+    func setRoot(_ root: String) {
+        lspRoot = root
+        explorer.setRoot(root)
+        layoutExplorer()
+    }
+
+    /// ⌘B / the chevron — unfold the tree or fold it to the rail.
+    func toggleExplorer() {
+        setExplorerExpanded(!explorerExpanded)
+    }
+
+    private func setExplorerExpanded(_ expanded: Bool) {
+        guard expanded != explorerExpanded else { return }
+        explorerExpanded = expanded
+        layoutExplorer()
+        if !expanded, window?.firstResponder === explorer.focusView {
+            window?.makeFirstResponder(focusView)
+        }
     }
 
     private func buildEmptyState() {
         // Two-voice (§1.4): the chord is mono, Atelier's sentence is ui.
         let line = NSMutableAttributedString()
-        line.append(NSAttributedString(string: "⌘O", attributes: [
+        line.append(NSAttributedString(string: "⌘P", attributes: [
             .font: Theme.Typography.mono(Theme.Typography.body),
             .foregroundColor: Theme.chromeText,
         ]))
-        line.append(NSAttributedString(string: " open a file", attributes: [
+        line.append(NSAttributedString(string: " go to file", attributes: [
             .font: Theme.Typography.ui(Theme.Typography.body, weight: .medium),
             .foregroundColor: Theme.chromeMutedText,
         ]))
         emptyLabel.attributedStringValue = line
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(emptyLabel)
+        contentHost.addSubview(emptyLabel)
         NSLayoutConstraint.activate([
-            emptyLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
-            emptyLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            emptyLabel.centerXAnchor.constraint(equalTo: contentHost.centerXAnchor),
+            emptyLabel.centerYAnchor.constraint(equalTo: contentHost.centerYAnchor),
         ])
     }
 
@@ -112,7 +193,24 @@ final class EditorPane: NSView, WorkspacePane {
     /// Open `path` into the buffer, detecting its language. The first open
     /// builds the editor; later opens reuse it. Any unsaved edits in the
     /// previous file are the caller's problem to guard.
-    func open(path: String) throws {
+    ///
+    /// `preview` (a tree click): soft-wrapped and read-only, tree stays wide,
+    /// nothing told to the server or to persistence. Committing the same path
+    /// afterwards just flips the configuration — the text doesn't reload.
+    func open(path: String, preview: Bool = false) throws {
+        // Clicking the file that's already here changes nothing — a committed
+        // buffer must not fall back to a read-only preview of itself.
+        if preview, filePath == path { return }
+        if !preview, isPreview, filePath == path, let controller {
+            // Preview → real: same text, editable, unwrapped, the server
+            // learns of it, the tree folds away.
+            isPreview = false
+            controller.configuration = Self.configuration(preview: false)
+            announceOpen(path: path, text: controller.text)
+            setExplorerExpanded(false)
+            return
+        }
+
         let url = URL(fileURLWithPath: path)
         let text = try String(contentsOf: url, encoding: .utf8)
         let language = CodeLanguage.detectLanguageFrom(url: url)
@@ -123,42 +221,52 @@ final class EditorPane: NSView, WorkspacePane {
             lspClient?.didClose(path: previous)
             clearDiagnostics()
         }
+        isPreview = preview
 
         if let controller {
+            controller.configuration = Self.configuration(preview: preview)
             controller.language = language
             controller.text = text
         } else {
             let controller = TextViewController(
                 string: text,
                 language: language,
-                configuration: Self.configuration(),
+                configuration: Self.configuration(preview: preview),
                 cursorPositions: [CursorPosition(line: 1, column: 1)],
                 coordinators: [changeCoordinator]
             )
             changeCoordinator.onTextChange = { [weak self] in self?.bufferChanged() }
             controller.view.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(controller.view)
+            contentHost.addSubview(controller.view)
             NSLayoutConstraint.activate([
-                controller.view.topAnchor.constraint(equalTo: topAnchor),
-                controller.view.leadingAnchor.constraint(equalTo: leadingAnchor),
-                controller.view.trailingAnchor.constraint(equalTo: trailingAnchor),
-                controller.view.bottomAnchor.constraint(equalTo: bottomAnchor),
+                controller.view.topAnchor.constraint(equalTo: contentHost.topAnchor),
+                controller.view.leadingAnchor.constraint(equalTo: contentHost.leadingAnchor),
+                controller.view.trailingAnchor.constraint(equalTo: contentHost.trailingAnchor),
+                controller.view.bottomAnchor.constraint(equalTo: contentHost.bottomAnchor),
             ])
             self.controller = controller
         }
         filePath = path
         isDirty = false // the coordinator saw the programmatic setText; undo it
         emptyLabel.isHidden = true
-
+        explorer.reveal(path: path)
         isSwiftBuffer = language == .swift
-        if let client = lspClient {
-            client.onDiagnostics = { [weak self] diagnosticsPath, diagnostics in
-                guard let self, diagnosticsPath == self.filePath else { return }
-                self.showDiagnostics(diagnostics)
-            }
-            client.didOpen(path: path, text: text)
-            client.requestDiagnostics(path: path)
+
+        if !preview {
+            announceOpen(path: path, text: text)
+            setExplorerExpanded(false)
         }
+    }
+
+    /// Tell the language server a real buffer exists (Swift only).
+    private func announceOpen(path: String, text: String) {
+        guard let client = lspClient else { return }
+        client.onDiagnostics = { [weak self] diagnosticsPath, diagnostics in
+            guard let self, diagnosticsPath == self.filePath else { return }
+            self.showDiagnostics(diagnostics)
+        }
+        client.didOpen(path: path, text: text)
+        client.requestDiagnostics(path: path)
     }
 
     /// Every edit: dirty for the host, debounced didChange for the server
@@ -180,9 +288,9 @@ final class EditorPane: NSView, WorkspacePane {
         controller?.setCursorPositions([CursorPosition(line: line, column: column)], scrollToVisible: true)
     }
 
-    /// Write the buffer back to its file.
+    /// Write the buffer back to its file. A preview has nothing to write.
     func save() throws {
-        guard let controller, let filePath else { return }
+        guard let controller, let filePath, !isPreview else { return }
         try controller.text.write(toFile: filePath, atomically: true, encoding: .utf8)
         isDirty = false
         lspClient?.didSave(path: filePath)
@@ -252,7 +360,8 @@ final class EditorPane: NSView, WorkspacePane {
     /// fieldAlpha so the behind-window blur reads through, JetBrains Mono at
     /// terminal size. Minimap off — not this app's furniture. Bracket
     /// emphasis nil: the default flash is a motion the inventory doesn't own.
-    private static func configuration() -> SourceEditorConfiguration {
+    /// A preview wraps to the pane and refuses edits — reading, not writing.
+    private static func configuration(preview: Bool) -> SourceEditorConfiguration {
         SourceEditorConfiguration(
             appearance: .init(
                 theme: EditorTheme(
@@ -274,11 +383,11 @@ final class EditorPane: NSView, WorkspacePane {
                     comments: .init(color: Theme.Editor.comment, italic: true)
                 ),
                 font: Theme.Typography.mono(Theme.TypeScale.current),
-                wrapLines: false,
+                wrapLines: preview,
                 tabWidth: 4,
                 bracketPairEmphasis: nil
             ),
-            behavior: .init(indentOption: .spaces(count: 4)),
+            behavior: .init(isEditable: !preview, indentOption: .spaces(count: 4)),
             layout: .init(),
             peripherals: .init(showGutter: true, showMinimap: false)
         )

@@ -140,6 +140,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         self.location = .local
         super.init()
         container.translatesAutoresizingMaskIntoConstraints = false
+        editorPane.setRoot(ideRoot)
         rebuildLayout()
     }
 
@@ -200,10 +201,10 @@ final class Session: NSObject, NSSplitViewDelegate {
         }
         rebuildLayout()
 
+        if state == .ide, !isRemote { editorPane.setRoot(cwd) }
         // The open file rides persistence (M2.1): reopen it if it's still there.
         if state == .ide, let file = restored.openFile,
            FileManager.default.fileExists(atPath: file) {
-            editorPane.lspRoot = cwd
             try? editorPane.open(path: file)
         }
     }
@@ -218,7 +219,7 @@ final class Session: NSObject, NSSplitViewDelegate {
             customTitle: customTitle,
             claudeSessionId: claudeSessionId,
             dividers: dividers.mapValues { Double($0) },
-            openFile: editorPane.filePath,
+            openFile: editorPane.committedFilePath,
             remoteHost: location.host,
             attention: attention.rawValue
         )
@@ -263,6 +264,7 @@ final class Session: NSObject, NSSplitViewDelegate {
 
         // Re-root the live shell — same move the `ide` script makes (send-keys cd).
         shellPane.send(text: " cd '\(root)' && clear\r")
+        editorPane.setRoot(root)
         startAgent()
 
         rebuildLayout()
