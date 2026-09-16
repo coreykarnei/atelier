@@ -106,7 +106,9 @@ final class FileExplorerView: NSView {
 
     private(set) var root: String?
     private var rootNode: FileNode?
-    private let outline = NSOutlineView()
+    private let outline = ExplorerOutlineView()
+    /// The open file was renamed or moved from the tree: the buffer follows.
+    var onRenamed: ((_ from: String, _ to: String) -> Void)?
     private let scroll = NSScrollView()
     private var ignored: Set<String> = []
     private var stream: FSEventStreamRef?
@@ -150,6 +152,7 @@ final class FileExplorerView: NSView {
         searchHost.isHidden = collapsed
         rail.isHidden = !collapsed
         railChevron.isHidden = !collapsed
+        updateSticky()
     }
 
     private static func chevronImage(_ name: String) -> NSImage? { symbol(name, size: 10) }
@@ -193,6 +196,7 @@ final class FileExplorerView: NSView {
         outline.target = self
         outline.action = #selector(rowClicked)
         outline.doubleAction = #selector(rowDoubleClicked)
+        outline.menuProvider = { [weak self] row in self?.contextMenu(forRow: row) }
 
         scroll.documentView = outline
         scroll.hasVerticalScroller = true
@@ -463,6 +467,7 @@ final class FileExplorerView: NSView {
         modeControl.setSelected(textOn, forSegment: 1)
         isSearchOpen = true
         scroll.isHidden = true
+        sticky.isHidden = true
         searchHostHeight.constant = max(0, bounds.height - header.frame.height)
         layoutSubtreeIfNeeded()
         runSearch(search.query)
@@ -480,6 +485,7 @@ final class FileExplorerView: NSView {
         searchHostHeight.constant = 0
         scroll.isHidden = isCollapsed
         layoutSubtreeIfNeeded()
+        updateSticky()
         if focusTree { window?.makeFirstResponder(outline) }
     }
 
@@ -562,7 +568,7 @@ final class FileExplorerView: NSView {
     }
 
     private func updateSticky() {
-        guard !scroll.isHidden, rootNode != nil else { sticky.isHidden = true; return }
+        guard !scroll.isHidden, !isCollapsed, !isSearchOpen, rootNode != nil else { sticky.isHidden = true; return }
         measureChevronBase()
         let rowHeight = outline.rowHeight
         let ancestors = stickyAncestors(under:)
@@ -576,6 +582,163 @@ final class FileExplorerView: NSView {
         sticky.show(chain.map { node in
             (node, outline.level(forItem: node), isIgnored(node.path))
         }, rowHeight: rowHeight, step: outline.indentationPerLevel, chevronBaseX: chevronBaseX)
+    }
+
+    // MARK: Context menu (M2.6: new file / folder, rename, trash, reveal, copy path)
+
+    private func contextMenu(forRow row: Int) -> NSMenu? {
+        guard let root else { return nil }
+        let node = row >= 0 ? outline.item(atRow: row) as? FileNode : rootNode
+        guard let node else { return nil }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        func item(_ title: String, _ action: Selector, _ target: FileNode) -> NSMenuItem {
+            let entry = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            entry.target = self
+            entry.representedObject = target
+            return entry
+        }
+        // Creation lands inside a folder, beside a file.
+        let container = node.isDirectory ? node : (outline.parent(forItem: node) as? FileNode) ?? rootNode!
+        menu.addItem(item("New File", #selector(menuNewFile(_:)), container))
+        menu.addItem(item("New Folder", #selector(menuNewFolder(_:)), container))
+        if node.path != root {
+            menu.addItem(.separator())
+            menu.addItem(item("Rename", #selector(menuRename(_:)), node))
+            menu.addItem(item("Move to Trash", #selector(menuTrash(_:)), node))
+        }
+        menu.addItem(.separator())
+        menu.addItem(item("Reveal in Finder", #selector(menuReveal(_:)), node))
+        menu.addItem(item("Copy Path", #selector(menuCopyPath(_:)), node))
+        if node.path != root {
+            menu.addItem(item("Copy Relative Path", #selector(menuCopyRelativePath(_:)), node))
+        }
+        return menu
+    }
+
+    @objc private func menuNewFile(_ sender: NSMenuItem) {
+        guard let folder = sender.representedObject as? FileNode else { return }
+        beginCreating(in: folder, directory: false)
+    }
+
+    @objc private func menuNewFolder(_ sender: NSMenuItem) {
+        guard let folder = sender.representedObject as? FileNode else { return }
+        beginCreating(in: folder, directory: true)
+    }
+
+    @objc private func menuRename(_ sender: NSMenuItem) {
+        guard let node = sender.representedObject as? FileNode else { return }
+        beginEditing(node, initial: node.name) { [weak self] newName in
+            guard let self, let newName, newName != node.name else { return }
+            let destination = (node.path as NSString).deletingLastPathComponent + "/" + newName
+            do {
+                try FileManager.default.moveItem(atPath: node.path, toPath: destination)
+                if let revealedPath = self.revealedPath,
+                   revealedPath == node.path || revealedPath.hasPrefix(node.path + "/") {
+                    let moved = destination + revealedPath.dropFirst(node.path.count)
+                    self.onRenamed?(revealedPath, moved)
+                    self.revealedPath = moved
+                }
+                self.reload()
+            } catch {
+                self.present(error, title: "Couldn't rename \(node.name)")
+            }
+        }
+    }
+
+    @objc private func menuTrash(_ sender: NSMenuItem) {
+        guard let node = sender.representedObject as? FileNode, let window else { return }
+        let alert = NSAlert()
+        alert.messageText = "Move “\(node.name)” to the Trash?"
+        alert.informativeText = node.isDirectory ? "The folder and everything in it." : "You can put it back from the Trash."
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .alertFirstButtonReturn else { return }
+            do {
+                try FileManager.default.trashItem(at: URL(fileURLWithPath: node.path), resultingItemURL: nil)
+                self.reload()
+            } catch {
+                self.present(error, title: "Couldn't move \(node.name) to the Trash")
+            }
+        }
+    }
+
+    @objc private func menuReveal(_ sender: NSMenuItem) {
+        guard let node = sender.representedObject as? FileNode else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: node.path)])
+    }
+
+    @objc private func menuCopyPath(_ sender: NSMenuItem) {
+        guard let node = sender.representedObject as? FileNode else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(node.path, forType: .string)
+    }
+
+    @objc private func menuCopyRelativePath(_ sender: NSMenuItem) {
+        guard let node = sender.representedObject as? FileNode, let root else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(String(node.path.dropFirst(root.count + 1)), forType: .string)
+    }
+
+    private func present(_ error: Error, title: String) {
+        guard let window else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = error.localizedDescription
+        alert.beginSheetModal(for: window)
+    }
+
+    /// New file/folder the VSCode way: a placeholder row appears inside the
+    /// folder with its name field open; ↩ creates it on disk (and opens a
+    /// new file), Esc or an empty name takes the row away again.
+    private func beginCreating(in folder: FileNode, directory: Bool) {
+        if folder !== rootNode { outline.expandItem(folder) }
+        _ = folder.children(hidingIgnored: false) // load before inserting
+        let placeholder = FileNode(path: folder.path + "/\u{0}new", isDirectory: directory)
+        placeholder.isPlaceholder = true
+        folder.insertChild(placeholder, first: true)
+        outline.reloadItem(folder === rootNode ? nil : folder, reloadChildren: true)
+        beginEditing(placeholder, initial: "") { [weak self] name in
+            guard let self else { return }
+            folder.removeChild(placeholder)
+            guard let name, !name.isEmpty, !name.contains("/") else {
+                self.outline.reloadItem(folder === self.rootNode ? nil : folder, reloadChildren: true)
+                return
+            }
+            let path = folder.path + "/" + name
+            do {
+                if directory {
+                    try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: false)
+                } else if !FileManager.default.fileExists(atPath: path) {
+                    try Data().write(to: URL(fileURLWithPath: path))
+                }
+                folder.invalidateDeep()
+                self.reload()
+                if !directory { self.onOpen?(URL(fileURLWithPath: path), true) }
+            } catch {
+                self.reload()
+                self.present(error, title: "Couldn't create \(name)")
+            }
+        }
+    }
+
+    /// Open the row's name for editing; `completion` gets the committed name
+    /// or nil on cancel. Focus returns to the tree either way.
+    private func beginEditing(_ node: FileNode, initial: String, completion: @escaping (String?) -> Void) {
+        let row = outline.row(forItem: node)
+        guard row >= 0 else { completion(nil); return }
+        outline.selectRowIndexes([row], byExtendingSelection: false)
+        outline.scrollRowToVisible(row)
+        guard let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: true) as? ExplorerCellView else {
+            completion(nil)
+            return
+        }
+        cell.beginEditing(initial: initial) { [weak self] name in
+            self?.window?.makeFirstResponder(self?.outline)
+            completion(name)
+        }
     }
 
     // MARK: Actions
@@ -784,7 +947,19 @@ final class FileNode: NSObject {
     let path: String
     let name: String
     let isDirectory: Bool
+    /// A row that exists only in the tree while its name is being typed.
+    var isPlaceholder = false
     private var cached: [FileNode]?
+
+    func insertChild(_ child: FileNode, first: Bool) {
+        var list = cached ?? []
+        list.insert(child, at: first ? 0 : list.count)
+        cached = list
+    }
+
+    func removeChild(_ child: FileNode) {
+        cached?.removeAll { $0 === child }
+    }
 
     init(path: String, isDirectory: Bool) {
         self.path = path
@@ -876,7 +1051,7 @@ private final class ExplorerRowView: NSTableRowView {
     }
 }
 
-private final class ExplorerCellView: NSTableCellView {
+private final class ExplorerCellView: NSTableCellView, NSTextFieldDelegate {
     private let icon = NSImageView()
     private let label = NSTextField(labelWithString: "")
 
@@ -906,7 +1081,53 @@ private final class ExplorerCellView: NSTableCellView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    private var editCompletion: ((String?) -> Void)?
+    private var editCancelled = false
+
+    /// Turn the name into a field: ↩ commits, Esc cancels, focus loss commits.
+    /// The stem is preselected (VSCode) so retyping a name keeps its extension.
+    func beginEditing(initial: String, completion: @escaping (String?) -> Void) {
+        editCompletion = completion
+        editCancelled = false
+        label.stringValue = initial
+        label.isEditable = true
+        label.isSelectable = true
+        label.isBezeled = false
+        label.drawsBackground = true
+        label.backgroundColor = Theme.Elevation.surface0
+        label.focusRingType = .none
+        label.delegate = self
+        window?.makeFirstResponder(label)
+        if let editor = label.currentEditor() {
+            let stem = (initial as NSString).deletingPathExtension
+            editor.selectedRange = NSRange(location: 0, length: (stem as NSString).length)
+        }
+    }
+
+    private func endEditing() {
+        guard let completion = editCompletion else { return }
+        editCompletion = nil
+        let name = label.stringValue.trimmingCharacters(in: .whitespaces)
+        label.isEditable = false
+        label.isSelectable = false
+        label.drawsBackground = false
+        label.delegate = nil
+        completion(editCancelled || name.isEmpty ? nil : name)
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) { endEditing() }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            editCancelled = true
+            endEditing()
+            return true
+        }
+        return false
+    }
+
     func configure(name: String, isDirectory: Bool, dimmed: Bool) {
+        if editCompletion != nil { return } // mid-edit: leave the field alone
         label.stringValue = name
         let color = dimmed ? Theme.chromeMutedText : Theme.chromeText
         label.textColor = color
@@ -1048,5 +1269,20 @@ private final class StickyRow: NSView {
 
     override func mouseDown(with event: NSEvent) {
         if let node { onClick?(node) }
+    }
+}
+
+
+// MARK: - Outline with a context menu
+
+/// Right-click selects the row under the pointer and asks the explorer for
+/// its menu; empty space asks for the root's.
+final class ExplorerOutlineView: NSOutlineView {
+    var menuProvider: ((Int) -> NSMenu?)?
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let row = self.row(at: convert(event.locationInWindow, from: nil))
+        if row >= 0 { selectRowIndexes([row], byExtendingSelection: false) }
+        return menuProvider?(row)
     }
 }

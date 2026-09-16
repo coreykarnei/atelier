@@ -95,6 +95,7 @@ final class EditorPane: NSView, WorkspacePane {
         explorer.onToggle = { [weak self] in self?.toggleExplorer() }
         explorer.onOpenAt = { [weak self] url, hit in self?.onOpenAtRequest?(url, hit) }
         explorer.onPreview = { [weak self] url, hit in self?.onPreviewRequest?(url, hit) }
+        explorer.onRenamed = { [weak self] from, to in self?.fileRenamed(from: from, to: to) }
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
             selector: #selector(accessibilityDisplayChanged),
@@ -332,6 +333,17 @@ final class EditorPane: NSView, WorkspacePane {
             width: max(0, textView.bounds.width - visibleX - gutterWidth), height: textView.bounds.height
         )
         CATransaction.commit()
+    }
+
+    /// The open file moved (tree rename). The buffer keeps its text and
+    /// follows the path: watcher re-armed, server told, tree reselected.
+    private func fileRenamed(from: String, to: String) {
+        guard filePath == from, let controller else { return }
+        lspClient?.didClose(path: from)
+        filePath = to
+        watchFile(to)
+        explorer.reveal(path: to, scroll: false)
+        if !isPreview { announceOpen(path: to, text: controller.text) }
     }
 
     // MARK: On-disk changes
