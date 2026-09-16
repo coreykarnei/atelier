@@ -13,3 +13,7 @@ root overrides by identity with `Vendor/` copies.
    without checking `isHidden`; as a floating subview of the scroll view
    it is still consulted while hidden, so with `showMinimap == false` the
    right ~17% of the editor could not be clicked. Now returns nil when hidden.
+
+2. **Gutter insets 10/12 instead of 20/12** (`Gutter/GutterView.swift`).
+   Taste, not a bug — Atelier's call; not for upstream. With the fold ribbon
+   off (config) the gutter is ~47pt for files under 1000 lines.

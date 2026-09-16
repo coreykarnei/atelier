@@ -582,7 +582,9 @@ final class EditorPane: NSView, WorkspacePane {
             ),
             behavior: .init(indentOption: .spaces(count: 4)),
             layout: .init(),
-            peripherals: .init(showGutter: true, showMinimap: false)
+            // No fold ribbon: folding isn't wired, and the ribbon is 11pt of
+            // gutter for nothing.
+            peripherals: .init(showGutter: true, showMinimap: false, showFoldingRibbon: false)
         )
     }
 }

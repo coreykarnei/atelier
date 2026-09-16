@@ -52,7 +52,9 @@ public class GutterView: NSView {
     }
 
     @Invalidating(.display)
-    var edgeInsets: EdgeInsets = EdgeInsets(leading: 20, trailing: 12)
+    // Atelier: tighter than upstream's 20/12 — the number column is ~25pt,
+    // the padding shouldn't outweigh it (owner call 2026-09-15).
+    var edgeInsets: EdgeInsets = EdgeInsets(leading: 10, trailing: 12)
 
     @Invalidating(.display)
     var backgroundEdgeInsets: EdgeInsets = EdgeInsets(leading: 0, trailing: 8)
