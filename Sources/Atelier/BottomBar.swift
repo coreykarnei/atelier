@@ -1524,29 +1524,36 @@ private final class FolderView: NSView {
         label.hasPrefix(treeMarker) ? (true, String(label.dropFirst(treeMarker.count))) : (false, label)
     }
 
-    /// The tree, drawn: a conifer — two stepped tiers on a short trunk, 10×12
+    /// The tree, drawn: a conifer — two stacked tiers on a short trunk, 10×12
     /// (a conifer was the owner's pick 2026-09-08; a canopy turned to a
-    /// lollipop at this size). One opaque fill. `rect` is the glyph box.
+    /// lollipop at this size). One opaque fill; the trunk runs up into the
+    /// lowest tier so there is never a seam. `rect` is the glyph box.
     private static func treePath(in rect: CGRect) -> NSBezierPath {
-        // Stepped sides (owner pick 2026-09-15, variant H): one outline, two
-        // tiers as horizontal steps rather than overlapped triangles, so the
-        // notch is a hard edge that survives 2x — and one winding, so there
-        // is no seam for the non-zero rule to open between tier and trunk.
+        let path = NSBezierPath()
         let w = rect.width, h = rect.height
         func pt(_ x: CGFloat, _ y: CGFloat) -> NSPoint { NSPoint(x: rect.minX + x * w, y: rect.minY + y * h) }
-        let path = NSBezierPath()
-        path.move(to: pt(0.5, 1.0))
-        path.line(to: pt(0.82, 0.58))
-        path.line(to: pt(0.68, 0.58))
-        path.line(to: pt(1.0, 0.26))
-        path.line(to: pt(0.6, 0.26))
-        path.line(to: pt(0.6, 0.0))
-        path.line(to: pt(0.4, 0.0))
-        path.line(to: pt(0.4, 0.26))
-        path.line(to: pt(0.0, 0.26))
-        path.line(to: pt(0.32, 0.58))
-        path.line(to: pt(0.18, 0.58))
-        path.close()
+        func tier(top: CGFloat, bottom: CGFloat, half: CGFloat) {
+            let t = NSBezierPath()
+            t.move(to: pt(0.5, top))
+            t.line(to: pt(0.5 + half, bottom))
+            t.line(to: pt(0.5 - half, bottom))
+            t.close()
+            path.append(t)
+        }
+        // Two tiers (three collapsed into one blob at this size — owner call
+        // 2026-09-08), in a 10×12 box (owner pick 2026-09-15, variant B): the
+        // extra height is what lets the step read at 2x.
+        tier(top: 1.00, bottom: 0.52, half: 0.38)
+        tier(top: 0.66, bottom: 0.24, half: 0.50)
+        // The trunk winds the same way as the tiers (clockwise): under the
+        // non-zero rule an opposite-wound overlap cancels to a hole.
+        let trunk = NSBezierPath()
+        trunk.move(to: pt(0.41, 0.34))
+        trunk.line(to: pt(0.59, 0.34))
+        trunk.line(to: pt(0.59, 0.0))
+        trunk.line(to: pt(0.41, 0.0))
+        trunk.close()
+        path.append(trunk)
         return path
     }
 
