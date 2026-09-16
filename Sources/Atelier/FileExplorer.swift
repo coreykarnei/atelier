@@ -708,12 +708,12 @@ final class FileExplorerView: NSView {
         let placeholder = FileNode(path: folder.path + "/\u{0}new", isDirectory: directory)
         placeholder.isPlaceholder = true
         folder.insertChild(placeholder, first: true)
-        outline.reloadItem(folder === rootNode ? nil : folder, reloadChildren: true)
+        reloadFolder(folder)
         beginEditing(placeholder, initial: "") { [weak self] name in
             guard let self else { return }
             folder.removeChild(placeholder)
             guard let name, !name.isEmpty, !name.contains("/") else {
-                self.outline.reloadItem(folder === self.rootNode ? nil : folder, reloadChildren: true)
+                self.reloadFolder(folder)
                 return
             }
             let path = folder.path + "/" + name
@@ -731,6 +731,17 @@ final class FileExplorerView: NSView {
                 self.present(error, title: "Couldn't create \(name)")
             }
         }
+    }
+
+    /// `reloadItem(nil)` is not how you reload the root — it wrecks the row
+    /// model (every label and chevron vanished). Root → reloadData.
+    private func reloadFolder(_ folder: FileNode) {
+        if folder === rootNode {
+            outline.reloadData()
+        } else {
+            outline.reloadItem(folder, reloadChildren: true)
+        }
+        if let revealedPath { reveal(path: revealedPath, scroll: false) }
     }
 
     /// Open the row's name for editing; `completion` gets the committed name
@@ -1092,6 +1103,7 @@ private final class ExplorerCellView: NSTableCellView, NSTextFieldDelegate {
 
     private var editCompletion: ((String?) -> Void)?
     private var editCancelled = false
+    private var editingWidth: NSLayoutConstraint?
 
     /// Turn the name into a field: ↩ commits, Esc cancels, focus loss commits.
     /// The stem is preselected (VSCode) so retyping a name keeps its extension.
@@ -1106,6 +1118,8 @@ private final class ExplorerCellView: NSTableCellView, NSTextFieldDelegate {
         label.backgroundColor = Theme.Elevation.surface0
         label.focusRingType = .none
         label.delegate = self
+        editingWidth = label.widthAnchor.constraint(greaterThanOrEqualToConstant: 140)
+        editingWidth?.isActive = true // an empty field still needs to be a field
         window?.makeFirstResponder(label)
         if let editor = label.currentEditor() {
             let stem = (initial as NSString).deletingPathExtension
@@ -1121,6 +1135,8 @@ private final class ExplorerCellView: NSTableCellView, NSTextFieldDelegate {
         label.isSelectable = false
         label.drawsBackground = false
         label.delegate = nil
+        editingWidth?.isActive = false
+        editingWidth = nil
         completion(editCancelled || name.isEmpty ? nil : name)
     }
 
