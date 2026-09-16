@@ -15,3 +15,13 @@ local override by package identity, the same way `Vendor/CodeEditSymbols` is.
    long lines ran off the right edge with nothing to scroll into. Deleting
    the shadowing line is the whole fix. Still present on upstream `main` as
    of 2026-09-15.
+
+2. **Scroll-to-visible followed the selection's box, not the caret**
+   (`TextView/TextView+ScrollToVisible.swift`,
+   `TextView/TextView+ReplaceCharacters.swift`). With wrapping off, a
+   multi-line selection's fill rects run to `maxLineWidth`, so its bounding
+   box is document-wide; `scrollToVisible` on a rect wider than the clip
+   snaps to x = 0. Typing over a selection far to the right therefore
+   yanked the viewport to the left margin. Both sites now use a new
+   `caretRect(for:)` — a padded line-height slice at the selection's moving
+   end — the way NSTextView tracks the insertion point.

@@ -12,7 +12,9 @@ let package = Package(
         .package(path: "Vendor/SwiftTerm"),
         // The M2 editor base (TECHNICAL_PLAN §3.3): TextKit-2 source editor
         // with incremental tree-sitter highlighting and multi-cursor support.
-        .package(url: "https://github.com/CodeEditApp/CodeEditSourceEditor.git", from: "0.11.0"),
+        // Vendored CodeEditSourceEditor 0.15.2 with Atelier's patches — see
+        // Vendor/CodeEditSourceEditor/ATELIER.md.
+        .package(path: "Vendor/CodeEditSourceEditor"),
         .package(url: "https://github.com/CodeEditApp/CodeEditLanguages.git", from: "0.1.20"),
         // Local override (by package identity) of CodeEditSourceEditor's
         // CodeEditSymbols dependency — see Vendor/CodeEditSymbols/Package.swift.

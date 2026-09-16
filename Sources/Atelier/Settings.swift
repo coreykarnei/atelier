@@ -11,6 +11,7 @@ enum Settings {
     private static let alphaKey = "field.alpha"
     private static let worktreesKey = "worktrees.enabled"
     private static let confirmCloseKey = "close.confirm"
+    private static let autosaveKey = "editor.autosave"
 
     /// Field opacity over the behind-window blur (Theme.fieldAlpha). 0.75 is
     /// the owner's Ghostty parity value. `ATELIER_FIELD_ALPHA` still wins for
@@ -43,6 +44,17 @@ enum Settings {
         }
     }
 
+    /// On: the editor writes the buffer a moment after every edit and never
+    /// asks about unsaved changes. Off: `⌘S`, and the dirty guard.
+    static var autosave: Bool {
+        get { UserDefaults.standard.bool(forKey: autosaveKey) }
+        set {
+            guard newValue != autosave else { return }
+            UserDefaults.standard.set(newValue, forKey: autosaveKey)
+            NotificationCenter.default.post(name: didChange, object: nil)
+        }
+    }
+
     /// Off: `+` starts a session on the main checkout, no question asked.
     /// On: the worktree chooser appears first (MILESTONE_1 §6, revised).
     static var worktreesEnabled: Bool {
@@ -64,6 +76,7 @@ final class SettingsWindowController: NSWindowController {
     private let alphaValue = NSTextField(labelWithString: "")
     private let worktreesToggle = NSButton(checkboxWithTitle: "Enable worktrees", target: nil, action: nil)
     private let confirmCloseToggle = NSButton(checkboxWithTitle: "Ask before closing a session", target: nil, action: nil)
+    private let autosaveToggle = NSButton(checkboxWithTitle: "Autosave", target: nil, action: nil)
 
     private init() {
         let window = NSWindow(
@@ -80,6 +93,9 @@ final class SettingsWindowController: NSWindowController {
         window.contentView?.wantsLayer = true
         window.contentView?.layer?.backgroundColor = Theme.Elevation.surface0.cgColor
         super.init(window: window)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(settingsChanged), name: Settings.didChange, object: nil
+        )
         build()
     }
 
@@ -139,15 +155,30 @@ final class SettingsWindowController: NSWindowController {
         confirmHint.lineBreakMode = .byWordWrapping
         confirmHint.maximumNumberOfLines = 2
 
+        autosaveToggle.attributedTitle = NSAttributedString(string: "Autosave", attributes: [
+            .font: Theme.Typography.ui(Theme.Typography.body),
+            .foregroundColor: Theme.chromeText,
+        ])
+        autosaveToggle.state = Settings.autosave ? .on : .off
+        autosaveToggle.target = self
+        autosaveToggle.action = #selector(autosaveChanged)
+
+        let autosaveHint = NSTextField(labelWithString: "The editor writes the file a moment after each edit. Off: ⌘S, and a question before discarding changes.")
+        autosaveHint.font = Theme.Typography.ui(Theme.Typography.small)
+        autosaveHint.textColor = Theme.chromeMutedText
+        autosaveHint.lineBreakMode = .byWordWrapping
+        autosaveHint.maximumNumberOfLines = 2
+
         let alphaRow = NSStackView(views: [alphaLabel, alphaSlider, alphaValue])
         alphaRow.orientation = .horizontal
         alphaRow.spacing = 10
 
-        let stack = NSStackView(views: [alphaRow, alphaHint, worktreesToggle, worktreesHint, confirmCloseToggle, confirmHint])
+        let stack = NSStackView(views: [alphaRow, alphaHint, autosaveToggle, autosaveHint, worktreesToggle, worktreesHint, confirmCloseToggle, confirmHint])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 6
         stack.setCustomSpacing(18, after: alphaHint)
+        stack.setCustomSpacing(18, after: autosaveHint)
         stack.setCustomSpacing(18, after: worktreesHint)
         stack.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(stack)
@@ -190,5 +221,16 @@ final class SettingsWindowController: NSWindowController {
 
     @objc private func worktreesChanged() {
         Settings.worktreesEnabled = worktreesToggle.state == .on
+    }
+
+    @objc private func autosaveChanged() {
+        Settings.autosave = autosaveToggle.state == .on
+    }
+
+    /// The File menu's Autosave item flips the same switch; keep the box honest.
+    @objc private func settingsChanged() {
+        autosaveToggle.state = Settings.autosave ? .on : .off
+        worktreesToggle.state = Settings.worktreesEnabled ? .on : .off
+        confirmCloseToggle.state = Settings.confirmClose ? .on : .off
     }
 }

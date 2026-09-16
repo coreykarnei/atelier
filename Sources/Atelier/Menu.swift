@@ -33,6 +33,9 @@ enum Menu {
         fileItem.submenu = fileMenu
         fileMenu.addItem(withTitle: "Open…", action: #selector(AppDelegate.openFile(_:)), keyEquivalent: "o")
         fileMenu.addItem(withTitle: "Save", action: #selector(AppDelegate.saveFile(_:)), keyEquivalent: "s")
+        fileMenu.addItem(.separator())
+        // A checkmark item mirroring Settings → Autosave; validation sets the state.
+        fileMenu.addItem(withTitle: "Autosave", action: #selector(AppDelegate.toggleAutosave(_:)), keyEquivalent: "")
 
         // Edit menu — this is the load-bearing one. nil targets route through the
         // responder chain to the focused terminal/editor view.

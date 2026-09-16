@@ -13,6 +13,12 @@ extension TextView {
     fileprivate typealias TextSelection = TextSelectionManager.TextSelection
 
     /// Scrolls the upmost selection to the visible rect if `scrollView` is not `nil`.
+    ///
+    /// Atelier patch: follow the *caret* (the selection's moving end), not the
+    /// selection's bounding box. With `wrapLines == false` a multi-line
+    /// selection's box spans the full document width (fill rects run to
+    /// `maxLineWidth`), so `scrollToVisible` on it snapped the view to x = 0 —
+    /// typing over a selection far to the right yanked the viewport left.
     public func scrollSelectionToVisible() {
         guard let scrollView else {
             return
@@ -24,8 +30,8 @@ extension TextView {
         // pass and scroll to that rect.
 
         var lastFrame: CGRect = .zero
-        while let boundingRect = getSelection()?.boundingRect, lastFrame != boundingRect {
-            lastFrame = boundingRect
+        while let caretRect = getSelection().flatMap(caretRect(for:)), lastFrame != caretRect {
+            lastFrame = caretRect
             layoutManager.layoutLines()
             selectionManager.updateSelectionViews()
             selectionManager.drawSelections(in: visibleRect)
@@ -107,6 +113,16 @@ extension TextView {
             .textSelections
             .sorted(by: { $0.range.max > $1.range.max }) // Get the lowest one.
             .first
+    }
+
+    /// The rect to keep on screen for a selection: the caret's line-height
+    /// slice at its moving end, padded a little so the caret isn't flush
+    /// against the edge. Nil until that offset has a laid-out rect.
+    func caretRect(for selection: TextSelectionManager.TextSelection) -> CGRect? {
+        guard var rect = layoutManager.rectForOffset(offsetNotPivot(selection)) else { return nil }
+        rect.origin.x -= 8
+        rect.size.width = 16
+        return rect
     }
 
     /// Returns the offset that isn't the pivot of the selection.

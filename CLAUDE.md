@@ -98,9 +98,13 @@ feel-check. **M2.6 landed 2026-09-15** — the file explorer
 hidden, gitignored dimmed, FSEvents-refreshed) down the editor pane's left
 edge; single click previews (soft-wrapped, read-only), double-click/`↩`
 commits and folds the tree to a 26pt rail with a chevron; `⌘B` toggles.
-`Vendor/CodeEditTextView` is a second local override (same identity trick
-as CodeEditSymbols) carrying the horizontal-scroll fix — `ATELIER.md` there
-lists patches. The triptych's two dividers can be dragged together from
+`Vendor/CodeEditSourceEditor` (0.15.2) and `Vendor/CodeEditTextView`
+(0.12.1) are vendored like SwiftTerm — editor-side fixes go there, each
+meant for upstream, listed in each copy's `ATELIER.md` (hidden minimap
+swallowing clicks; widest-line width never escaping layout so nothing
+scrolled horizontally; scroll-to-visible following the selection box
+instead of the caret). Settings → Autosave (also File → Autosave) writes
+0.8s after each edit and silences the dirty guard. The triptych's two dividers can be dragged together from
 where they cross (`SplitCornerHandle` in `Layout.swift`).
 
 Also landed 2026-07-14: **remote sessions** — the native successor of the

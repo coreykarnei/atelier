@@ -76,6 +76,17 @@ final class LayoutSplitView: NSSplitView {
         needsLayout = true
     }
 
+    /// NSSplitView claims a generous band around its divider before asking
+    /// subviews, which swallowed the handle's centre — the exact spot you'd
+    /// grab. The handle wins wherever it sits.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if let handle = cornerHandle, !handle.isHidden,
+           handle.frame.contains(convert(point, from: superview)) {
+            return handle
+        }
+        return super.hitTest(point)
+    }
+
     override func layout() {
         super.layout()
         guard let handle = cornerHandle, let inner = innerSplit,
@@ -107,7 +118,7 @@ final class LayoutSplitView: NSSplitView {
 /// the outer's x and the inner's y follow the pointer, each clamped to its
 /// slot's minimums. PTY resizes freeze for the drag like any divider drag.
 final class SplitCornerHandle: NSView {
-    static let size: CGFloat = 14
+    static let size: CGFloat = 18
     private unowned let outer: LayoutSplitView
     private unowned let inner: LayoutSplitView
 

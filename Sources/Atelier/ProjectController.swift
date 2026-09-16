@@ -338,6 +338,16 @@ final class ProjectController: NSObject, BottomBarDelegate {
             proceed()
             return
         }
+        if Settings.autosave {
+            // Autosave means never being asked: write, then go.
+            do {
+                try session.editorPane.save()
+                proceed()
+            } catch {
+                presentError(title: "Couldn't save \((path as NSString).lastPathComponent)", error: error)
+            }
+            return
+        }
         let alert = NSAlert()
         alert.messageText = "\((path as NSString).lastPathComponent) has unsaved changes"
         alert.informativeText = informative

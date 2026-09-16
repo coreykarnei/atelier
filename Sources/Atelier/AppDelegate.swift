@@ -327,6 +327,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func openFile(_ sender: Any?) { keyController?.openFileInEditor() }
     @objc func saveFile(_ sender: Any?) { keyController?.saveEditor() }
+    @objc func toggleAutosave(_ sender: Any?) { Settings.autosave.toggle() }
     @objc func goToFile(_ sender: Any?) { keyController?.showFilePicker() }
     @objc func searchRepo(_ sender: Any?) { keyController?.showRepoSearch() }
     @objc func goToDefinition(_ sender: Any?) { keyController?.goToDefinition() }
@@ -350,6 +351,10 @@ extension AppDelegate: NSMenuItemValidation {
     /// "Reopen Closed Session" is only offered when there's something to reopen;
     /// every other item keeps its default enablement.
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(toggleAutosave(_:)) {
+            menuItem.state = Settings.autosave ? .on : .off
+            return true
+        }
         if menuItem.action == #selector(reopenSession(_:)) {
             return keyController?.canReopenClosedSession ?? false
         }

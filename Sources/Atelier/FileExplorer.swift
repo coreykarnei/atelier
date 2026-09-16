@@ -215,8 +215,9 @@ final class FileExplorerView: NSView {
     }
 
     /// Select the row for `path`, expanding the folders above it. Silent if
-    /// the path isn't under the root.
-    func reveal(path: String) {
+    /// the path isn't under the root. `scroll` brings the row into view — an
+    /// open does that, a background reload must not yank the list around.
+    func reveal(path: String, scroll: Bool = true) {
         revealedPath = path
         guard let root, path.hasPrefix(root + "/") else { return }
         let rel = String(path.dropFirst(root.count + 1)).split(separator: "/").map(String.init)
@@ -232,7 +233,7 @@ final class FileExplorerView: NSView {
         let row = outline.row(forItem: leaf)
         guard row >= 0 else { return }
         outline.selectRowIndexes([row], byExtendingSelection: false)
-        outline.scrollRowToVisible(row)
+        if scroll { outline.scrollRowToVisible(row) }
     }
 
     // MARK: Actions
@@ -243,7 +244,7 @@ final class FileExplorerView: NSView {
         if node.isDirectory {
             if outline.isItemExpanded(node) { outline.collapseItem(node) } else { outline.expandItem(node) }
             // Folders don't own the selection; the open file does.
-            if let revealedPath { reveal(path: revealedPath) } else { outline.deselectAll(nil) }
+            if let revealedPath { reveal(path: revealedPath, scroll: false) } else { outline.deselectAll(nil) }
         } else {
             onOpen?(URL(fileURLWithPath: node.path), false)
         }
@@ -302,7 +303,7 @@ final class FileExplorerView: NSView {
                 guard let self, self.root == root else { return }
                 self.ignored = set
                 self.outline.reloadData()
-                if let revealedPath = self.revealedPath { self.reveal(path: revealedPath) }
+                if let revealedPath = self.revealedPath { self.reveal(path: revealedPath, scroll: false) }
             }
         }
     }
@@ -323,15 +324,21 @@ final class FileExplorerView: NSView {
     private func startWatching(_ root: String) {
         var context = FSEventStreamContext()
         context.info = Unmanaged.passUnretained(self).toOpaque()
-        let callback: FSEventStreamCallback = { _, info, _, _, _, _ in
+        let callback: FSEventStreamCallback = { _, info, count, paths, _, _ in
             guard let info else { return }
             let view = Unmanaged<FileExplorerView>.fromOpaque(info).takeUnretainedValue()
-            view.scheduleReload()
+            // `.git` churns constantly — and our own `git status` refreshes
+            // the index, which would otherwise reload the tree in a loop.
+            guard let changed = unsafeBitCast(paths, to: CFArray.self) as? [String],
+                  let root = view.root else { return }
+            let gitDir = root + "/.git"
+            let relevant = changed.prefix(Int(count)).contains { !$0.hasPrefix(gitDir) }
+            if relevant { view.scheduleReload() }
         }
         guard let stream = FSEventStreamCreate(
             nil, callback, &context, [root] as CFArray,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 0.3,
-            FSEventStreamCreateFlags(kFSEventStreamCreateFlagNoDefer | kFSEventStreamCreateFlagIgnoreSelf)
+            FSEventStreamCreateFlags(kFSEventStreamCreateFlagNoDefer | kFSEventStreamCreateFlagIgnoreSelf | kFSEventStreamCreateFlagUseCFTypes)
         ) else { return }
         FSEventStreamSetDispatchQueue(stream, .main)
         FSEventStreamStart(stream)
@@ -358,7 +365,7 @@ final class FileExplorerView: NSView {
     private func reload() {
         rootNode?.invalidateDeep()
         outline.reloadData()
-        if let revealedPath { reveal(path: revealedPath) }
+        if let revealedPath { reveal(path: revealedPath, scroll: false) }
         refreshIgnored()
     }
 }

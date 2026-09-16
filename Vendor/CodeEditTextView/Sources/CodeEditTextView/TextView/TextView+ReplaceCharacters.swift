@@ -55,7 +55,10 @@ extension TextView {
 
         // `scrollSelectionToVisible` is a little expensive to call every time. Instead we just check if the first
         // selection is entirely visible. `.contains` checks that all points in the rect are inside. 
-        if let selection = selectionManager.textSelections.first, !visibleRect.contains(selection.boundingRect) {
+        // Atelier patch: judge visibility by the caret, not the selection's
+        // bounding box (see `scrollSelectionToVisible`).
+        if let selection = selectionManager.textSelections.first,
+           let caret = caretRect(for: selection), !visibleRect.contains(caret) {
             scrollSelectionToVisible()
         }
     }

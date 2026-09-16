@@ -62,6 +62,7 @@ final class EditorPane: NSView, WorkspacePane {
     }
     private var isSwiftBuffer = false
     private var lspChangeDebounce: Timer?
+    private var autosaveDebounce: Timer?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -273,6 +274,13 @@ final class EditorPane: NSView, WorkspacePane {
     /// (full-document sync — the buffer is small and the protocol allows it).
     private func bufferChanged() {
         isDirty = true
+        if Settings.autosave, !isPreview {
+            autosaveDebounce?.invalidate()
+            autosaveDebounce = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
+                guard let self, self.isDirty else { return }
+                do { try self.save() } catch { NSLog("Atelier: autosave failed: \(error)") }
+            }
+        }
         guard lspClient != nil else { return }
         lspChangeDebounce?.invalidate()
         lspChangeDebounce = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
@@ -359,9 +367,30 @@ final class EditorPane: NSView, WorkspacePane {
     var debugGeometry: String {
         guard let controller else { return "no buffer" }
         guard let sv = controller.scrollView else { return "no scroll view" }
-        return "preview=\(isPreview) wrap=\(controller.wrapLines) hScroller=\(sv.hasHorizontalScroller) "
-            + "content=\(sv.contentSize) doc=\(controller.textView.frame.size) "
-            + "docVisible=\(sv.documentVisibleRect) estWidth=\(controller.textView.layoutManager.estimatedWidth())"
+        var hits: [String] = []
+        if let root = window?.contentView {
+            // Who answers a click across the content host's width, at mid-height.
+            let midY = contentHost.bounds.midY
+            for step in 0...11 {
+                let x = contentHost.bounds.minX + contentHost.bounds.width * CGFloat(step) / 11
+                let point = contentHost.convert(NSPoint(x: min(x, contentHost.bounds.maxX - 1), y: midY), to: root)
+                let hit = root.hitTest(point).map { String(describing: type(of: $0)) } ?? "nil"
+                hits.append("\(Int(x)):\(hit)")
+            }
+        }
+        func find(_ view: NSView) -> NSView? {
+            if String(describing: type(of: view)) == "MinimapView" { return view }
+            for sub in view.subviews { if let hit = find(sub) { return hit } }
+            return nil
+        }
+        let minimap = find(controller.view)
+        let minimapLine = "minimap hidden=\(minimap?.isHidden ?? true) frame=\(minimap?.frame ?? .zero) "
+            + "superHidden=\(minimap?.isHiddenOrHasHiddenAncestor ?? true)"
+        var out = "preview=\(isPreview) wrap=\(controller.wrapLines) hScroller=\(sv.hasHorizontalScroller) "
+        out += "content=\(sv.contentSize) doc=\(controller.textView.frame.size) "
+        out += "docVisible=\(sv.documentVisibleRect) estWidth=\(controller.textView.layoutManager.estimatedWidth())\n"
+        out += "  hits: " + hits.joined(separator: " ") + "\n  " + minimapLine
+        return out
     }
 
     // MARK: Configuration
