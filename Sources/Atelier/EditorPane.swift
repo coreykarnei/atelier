@@ -34,8 +34,19 @@ final class EditorPane: NSView, WorkspacePane {
     var onPreviewRequest: ((URL, SearchHit?) -> Void)?
     /// ⌘-click in the buffer: go to definition at the caret.
     var onGoToDefinition: (() -> Void)?
-    /// Everything right of the tree: the empty-state line, then the buffer.
+    /// Everything right of the tree: the empty-state line, then the header
+    /// strip and the buffer (or, for markdown in Preview, the rendering).
     private let contentHost = NSView()
+    private let fileHeader = EditorFileHeader()
+    private let preview = MarkdownPreviewView(frame: .zero)
+    private var previewRenderDebounce: Timer?
+    private var isMarkdown: Bool { bufferLanguage?.id == .markdown }
+    private static let previewKey = "editor.markdownPreview"
+    /// Markdown opens in the mode you last chose (Text by default).
+    private var previewMode: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.previewKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.previewKey) }
+    }
     private var contentLeading: NSLayoutConstraint!
     private var explorerWidth: NSLayoutConstraint!
     /// Wide (browsing) or folded to the rail (a file is open for real).
@@ -54,7 +65,12 @@ final class EditorPane: NSView, WorkspacePane {
     private(set) var filePath: String?
     /// Unsaved edits exist. Owner is told on change (future tab/gutter marks).
     private(set) var isDirty = false {
-        didSet { if oldValue != isDirty { onDirtyChange?(isDirty) } }
+        didSet {
+            if oldValue != isDirty {
+                onDirtyChange?(isDirty)
+                fileHeader.isDirty = isDirty
+            }
+        }
     }
     var onDirtyChange: ((Bool) -> Void)?
 
@@ -129,6 +145,7 @@ final class EditorPane: NSView, WorkspacePane {
     /// ⌘+/⌘−/⌘0 — the buffer rides the same content scale as the terminals.
     @objc private func typeScaleChanged() {
         controller?.configuration = Self.configuration(wrap: isWrapped)
+        if !preview.isHidden, let controller { preview.render(markdown: controller.text) }
     }
 
     override func updateLayer() {
@@ -150,6 +167,27 @@ final class EditorPane: NSView, WorkspacePane {
         addSubview(contentHost)
         contentLeading = contentHost.leadingAnchor.constraint(equalTo: leadingAnchor)
         explorerWidth = explorer.widthAnchor.constraint(equalToConstant: FileExplorerView.width)
+        fileHeader.translatesAutoresizingMaskIntoConstraints = false
+        fileHeader.isHidden = true
+        fileHeader.onModeChange = { [weak self] previewOn in
+            guard let self else { return }
+            self.previewMode = previewOn
+            self.applyViewMode()
+        }
+        contentHost.addSubview(fileHeader)
+        preview.translatesAutoresizingMaskIntoConstraints = false
+        preview.isHidden = true
+        contentHost.addSubview(preview)
+        NSLayoutConstraint.activate([
+            fileHeader.topAnchor.constraint(equalTo: contentHost.topAnchor),
+            fileHeader.leadingAnchor.constraint(equalTo: contentHost.leadingAnchor),
+            fileHeader.trailingAnchor.constraint(equalTo: contentHost.trailingAnchor),
+            fileHeader.heightAnchor.constraint(equalToConstant: EditorFileHeader.height),
+            preview.topAnchor.constraint(equalTo: fileHeader.bottomAnchor),
+            preview.leadingAnchor.constraint(equalTo: contentHost.leadingAnchor),
+            preview.trailingAnchor.constraint(equalTo: contentHost.trailingAnchor),
+            preview.bottomAnchor.constraint(equalTo: contentHost.bottomAnchor),
+        ])
         NSLayoutConstraint.activate([
             explorer.topAnchor.constraint(equalTo: topAnchor),
             explorer.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -185,6 +223,32 @@ final class EditorPane: NSView, WorkspacePane {
         guard explorer.root != nil else { return }
         setExplorerExpanded(true)
         explorer.openSearch()
+    }
+
+    /// Dev-only: unfold the tree and hand the query to the explorer's driver.
+    /// `probe:dupundo` instead exercises ⇧⌥↓ then ⌘Z on the buffer and
+    /// writes what happened to ~/.local/state/atelier/probe.txt.
+    func debugExplorer(_ query: String) {
+        if query == "probe:dupundo" {
+            if controller == nil {
+                let scratch = NSTemporaryDirectory() + "atelier-probe.md"
+                try? "alpha\nbeta\ngamma\n".write(toFile: scratch, atomically: true, encoding: .utf8)
+                try? open(path: scratch)
+                reveal(line: 2, column: 1)
+            }
+            guard let controller else { return }
+            let before = controller.text
+            controller.duplicateLines(above: false)
+            let after = controller.text
+            controller.textView?.undoManager?.undo()
+            let undone = controller.text
+            let report = "before=\(before.count) after=\(after.count) undone=\(undone.count) restored=\(undone == before) "
+                + "undoManager=\(controller.textView?.undoManager.map { String(describing: type(of: $0)) } ?? "nil") canUndo=\(controller.textView?.undoManager?.canUndo ?? false)\n"
+            try? report.write(toFile: NSHomeDirectory() + "/.local/state/atelier/probe.txt", atomically: true, encoding: .utf8)
+            return
+        }
+        setExplorerExpanded(true)
+        explorer.debugSetQuery(query)
     }
 
     /// ⌘B / the chevron — unfold the tree or fold it to the rail.
@@ -275,7 +339,7 @@ final class EditorPane: NSView, WorkspacePane {
             installGutterMask(controller)
             controller.textView?.onCommandClick = { [weak self] _ in self?.onGoToDefinition?() }
             NSLayoutConstraint.activate([
-                controller.view.topAnchor.constraint(equalTo: contentHost.topAnchor),
+                controller.view.topAnchor.constraint(equalTo: fileHeader.bottomAnchor),
                 controller.view.leadingAnchor.constraint(equalTo: contentHost.leadingAnchor),
                 controller.view.trailingAnchor.constraint(equalTo: contentHost.trailingAnchor),
                 controller.view.bottomAnchor.constraint(equalTo: contentHost.bottomAnchor),
@@ -288,6 +352,9 @@ final class EditorPane: NSView, WorkspacePane {
         explorer.reveal(path: path)
         bufferLanguage = language
         watchFile(path)
+        fileHeader.isHidden = false
+        fileHeader.configure(name: displayName(for: path), markdown: isMarkdown, previewOn: isMarkdown && previewMode)
+        applyViewMode()
 
         if !preview {
             announceOpen(path: path, text: text)
@@ -343,6 +410,7 @@ final class EditorPane: NSView, WorkspacePane {
         filePath = to
         watchFile(to)
         explorer.reveal(path: to, scroll: false)
+        fileHeader.configure(name: displayName(for: to), markdown: isMarkdown, previewOn: isMarkdown && previewMode)
         if !isPreview { announceOpen(path: to, text: controller.text) }
     }
 
@@ -428,6 +496,32 @@ final class EditorPane: NSView, WorkspacePane {
         setExplorerExpanded(false)
     }
 
+    // MARK: Header + markdown preview
+
+    /// The path relative to the root when it's inside it, else the name.
+    private func displayName(for path: String) -> String {
+        if let lspRoot, path.hasPrefix(lspRoot + "/") { return String(path.dropFirst(lspRoot.count + 1)) }
+        return (path as NSString).lastPathComponent
+    }
+
+    /// Text or Preview: the rendering stands in for the buffer for markdown
+    /// files in Preview; everything else is the buffer.
+    private func applyViewMode() {
+        let showPreview = isMarkdown && previewMode && controller != nil
+        preview.isHidden = !showPreview
+        controller?.view.isHidden = showPreview
+        if showPreview, let controller { preview.render(markdown: controller.text) }
+    }
+
+    private func schedulePreviewRender() {
+        guard !preview.isHidden, let controller else { return }
+        previewRenderDebounce?.invalidate()
+        previewRenderDebounce = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: false) { [weak self, weak controller] _ in
+            guard let self, let controller else { return }
+            self.preview.render(markdown: controller.text)
+        }
+    }
+
     /// Tell the language server a real buffer exists (Swift only).
     private func announceOpen(path: String, text: String) {
         guard let client = lspClient else { return }
@@ -444,6 +538,7 @@ final class EditorPane: NSView, WorkspacePane {
     private func bufferChanged() {
         isDirty = true
         clearHitMark()
+        schedulePreviewRender()
         if isPreview {
             // Typing into a preview is entering the file: unwrap, fold the
             // tree, tell the server — same as double-click/↩ (owner call).
@@ -647,4 +742,87 @@ private final class ChangeCoordinator: TextViewCoordinator {
     var onTextChange: (() -> Void)?
     func prepareCoordinator(controller: TextViewController) {}
     func textViewDidChangeText(controller: TextViewController) { onTextChange?() }
+}
+
+
+// MARK: - File header
+
+/// The strip over the buffer: which file this is (path from the root, mono),
+/// a dot while it has unsaved edits, and for markdown the Text / Preview
+/// toggle. Mantle over the buffer's base — a step up, not a toolbar.
+final class EditorFileHeader: NSView {
+    static let height: CGFloat = 26
+    var onModeChange: ((Bool) -> Void)?
+    var isDirty = false { didSet { dot.isHidden = !isDirty } }
+
+    private let name = NSTextField(labelWithString: "")
+    private let dot = NSView()
+    private let mode = NSSegmentedControl(labels: ["Text", "Preview"], trackingMode: .selectOne, target: nil, action: nil)
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+
+        name.font = Theme.Typography.mono(Theme.Typography.small)
+        name.textColor = Theme.chromeText
+        name.lineBreakMode = .byTruncatingMiddle
+        name.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(name)
+
+        dot.wantsLayer = true
+        dot.layer?.backgroundColor = Theme.chromeText.cgColor
+        dot.layer?.cornerRadius = 3
+        dot.isHidden = true
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(dot)
+
+        mode.controlSize = .small
+        mode.font = Theme.Typography.ui(Theme.Typography.small)
+        mode.segmentStyle = .roundRect
+        mode.target = self
+        mode.action = #selector(modeChanged)
+        mode.isHidden = true
+        mode.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(mode)
+
+        let hairline = NSView()
+        hairline.wantsLayer = true
+        hairline.layer?.backgroundColor = Theme.Elevation.hairline.cgColor
+        hairline.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hairline)
+
+        NSLayoutConstraint.activate([
+            name.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            name.centerYAnchor.constraint(equalTo: centerYAnchor),
+            dot.leadingAnchor.constraint(equalTo: name.trailingAnchor, constant: 7),
+            dot.centerYAnchor.constraint(equalTo: centerYAnchor),
+            dot.widthAnchor.constraint(equalToConstant: 6),
+            dot.heightAnchor.constraint(equalToConstant: 6),
+            mode.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            mode.centerYAnchor.constraint(equalTo: centerYAnchor),
+            name.trailingAnchor.constraint(lessThanOrEqualTo: mode.leadingAnchor, constant: -24),
+            hairline.leadingAnchor.constraint(equalTo: leadingAnchor),
+            hairline.trailingAnchor.constraint(equalTo: trailingAnchor),
+            hairline.bottomAnchor.constraint(equalTo: bottomAnchor),
+            hairline.heightAnchor.constraint(equalToConstant: 1),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func updateLayer() {
+        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+    }
+
+    func configure(name text: String, markdown: Bool, previewOn: Bool) {
+        name.stringValue = text
+        mode.isHidden = !markdown
+        mode.selectedSegment = previewOn ? 1 : 0
+    }
+
+    @objc private func modeChanged() {
+        onModeChange?(mode.selectedSegment == 1)
+    }
 }

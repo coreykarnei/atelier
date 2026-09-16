@@ -197,6 +197,14 @@ final class FileExplorerView: NSView {
         outline.action = #selector(rowClicked)
         outline.doubleAction = #selector(rowDoubleClicked)
         outline.menuProvider = { [weak self] row in self?.contextMenu(forRow: row) }
+        outline.onKeyboardSelect = { [weak self] in
+            // Arrowing through the tree previews files as you pass them
+            // (owner ask 2026-09-16); folders just move the selection.
+            guard let self, self.outline.selectedRow >= 0,
+                  let node = self.outline.item(atRow: self.outline.selectedRow) as? FileNode,
+                  !node.isDirectory, !node.isPlaceholder else { return }
+            self.onPreview?(URL(fileURLWithPath: node.path), nil)
+        }
 
         scroll.documentView = outline
         scroll.hasVerticalScroller = true
@@ -212,7 +220,6 @@ final class FileExplorerView: NSView {
         NotificationCenter.default.addObserver(
             self, selector: #selector(treeScrolled), name: NSView.boundsDidChangeNotification, object: scroll.contentView
         )
-        sticky.translatesAutoresizingMaskIntoConstraints = false
         sticky.isHidden = true
         sticky.onJump = { [weak self] node in
             guard let self else { return }
@@ -224,7 +231,9 @@ final class FileExplorerView: NSView {
         }
         addSubview(scroll)
 
-        addSubview(sticky)
+        // Inside the scroll view, beneath its scroller: the scrollbar always
+        // draws on top, and the stack never covers it.
+        scroll.addSubview(sticky, positioned: .below, relativeTo: scroll.verticalScroller)
 
         // The hairline that seats the tree beside the buffer.
         let edge = NSView()
@@ -344,9 +353,6 @@ final class FileExplorerView: NSView {
             searchHostHeight,
             modeControl.topAnchor.constraint(equalTo: searchHost.topAnchor, constant: 4),
             modeControl.leadingAnchor.constraint(equalTo: searchHost.leadingAnchor, constant: 10),
-            sticky.topAnchor.constraint(equalTo: searchHost.bottomAnchor),
-            sticky.leadingAnchor.constraint(equalTo: leadingAnchor),
-            sticky.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -1),
             scroll.topAnchor.constraint(equalTo: searchHost.bottomAnchor),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -529,6 +535,7 @@ final class FileExplorerView: NSView {
 
     override func layout() {
         super.layout()
+        if !sticky.isHidden { updateSticky() }
         if isSearchOpen {
             let target = max(0, bounds.height - header.frame.height)
             if searchHostHeight.constant != target { searchHostHeight.constant = target }
@@ -579,9 +586,11 @@ final class FileExplorerView: NSView {
             return
         }
         sticky.isHidden = false
-        sticky.show(chain.map { node in
+        let stackHeight = sticky.show(chain.map { node in
             (node, outline.level(forItem: node), isIgnored(node.path))
         }, rowHeight: rowHeight, step: outline.indentationPerLevel, chevronBaseX: chevronBaseX)
+        // NSScrollView isn't flipped: the top edge is at bounds.maxY.
+        sticky.frame = NSRect(x: 0, y: scroll.bounds.height - stackHeight, width: scroll.bounds.width, height: stackHeight)
     }
 
     // MARK: Context menu (M2.6: new file / folder, rename, trash, reveal, copy path)
@@ -1150,7 +1159,7 @@ private final class StickyFolderStack: NSView {
     var onJump: ((FileNode) -> Void)?
     private var rows: [StickyRow] = []
     private let hairline = NSView()
-    private var heightConstraint: NSLayoutConstraint!
+    override var isFlipped: Bool { true }
 
     /// Opaque crust: the rows scroll on underneath, and a translucent strip
     /// would show their text through the pinned names. The one place the
@@ -1163,16 +1172,7 @@ private final class StickyFolderStack: NSView {
         layer?.backgroundColor = Self.fill
         hairline.wantsLayer = true
         hairline.layer?.backgroundColor = Theme.Elevation.hairline.cgColor
-        hairline.translatesAutoresizingMaskIntoConstraints = false
         addSubview(hairline)
-        heightConstraint = heightAnchor.constraint(equalToConstant: 0)
-        NSLayoutConstraint.activate([
-            heightConstraint,
-            hairline.leadingAnchor.constraint(equalTo: leadingAnchor),
-            hairline.trailingAnchor.constraint(equalTo: trailingAnchor),
-            hairline.bottomAnchor.constraint(equalTo: bottomAnchor),
-            hairline.heightAnchor.constraint(equalToConstant: 1),
-        ])
     }
 
     @available(*, unavailable)
@@ -1182,27 +1182,27 @@ private final class StickyFolderStack: NSView {
         layer?.backgroundColor = Self.fill
     }
 
-    func show(_ chain: [(node: FileNode, level: Int, dimmed: Bool)], rowHeight: CGFloat, step: CGFloat, chevronBaseX: CGFloat) {
+    /// Lay the chain out top-down; returns the stack's height (rows + hairline).
+    @discardableResult
+    func show(_ chain: [(node: FileNode, level: Int, dimmed: Bool)], rowHeight: CGFloat, step: CGFloat, chevronBaseX: CGFloat) -> CGFloat {
         while rows.count < chain.count {
             let row = StickyRow(frame: .zero)
             row.onClick = { [weak self] node in self?.onJump?(node) }
             addSubview(row, positioned: .below, relativeTo: hairline)
             rows.append(row)
         }
+        let height = rowHeight * CGFloat(chain.count) + 1
         for (index, row) in rows.enumerated() {
             guard index < chain.count else { row.isHidden = true; continue }
             row.isHidden = false
             let entry = chain[index]
-            row.frame = NSRect(x: 0, y: bounds.height - rowHeight * CGFloat(index + 1), width: bounds.width, height: rowHeight)
-            row.autoresizingMask = [.width, .minYMargin]
+            row.frame = NSRect(x: 0, y: rowHeight * CGFloat(index), width: bounds.width, height: rowHeight)
+            row.autoresizingMask = [.width]
             row.configure(node: entry.node, level: entry.level, step: step, base: chevronBaseX, dimmed: entry.dimmed)
         }
-        heightConstraint.constant = rowHeight * CGFloat(chain.count) + 1
-        // Re-seat rows after the height change lands.
-        layoutSubtreeIfNeeded()
-        for (index, row) in rows.enumerated() where index < chain.count {
-            row.frame = NSRect(x: 0, y: bounds.height - 1 - rowHeight * CGFloat(index + 1), width: bounds.width, height: rowHeight)
-        }
+        hairline.frame = NSRect(x: 0, y: height - 1, width: bounds.width, height: 1)
+        hairline.autoresizingMask = [.width]
+        return height
     }
 }
 
@@ -1279,6 +1279,15 @@ private final class StickyRow: NSView {
 /// its menu; empty space asks for the root's.
 final class ExplorerOutlineView: NSOutlineView {
     var menuProvider: ((Int) -> NSMenu?)?
+    /// A key press moved the selection (arrows, home/end) — not a click, not
+    /// a programmatic reselect. Hosts preview on this and nothing else.
+    var onKeyboardSelect: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        let before = selectedRow
+        super.keyDown(with: event)
+        if selectedRow != before { onKeyboardSelect?() }
+    }
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let row = self.row(at: convert(event.locationInWindow, from: nil))

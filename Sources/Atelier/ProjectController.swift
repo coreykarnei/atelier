@@ -525,7 +525,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// path in M2.2; the panel stays as the native fallback.)
     /// Dev-only: drive the explorer's search bar from the socket.
     func debugExplorerSearch(_ query: String) {
-        activeSession?.editorPane.explorer.debugSetQuery(query)
+        activeSession?.editorPane.debugExplorer(query)
     }
 
     /// ⌘⇧E — the sidebar search panel.

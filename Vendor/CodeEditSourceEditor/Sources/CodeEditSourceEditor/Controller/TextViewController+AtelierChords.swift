@@ -17,7 +17,7 @@ extension TextViewController {
     /// in) — probing mid-glyph rounded to the nearer boundary and drifted
     /// left a column per press. Carets that land where one already is are
     /// not added twice, so stepping past an existing caret merges (VSCode).
-    func addCursor(above: Bool) {
+    public func addCursor(above: Bool) {
         let layoutManager = textView.layoutManager!
         let existing = Set(textView.selectionManager.textSelections.map(\.range.location))
         var added: [NSRange] = []
@@ -36,7 +36,7 @@ extension TextViewController {
 
     /// Copy the lines under each selection and insert the copy above or
     /// below them. The caret lands on the copy so a second press keeps going.
-    func duplicateLines(above: Bool) {
+    public func duplicateLines(above: Bool) {
         guard !cursorPositions.isEmpty else { return }
         textView.undoManager?.beginUndoGrouping()
         textView.editSelections { textView, selection in
@@ -65,7 +65,7 @@ extension TextViewController {
 
     /// ⌘D: with a selection, add the next match of its text as another
     /// selection (wrapping); with a bare caret, select the word first.
-    func selectNextOccurrence() {
+    public func selectNextOccurrence() {
         let manager = textView.selectionManager!
         guard let last = manager.textSelections.last else { return }
         if last.range.isEmpty {
