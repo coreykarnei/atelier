@@ -41,6 +41,11 @@ public struct EditorTheme: Equatable {
     public var strings: Attribute
     public var characters: Attribute
     public var comments: Attribute
+    /// Atelier patch: attributes per capture, consulted before the coarse
+    /// slot mapping below. Lets a theme colour functions, properties,
+    /// parameters, builtins… apart instead of collapsing them into
+    /// `variables`/`keywords`.
+    public var captures: [CaptureName: Attribute]
 
     public init(
         text: Attribute,
@@ -58,7 +63,8 @@ public struct EditorTheme: Equatable {
         numbers: Attribute,
         strings: Attribute,
         characters: Attribute,
-        comments: Attribute
+        comments: Attribute,
+        captures: [CaptureName: Attribute] = [:]
     ) {
         self.text = text
         self.insertionPoint = insertionPoint
@@ -76,12 +82,14 @@ public struct EditorTheme: Equatable {
         self.strings = strings
         self.characters = characters
         self.comments = comments
+        self.captures = captures
     }
 
     /// Maps a capture type to the attributes for that capture determined by the theme.
     /// - Parameter capture: The capture to map to.
     /// - Returns: Theme attributes for the capture.
     private func mapCapture(_ capture: CaptureName?) -> Attribute {
+        if let capture, let exact = captures[capture] { return exact }
         switch capture {
         case .include, .constructor, .keyword, .boolean, .variableBuiltin,
                 .keywordReturn, .keywordFunction, .repeat, .conditional, .tag:
@@ -94,6 +102,12 @@ public struct EditorTheme: Equatable {
         case .type: return types
         case .parameter: return variables
         case .typeAlternate: return attributes
+        case .functionBuiltin: return variables
+        case .constant, .constantBuiltin: return values
+        case .typeBuiltin: return types
+        case .attribute: return attributes
+        case .namespace, .label: return types
+        case .operator, .punctuation, .escape: return text
         default: return text
         }
     }

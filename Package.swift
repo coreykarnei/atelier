@@ -15,7 +15,7 @@ let package = Package(
         // Vendored CodeEditSourceEditor 0.15.2 with Atelier's patches — see
         // Vendor/CodeEditSourceEditor/ATELIER.md.
         .package(path: "Vendor/CodeEditSourceEditor"),
-        .package(url: "https://github.com/CodeEditApp/CodeEditLanguages.git", from: "0.1.20"),
+        .package(path: "Vendor/CodeEditLanguages"),
         // Local override (by package identity) of CodeEditSourceEditor's
         // CodeEditSymbols dependency — see Vendor/CodeEditSymbols/Package.swift.
         .package(path: "Vendor/CodeEditSymbols"),

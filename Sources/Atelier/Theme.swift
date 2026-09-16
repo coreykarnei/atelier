@@ -255,6 +255,18 @@ enum Theme {
         static let character = nsColor(0x94E2D5)   // teal
         static let command = nsColor(0x89DCEB)     // sky
         static let comment = nsColor(0x6C7086)     // overlay0
+        // Per-capture colours (catppuccin/nvim's mapping, Mocha):
+        static let method = nsColor(0x89B4FA)      // blue — same as function
+        static let builtinFunction = nsColor(0xFAB387) // peach
+        static let constructor = nsColor(0x74C7EC) // sapphire
+        static let property = nsColor(0xB4BEFE)    // lavender
+        static let parameter = nsColor(0xEBA0AC)   // maroon
+        static let builtinVariable = nsColor(0xF38BA8) // red — self, this
+        static let escape = nsColor(0xF5C2E7)      // pink
+        static let operatorSign = nsColor(0x89DCEB) // sky
+        static let punctuation = nsColor(0x9399B2) // overlay2
+        static let namespace = nsColor(0xB4BEFE)   // lavender
+        static let label = nsColor(0x74C7EC)       // sapphire
         static let selection = nsColor(0x585B70).withAlphaComponent(0.5)     // surface2
         static let lineHighlight = nsColor(0x313244).withAlphaComponent(0.5) // surface0
     }

@@ -88,34 +88,29 @@ extension TreeSitterClient {
         includedRange: NSRange
     ) -> [HighlightRange] {
         guard let readCallback else { return [] }
-        var ranges: [NSRange: Int] = [:]
-        return cursor
-            .resolve(with: .init(textProvider: readCallback)) // Resolve our cursor against the query
-            .flatMap { $0.captures }
-            .reversed() // SwiftTreeSitter returns captures in the reverse order of what we need to filter with.
-            .compactMap { capture in
-                let range = capture.range
-                let index = capture.index
-
-                // Lower indexed captures are favored over higher, this is why we reverse it above
-                if let existingLevel = ranges[range], existingLevel <= index {
-                    return nil
-                }
-
-                guard let captureName = CaptureName.fromString(capture.name) else {
-                    return nil
-                }
-
-                // Update the filter level to the current index since it's lower and a 'valid' capture
-                ranges[range] = index
-
-                // Validate range and capture name
-                let intersectionRange = range.intersection(includedRange) ?? .zero
-                guard intersectionRange.length > 0 else {
-                    return nil
-                }
-
-                return HighlightRange(range: intersectionRange, capture: captureName)
-            }
+        // Atelier patch: one winner per range. The old pass filtered a
+        // later capture only if a *lower*-indexed one had already been seen
+        // for that range — so when the generic capture (`(identifier)
+        // @variable`) was encountered first it was emitted *and* the
+        // specific one (`@function`) was emitted after it. The style
+        // container then keeps the first of two runs at the same location
+        // and drops the second: every function name in Python rendered as
+        // a variable. Keep the lowest-indexed (earliest-in-query) capture
+        // per range, then emit in document order.
+        var best: [NSRange: (index: Int, capture: CaptureName)] = [:]
+        for capture in cursor.resolve(with: .init(textProvider: readCallback)).flatMap({ $0.captures }) {
+            guard let captureName = CaptureName.fromString(capture.name) else { continue }
+            let range = capture.range
+            if let existing = best[range], existing.index <= capture.index { continue }
+            best[range] = (capture.index, captureName)
+        }
+        return best.compactMap { range, value -> HighlightRange? in
+            guard let intersection = range.intersection(includedRange), intersection.length > 0 else { return nil }
+            return HighlightRange(range: intersection, capture: value.capture)
+        }.sorted { lhs, rhs in
+            lhs.range.location != rhs.range.location
+                ? lhs.range.location < rhs.range.location
+                : lhs.range.length > rhs.range.length
+        }
     }
 }

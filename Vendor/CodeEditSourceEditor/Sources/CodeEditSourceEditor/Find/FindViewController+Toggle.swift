@@ -16,6 +16,7 @@ extension FindViewController {
     /// - Animates the find panel into position (resolvedTopPadding).
     /// - Makes the find panel the first responder.
     func showFindPanel(animated: Bool = true) {
+        seedFindTextFromSelection()
         if viewModel.isShowingFindPanel {
             // If panel is already showing, just focus the text field
             viewModel.isFocused = true
@@ -49,6 +50,20 @@ extension FindViewController {
             name: FindPanelViewModel.Notifications.didToggle,
             object: viewModel.target
         )
+    }
+
+    /// Atelier patch: ⌘F with a selection searches for it — one line, not
+    /// empty, not absurdly long. Every editor since TextMate does this; the
+    /// panel used to keep whatever it last searched.
+    private func seedFindTextFromSelection() {
+        guard let textView = viewModel.target?.textView,
+              let range = textView.selectionManager.textSelections.first?.range,
+              range.length > 0, range.length <= 256,
+              let storage = textView.textStorage, NSMaxRange(range) <= storage.length else { return }
+        let text = storage.attributedSubstring(from: range).string
+        guard !text.contains("\n"), text != viewModel.findText else { return }
+        viewModel.findText = text
+        viewModel.find()
     }
 
     /// Hide the find panel

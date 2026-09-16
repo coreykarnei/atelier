@@ -70,6 +70,11 @@ enum Menu {
         // F12 — the VSCode instinct (§2.6). Function keys carry no modifier.
         viewMenu.addItem(chord("Go to Definition", #selector(AppDelegate.goToDefinition(_:)),
                                String(UnicodeScalar(UInt16(NSF12FunctionKey))!), []))
+        // File history — Xcode's chords (⌃⌘← / →); the header's `< >` are the pointer route.
+        viewMenu.addItem(chord("Back", #selector(AppDelegate.goBackInHistory(_:)),
+                               String(UnicodeScalar(UInt16(NSLeftArrowFunctionKey))!), [.control, .command]))
+        viewMenu.addItem(chord("Forward", #selector(AppDelegate.goForwardInHistory(_:)),
+                               String(UnicodeScalar(UInt16(NSRightArrowFunctionKey))!), [.control, .command]))
         viewMenu.addItem(.separator())
 
         viewMenu.addItem(withTitle: "New Project Tab", action: #selector(AppDelegate.newProject(_:)), keyEquivalent: "t")

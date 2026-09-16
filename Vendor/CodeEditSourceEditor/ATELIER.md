@@ -24,3 +24,21 @@ root overrides by identity with `Vendor/` copies.
    `Controller/TextViewController+AtelierChords.swift`): ⌥⌘↑/↓ add caret
    above/below, ⇧⌥↑/↓ duplicate lines, ⌥↑/↓ move lines (upstream had the
    methods, no binding), ⌘D select next occurrence.
+5. **Per-capture theme attributes** (`Theme/EditorTheme.swift`,
+   `Enums/CaptureName.swift`): `EditorTheme.captures[CaptureName]` is
+   consulted before the eight coarse slots, and `CaptureName` gains the
+   captures the bundled queries already emit (function.builtin, constant,
+   constant.builtin, operator, punctuation, escape, type.builtin,
+   attribute, namespace, label) plus prefix fallback for dotted names.
+   Before this, `def`, `self`, `None`, operators and builtin calls in
+   Python all rendered as plain text.
+6. **One capture per range** (`TreeSitter/TreeSitterClient+Highlight.swift`,
+   `highlightsFromCursor`). When a generic capture (`(identifier)
+   @variable`) preceded a specific one (`@function`) for the same node,
+   both were emitted and the style container kept the first — function,
+   method and builtin names rendered as variables in every language whose
+   query has a catch-all identifier pattern. Now the lowest-indexed capture
+   wins outright and results come back in document order.
+7. **⌘F seeds from the selection** (`Find/FindViewController+Toggle.swift`):
+   a non-empty single-line selection becomes the find text when the panel
+   is summoned (and re-seeds when it's already up).

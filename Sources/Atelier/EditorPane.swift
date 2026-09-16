@@ -39,6 +39,62 @@ final class EditorPane: NSView, WorkspacePane {
     private let contentHost = NSView()
     private let fileHeader = EditorFileHeader()
     private let diagnosticStrip = DiagnosticStrip()
+
+    // MARK: File history (2026-09-16)
+    // Where you've been, in order — committed opens only (previews are
+    // glances). ⌘-click into a `.pyi` and `<` brings you straight back to
+    // the line you left. Capped; a session isn't a browser.
+    private struct HistoryEntry { let path: String; var line: Int }
+    private var history: [HistoryEntry] = []
+    private var historyIndex = -1
+    /// Fired when back/forward availability changes.
+    var onHistoryChange: (() -> Void)?
+    /// History navigation asks the controller to open (dirty guard, focus)
+    /// rather than opening directly.
+    var onNavigateRequest: ((_ path: String, _ line: Int) -> Void)?
+    var canGoBack: Bool { historyIndex > 0 }
+    var canGoForward: Bool { historyIndex >= 0 && historyIndex < history.count - 1 }
+
+    /// The current entry learns the caret line the moment we leave it.
+    private func rememberPosition() {
+        guard historyIndex >= 0, let filePath, history[historyIndex].path == filePath else { return }
+        history[historyIndex].line = cursorPosition?.line ?? 1
+    }
+
+    private func recordVisit(_ path: String) {
+        if historyIndex >= 0, history[historyIndex].path == path { return }
+        history = Array(history.prefix(historyIndex + 1))
+        history.append(HistoryEntry(path: path, line: cursorPosition?.line ?? 1))
+        if history.count > 100 { history.removeFirst(history.count - 100) }
+        historyIndex = history.count - 1
+        fileHeader.setHistory(back: canGoBack, forward: canGoForward)
+        onHistoryChange?()
+    }
+
+    func goBack() { navigateHistory(by: -1) }
+    func goForward() { navigateHistory(by: 1) }
+
+    private func navigateHistory(by step: Int) {
+        rememberPosition()
+        var target = historyIndex + step
+        // Files vanish (worktree torn down, stash): drop dead entries and
+        // keep stepping the same way.
+        while target >= 0, target < history.count,
+              !FileManager.default.fileExists(atPath: history[target].path) {
+            history.remove(at: target)
+            if step < 0 { target -= 1; historyIndex -= 1 }
+        }
+        guard target >= 0, target < history.count else {
+            fileHeader.setHistory(back: canGoBack, forward: canGoForward)
+            onHistoryChange?()
+            return
+        }
+        historyIndex = target
+        let entry = history[target]
+        fileHeader.setHistory(back: canGoBack, forward: canGoForward)
+        onHistoryChange?()
+        onNavigateRequest?(entry.path, entry.line)
+    }
     private let preview = MarkdownPreviewView(frame: .zero)
     private var previewRenderDebounce: Timer?
     private var isMarkdown: Bool { bufferLanguage?.id == .markdown }
@@ -170,6 +226,8 @@ final class EditorPane: NSView, WorkspacePane {
         explorerWidth = explorer.widthAnchor.constraint(equalToConstant: FileExplorerView.width)
         fileHeader.translatesAutoresizingMaskIntoConstraints = false
         fileHeader.isHidden = true
+        fileHeader.onBack = { [weak self] in self?.goBack() }
+        fileHeader.onForward = { [weak self] in self?.goForward() }
         fileHeader.onModeChange = { [weak self] previewOn in
             guard let self else { return }
             self.previewMode = previewOn
@@ -250,6 +308,29 @@ final class EditorPane: NSView, WorkspacePane {
                         + self.lastDiagnostics.prefix(5).map { "\($0.startLine + 1):\($0.startCharacter + 1)-\($0.endLine + 1):\($0.endCharacter + 1) \($0.severity) '\($0.message.prefix(60))'" }.joined(separator: " | ")
                         + "\nstrip hidden=\(self.diagnosticStrip.isHidden) text='\(self.diagnosticStrip.debugText)' frame=\(self.diagnosticStrip.frame)\n"
                     try? report.write(toFile: NSHomeDirectory() + "/.local/state/atelier/probe.txt", atomically: true, encoding: .utf8)
+                }
+            }
+            return
+        }
+        if query == "probe:back" { goBack(); return }
+        if query == "probe:forward" { goForward(); return }
+        if query.hasPrefix("probe:findseed=") {
+            // `probe:findseed=word` — select the first occurrence, press ⌘F.
+            let word = String(query.dropFirst("probe:findseed=".count))
+            guard let controller, let window, let textView = controller.textView else { return }
+            let range = (controller.text as NSString).range(of: word)
+            guard range.location != NSNotFound else { return }
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            window.makeFirstResponder(textView)
+            controller.setCursorPositions([CursorPosition(range: range)], scrollToVisible: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                for type in [NSEvent.EventType.keyDown, .keyUp] {
+                    if let event = NSEvent.keyEvent(
+                        with: type, location: .zero, modifierFlags: [.command], timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil, characters: "f", charactersIgnoringModifiers: "f",
+                        isARepeat: false, keyCode: 3
+                    ) { NSApp.sendEvent(event) }
                 }
             }
             return
@@ -401,6 +482,7 @@ final class EditorPane: NSView, WorkspacePane {
         // The previous buffer leaves the server's world before the new one
         // enters it; its underlines go with it.
         if let previous = filePath, previous != path {
+            rememberPosition()
             lspClient?.didClose(path: previous)
             clearDiagnostics()
         }
@@ -425,6 +507,11 @@ final class EditorPane: NSView, WorkspacePane {
             // Free two-axis scrolling: with wrapping off a code view is a plane,
             // and AppKit's axis lock makes diagonal trackpad gestures stutter.
             controller.scrollView?.usesPredominantAxisScrolling = false
+            // macOS 14 stopped clipping subviews by default; the gutter is a
+            // floating subview sized to the whole document, so its line
+            // numbers were painting up over the file header.
+            controller.view.clipsToBounds = true
+            controller.scrollView?.clipsToBounds = true
             installGutterMask(controller)
             controller.textView?.onCommandClick = { [weak self] _ in self?.onGoToDefinition?() }
             contentHost.addSubview(diagnosticStrip, positioned: .above, relativeTo: controller.view)
@@ -452,6 +539,7 @@ final class EditorPane: NSView, WorkspacePane {
         applyViewMode()
 
         if !preview {
+            recordVisit(path)
             announceOpen(path: path, text: text)
             setExplorerExpanded(false)
         }
@@ -588,6 +676,7 @@ final class EditorPane: NSView, WorkspacePane {
         isWrapped = false
         controller.configuration = Self.configuration(wrap: false)
         if wasPreview { announceOpen(path: filePath, text: controller.text) }
+        recordVisit(filePath)
         setExplorerExpanded(false)
     }
 
@@ -820,6 +909,40 @@ final class EditorPane: NSView, WorkspacePane {
         out += "docVisible=\(sv.documentVisibleRect) estWidth=\(controller.textView.layoutManager.estimatedWidth())\n"
         out += "  hits: " + hits.joined(separator: " ") + "\n  " + minimapLine
         out += "\n  strip hidden=\(diagnosticStrip.isHidden) '\(diagnosticStrip.debugText)'"
+        if let root = window?.contentView {
+            // The find panel's row: 14pt under the header, across the width.
+            var top: [String] = []
+            let y = contentHost.isFlipped
+                ? contentHost.bounds.minY + EditorFileHeader.height + 14
+                : contentHost.bounds.maxY - EditorFileHeader.height - 14
+            for step in 0...11 {
+                let x = contentHost.bounds.minX + contentHost.bounds.width * CGFloat(step) / 11
+                let point = contentHost.convert(NSPoint(x: min(x, contentHost.bounds.maxX - 1), y: y), to: root)
+                let hit = root.hitTest(point)
+                let chain = sequence(first: hit, next: { $0?.superview }).prefix(3).compactMap { $0 }.map { String(describing: type(of: $0)) }
+                top.append("\(Int(x)):\(chain.joined(separator: "<"))")
+            }
+            out += "\n  topHits: " + top.joined(separator: " ")
+            let panels = controller.view.subviews.flatMap { [$0] + $0.subviews }.filter { String(describing: type(of: $0)).contains("FindPanel") }
+            out += "\n  findPanel: " + panels.map { "\(type(of: $0)) frame=\($0.frame) hidden=\($0.isHidden)" }.joined(separator: "; ")
+        }
+        if let lang = bufferLanguage {
+            let url = lang.queryURL
+            let exists = url.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+            out += "\n  ts query=\(TreeSitterModel.shared.query(for: lang.id) != nil) url=\(url?.path ?? "-") exists=\(exists) tsLang=\(lang.language != nil)"
+        }
+        if let storage = controller.textView.textStorage {
+            var colors: [String: Int] = [:]
+            let probe = NSRange(location: 0, length: min(storage.length, 1500))
+            storage.enumerateAttribute(.foregroundColor, in: probe) { value, range, _ in
+                let key = (value as? NSColor).map { c in
+                    let c = c.usingColorSpace(.sRGB) ?? c
+                    return String(format: "%02X%02X%02X", Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255))
+                } ?? "nil"
+                colors[key, default: 0] += range.length
+            }
+            out += "\n  colors=\(colors.sorted { $0.value > $1.value }.map { "\($0.key):\($0.value)" }.joined(separator: " "))"
+        }
         return out
     }
 
@@ -830,6 +953,48 @@ final class EditorPane: NSView, WorkspacePane {
     /// terminal size. Minimap off — not this app's furniture. Bracket
     /// emphasis nil: the default flash is a motion the inventory doesn't own.
     /// A preview wraps to the pane; everything else is identical.
+    /// The fine map (§2.9 continued, 2026-09-16): one Catppuccin colour per
+    /// tree-sitter capture, catppuccin/nvim's assignments. Declaration
+    /// keywords (`def`, `func`, `import`) stay mauve but go italic, so a
+    /// definition reads apart from control flow without leaving the palette.
+    private static let captureAttributes: [CaptureName: EditorTheme.Attribute] = {
+        typealias A = EditorTheme.Attribute
+        let e = Theme.Editor.self
+        return [
+            .keyword: A(color: e.keyword),
+            .conditional: A(color: e.keyword),
+            .repeat: A(color: e.keyword),
+            .keywordReturn: A(color: e.keyword),
+            .keywordFunction: A(color: e.keyword, italic: true),
+            .include: A(color: e.keyword, italic: true),
+            .function: A(color: e.function),
+            .method: A(color: e.method),
+            .functionBuiltin: A(color: e.builtinFunction),
+            .constructor: A(color: e.constructor),
+            .type: A(color: e.type),
+            .typeBuiltin: A(color: e.type),
+            .typeAlternate: A(color: e.type),
+            .property: A(color: e.property),
+            .parameter: A(color: e.parameter),
+            .variable: A(color: e.text),
+            .variableBuiltin: A(color: e.builtinVariable),
+            .constant: A(color: e.constant),
+            .constantBuiltin: A(color: e.constant),
+            .boolean: A(color: e.constant),
+            .number: A(color: e.number),
+            .float: A(color: e.number),
+            .string: A(color: e.string),
+            .escape: A(color: e.escape),
+            .operator: A(color: e.operatorSign),
+            .punctuation: A(color: e.punctuation),
+            .attribute: A(color: e.attribute),
+            .namespace: A(color: e.namespace),
+            .label: A(color: e.label),
+            .tag: A(color: e.function),
+            .comment: A(color: e.comment, italic: true),
+        ]
+    }()
+
     private static func configuration(wrap: Bool) -> SourceEditorConfiguration {
         SourceEditorConfiguration(
             appearance: .init(
@@ -849,7 +1014,8 @@ final class EditorPane: NSView, WorkspacePane {
                     numbers: .init(color: Theme.Editor.number),
                     strings: .init(color: Theme.Editor.string),
                     characters: .init(color: Theme.Editor.character),
-                    comments: .init(color: Theme.Editor.comment, italic: true)
+                    comments: .init(color: Theme.Editor.comment, italic: true),
+                    captures: captureAttributes
                 ),
                 font: Theme.Typography.mono(Theme.TypeScale.current),
                 wrapLines: wrap,
@@ -881,7 +1047,11 @@ private final class ChangeCoordinator: TextViewCoordinator {
 final class EditorFileHeader: NSView {
     static let height: CGFloat = 26
     var onModeChange: ((Bool) -> Void)?
+    var onBack: (() -> Void)?
+    var onForward: (() -> Void)?
     var isDirty = false { didSet { dot.isHidden = !isDirty } }
+    private let back = HoverPadButton(frame: .zero)
+    private let forward = HoverPadButton(frame: .zero)
 
     private let name = NSTextField(labelWithString: "")
     private let dot = NSView()
@@ -914,6 +1084,21 @@ final class EditorFileHeader: NSView {
         mode.translatesAutoresizingMaskIntoConstraints = false
         addSubview(mode)
 
+        // Back / forward through the file history (owner ask 2026-09-16):
+        // the browser's `< >`, at the title area's right edge. Disabled
+        // ends fade rather than vanish, so the pair never jumps.
+        for (button, symbol, action) in [(back, "chevron.left", #selector(goBack)), (forward, "chevron.right", #selector(goForward))] {
+            let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(config)
+            button.contentTintColor = Theme.chromeText
+            button.target = self
+            button.action = action
+            button.isEnabled = false
+            button.alphaValue = 0.3
+            button.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(button)
+        }
+
         let hairline = NSView()
         hairline.wantsLayer = true
         hairline.layer?.backgroundColor = Theme.Elevation.hairline.cgColor
@@ -927,7 +1112,15 @@ final class EditorFileHeader: NSView {
             dot.centerYAnchor.constraint(equalTo: centerYAnchor),
             dot.widthAnchor.constraint(equalToConstant: 6),
             dot.heightAnchor.constraint(equalToConstant: 6),
-            mode.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            forward.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            forward.centerYAnchor.constraint(equalTo: centerYAnchor),
+            forward.widthAnchor.constraint(equalToConstant: 20),
+            forward.heightAnchor.constraint(equalToConstant: 20),
+            back.trailingAnchor.constraint(equalTo: forward.leadingAnchor, constant: -2),
+            back.centerYAnchor.constraint(equalTo: centerYAnchor),
+            back.widthAnchor.constraint(equalToConstant: 20),
+            back.heightAnchor.constraint(equalToConstant: 20),
+            mode.trailingAnchor.constraint(equalTo: back.leadingAnchor, constant: -10),
             mode.centerYAnchor.constraint(equalTo: centerYAnchor),
             name.trailingAnchor.constraint(lessThanOrEqualTo: mode.leadingAnchor, constant: -24),
             hairline.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -953,6 +1146,16 @@ final class EditorFileHeader: NSView {
     @objc private func modeChanged() {
         onModeChange?(mode.selectedSegment == 1)
     }
+
+    func setHistory(back canBack: Bool, forward canForward: Bool) {
+        back.isEnabled = canBack
+        back.alphaValue = canBack ? HoverPadButton.restingAlpha : 0.3
+        forward.isEnabled = canForward
+        forward.alphaValue = canForward ? HoverPadButton.restingAlpha : 0.3
+    }
+
+    @objc private func goBack() { onBack?() }
+    @objc private func goForward() { onForward?() }
 }
 
 /// One line over the bottom edge of the buffer: severity dot, message.

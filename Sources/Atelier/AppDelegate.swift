@@ -335,6 +335,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func goToFile(_ sender: Any?) { keyController?.showFilePicker() }
     @objc func searchRepo(_ sender: Any?) { keyController?.showRepoSearch() }
     @objc func goToDefinition(_ sender: Any?) { keyController?.goToDefinition() }
+    @objc func goBackInHistory(_ sender: Any?) { keyController?.goBackInHistory() }
+    @objc func goForwardInHistory(_ sender: Any?) { keyController?.goForwardInHistory() }
     @objc func toggleExplorer(_ sender: Any?) { keyController?.toggleExplorer() }
     @objc func explorerSearch(_ sender: Any?) { keyController?.focusExplorerSearch() }
 

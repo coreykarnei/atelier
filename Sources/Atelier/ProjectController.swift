@@ -262,6 +262,10 @@ final class ProjectController: NSObject, BottomBarDelegate {
             self.openInEditor(url: url, session: session, hit: hit, preview: true)
         }
         session.editorPane.onGoToDefinition = { [weak self] in self?.goToDefinition() }
+        session.editorPane.onNavigateRequest = { [weak self, weak session] path, line in
+            guard let self, let session else { return }
+            self.openInEditor(url: URL(fileURLWithPath: path), session: session, cursor: (line, 1))
+        }
         session.onRemoteRequested = { [weak self, weak session] host, dir in
             guard let self, let session else { return }
             self.replaceLanding(session, withRemote: host, dir: dir)
@@ -701,6 +705,9 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// place; cross-file jumps ride the ⌘P open path (dirty guard included).
     /// No result is a quiet no-op: the server may still be indexing, and a
     /// missing definition isn't an error worth a dialog.
+    func goBackInHistory() { activeSession?.editorPane.goBack() }
+    func goForwardInHistory() { activeSession?.editorPane.goForward() }
+
     func goToDefinition() {
         guard let session = activeSession, session.state == .ide,
               let path = session.editorPane.filePath,
