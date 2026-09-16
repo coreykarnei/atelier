@@ -717,11 +717,27 @@ extension FileExplorerView: NSOutlineViewDataSource, NSOutlineViewDelegate {
         let row = ExplorerRowView()
         row.depth = outlineView.level(forItem: item)
         row.guideStep = outlineView.indentationPerLevel
+        row.isOpenFolder = outlineView.isItemExpanded(item)
         return row
     }
 
-    func outlineViewItemDidExpand(_ notification: Notification) { updateSticky() }
-    func outlineViewItemDidCollapse(_ notification: Notification) { updateSticky() }
+    func outlineViewItemDidExpand(_ notification: Notification) {
+        markFolderRow(notification, open: true)
+        updateSticky()
+    }
+    func outlineViewItemDidCollapse(_ notification: Notification) {
+        markFolderRow(notification, open: false)
+        updateSticky()
+    }
+
+    /// The folder's own row starts its guide (chevron down); tell the row.
+    private func markFolderRow(_ notification: Notification, open: Bool) {
+        guard let item = notification.userInfo?["NSObject"] else { return }
+        let row = outline.row(forItem: item)
+        guard row >= 0, let view = outline.rowView(atRow: row, makeIfNecessary: false) as? ExplorerRowView else { return }
+        view.isOpenFolder = open
+        view.needsDisplay = true
+    }
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         guard let node = item as? FileNode else { return nil }
@@ -792,18 +808,25 @@ private final class ExplorerRowView: NSTableRowView {
     /// Nesting level; one indent guide per ancestor.
     var depth = 0
     var guideStep: CGFloat = 12
+    /// An expanded folder: its guide starts here, right under its chevron.
+    var isOpenFolder = false
 
     /// The pane's crust shows through; the only paint is the indent guides —
     /// a hairline under each ancestor's chevron, so a folder's extent reads
     /// as a vertical line down its children (owner ask 2026-09-15).
     override func drawBackground(in dirtyRect: NSRect) {} // AppKit skips this on a clear table anyway
     override func draw(_ dirtyRect: NSRect) {
-        if depth > 0 {
-            Theme.Elevation.hairline.setFill()
-            for level in 0..<depth {
-                let x = FileExplorerView.chevronCenterX + guideStep * CGFloat(level)
-                NSRect(x: x - 0.5, y: 0, width: 1, height: bounds.height).fill()
-            }
+        Theme.Elevation.hairline.setFill()
+        for level in 0..<depth {
+            let x = FileExplorerView.chevronCenterX + guideStep * CGFloat(level)
+            NSRect(x: x - 0.5, y: 0, width: 1, height: bounds.height).fill()
+        }
+        if isOpenFolder {
+            // From just below the chevron to the row's bottom edge, where the
+            // children's guide picks it up. Row views are flipped: y grows down.
+            let x = FileExplorerView.chevronCenterX + guideStep * CGFloat(depth)
+            let top = bounds.midY + 6
+            NSRect(x: x - 0.5, y: top, width: 1, height: max(0, bounds.height - top)).fill()
         }
         super.draw(dirtyRect)
     }
