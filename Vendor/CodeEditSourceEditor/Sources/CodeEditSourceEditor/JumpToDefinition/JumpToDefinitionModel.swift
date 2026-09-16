@@ -28,6 +28,8 @@ final class JumpToDefinitionModel {
     private var jumpRequestTask: Task<Void, Never>?
 
     private var currentLinks: [JumpToDefinitionLink]?
+    /// Atelier patch: the links the hover already confirmed for `hoveredRange`.
+    private var hoverLinks: [JumpToDefinitionLink]?
 
     private var textView: TextView? {
         controller?.textView
@@ -62,9 +64,12 @@ final class JumpToDefinitionModel {
         jumpRequestTask?.cancel()
         jumpRequestTask = Task {
             currentLinks = nil
-            guard let controller,
-                  let links = await delegate?.queryLinks(forRange: location, textView: controller),
-                  !links.isEmpty else {
+            // Atelier patch: the hover already asked; don't ask twice.
+            let cached = (location == hoveredRange) ? hoverLinks : nil
+            guard let controller else { return }
+            var resolved = cached
+            if resolved == nil { resolved = await delegate?.queryLinks(forRange: location, textView: controller) }
+            guard let links = resolved, !links.isEmpty else {
                 NSSound.beep()
                 if let textView {
                     BezelNotification.show(symbolName: "questionmark", over: textView)
@@ -134,6 +139,17 @@ final class JumpToDefinitionModel {
         hoverRequestTask?.cancel()
         hoverRequestTask = Task {
             guard let newRange = await findDefinitionRange(at: location) else { return }
+            if newRange == hoveredRange { return }
+            // Atelier patch: promise a link only when one exists — ask the
+            // delegate on hover (VSCode's manner), not just "is this an
+            // identifier". Unresolvable symbols keep the arrow cursor.
+            guard let controller,
+                  let links = await delegate?.queryLinks(forRange: newRange, textView: controller),
+                  !links.isEmpty, !Task.isCancelled else {
+                cancelHover()
+                return
+            }
+            hoverLinks = links
             updateHoveredRange(to: newRange)
         }
     }
@@ -143,6 +159,7 @@ final class JumpToDefinitionModel {
             (textView as? SourceEditorTextView)?.additionalCursorRects = []
             textView?.resetCursorRects()
         }
+        hoverLinks = nil
         guard hoveredRange != nil else { return }
         hoveredRange = nil
         hoverRequestTask?.cancel()
@@ -157,9 +174,11 @@ final class JumpToDefinitionModel {
         hoveredRange = newRange
 
         textView?.emphasisManager?.removeEmphases(for: Self.emphasisId)
-        let color = textView?.selectionManager.selectionBackgroundColor ?? .selectedTextBackgroundColor
+        // Atelier patch: a link underline in the theme's colour, not a
+        // filled selection-coloured box.
+        let color = controller?.linkHoverColor ?? .linkColor
         textView?.emphasisManager?.addEmphasis(
-            Emphasis(range: newRange, style: .outline( color: color, fill: true)),
+            Emphasis(range: newRange, style: .underline(color: color)),
             for: Self.emphasisId
         )
     }

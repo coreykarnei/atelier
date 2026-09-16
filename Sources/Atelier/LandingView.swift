@@ -70,6 +70,7 @@ final class LandingView: NSView, WorkspacePane {
     private let cardHost = NSView()
     private let card = NSView()
     private var listHeight: NSLayoutConstraint?
+    private var cardWidth: NSLayoutConstraint?
     private let defaultFolder: String
     private var entries: [LandingEntry] = []
     private var emptyHint: NSTextField?
@@ -104,6 +105,8 @@ final class LandingView: NSView, WorkspacePane {
 
         card.wantsLayer = true
         card.layer?.backgroundColor = Theme.Elevation.base.cgColor
+        card.layer?.borderWidth = 1
+        card.layer?.borderColor = Theme.Elevation.hairline.cgColor
         card.layer?.cornerRadius = Theme.Elevation.radiusLarge
         card.layer?.masksToBounds = true
         card.translatesAutoresizingMaskIntoConstraints = false
@@ -136,7 +139,14 @@ final class LandingView: NSView, WorkspacePane {
         ])) }
         chord("↩"); prose(" open · "); chord("⌘↩"); prose(" "); chord("ide")
         prose(" in terminal dir · "); chord("⌃⌘j"); prose(" shell")
+        let hintParagraph = NSMutableParagraphStyle()
+        hintParagraph.alignment = .center
+        hintParagraph.lineBreakMode = .byWordWrapping
+        hint.addAttribute(.paragraphStyle, value: hintParagraph, range: NSRange(location: 0, length: hint.length))
         hintLabel.attributedStringValue = hint
+        hintLabel.alignment = .center
+        hintLabel.lineBreakMode = .byWordWrapping
+        hintLabel.maximumNumberOfLines = 2
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(hintLabel)
 
@@ -145,6 +155,8 @@ final class LandingView: NSView, WorkspacePane {
         let topSpace = NSLayoutGuide()
         addLayoutGuide(topSpace)
 
+        let width = cardHost.widthAnchor.constraint(equalToConstant: 560)
+        cardWidth = width
         let bottomGuard = cardHost.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -16)
         NSLayoutConstraint.activate([
             topSpace.topAnchor.constraint(equalTo: topAnchor),
@@ -152,7 +164,7 @@ final class LandingView: NSView, WorkspacePane {
 
             cardHost.topAnchor.constraint(equalTo: topSpace.bottomAnchor),
             cardHost.centerXAnchor.constraint(equalTo: centerXAnchor),
-            cardHost.widthAnchor.constraint(equalToConstant: 560),
+            width,
             bottomGuard,
 
             card.topAnchor.constraint(equalTo: cardHost.topAnchor),
@@ -172,6 +184,7 @@ final class LandingView: NSView, WorkspacePane {
 
             hintLabel.topAnchor.constraint(equalTo: cardHost.bottomAnchor, constant: 10),
             hintLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            hintLabel.widthAnchor.constraint(equalTo: cardHost.widthAnchor),
         ])
         // When the pane runs short, the list compresses before the card can
         // cross the divider.
@@ -225,9 +238,19 @@ final class LandingView: NSView, WorkspacePane {
     /// The card hugs its results (the palette's §6 height-tracking, embedded):
     /// grows as matches appear, shrinks as the query narrows, one-line floor
     /// for the no-match state.
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        cardWidth?.constant = min(560, max(0, newSize.width - 40))
+        listHeight?.constant = min(summon.contentHeight, availableListHeight)
+    }
+
+    private var availableListHeight: CGFloat {
+        bounds.height > 0 ? max(24, min(Self.maxListHeight, bounds.height * 0.74 - 100)) : Self.maxListHeight
+    }
+
     private func trackContentHeight() {
         guard let listHeight else { return }
-        let newHeight = min(summon.contentHeight, Self.maxListHeight)
+        let newHeight = min(summon.contentHeight, availableListHeight)
         guard listHeight.constant != newHeight else { return }
         if window == nil || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             listHeight.constant = newHeight

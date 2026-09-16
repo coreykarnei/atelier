@@ -45,6 +45,19 @@ public enum CaptureName: Int8, CaseIterable, Sendable {
     case attribute
     case namespace
     case label
+    // Atelier patch: markup captures for prose grammars (markdown): headings,
+    // emphasis, raw code, links, list markers, quotes. Aliased from nvim's
+    // `markup.*` names and the older `text.*` names in `fromString`.
+    case markupHeading1
+    case markupHeading
+    case markupStrong
+    case markupItalic
+    case markupStrikethrough
+    case markupRaw
+    case markupLink
+    case markupUrl
+    case markupList
+    case markupQuote
 
     var alternate: CaptureName {
         switch self {
@@ -59,7 +72,7 @@ public enum CaptureName: Int8, CaseIterable, Sendable {
     /// - Note: See ``CaptureName`` docs for why this enum isn't a raw representable.
     /// - Parameter string: A string to get the capture name from
     /// - Returns: A `CaptureNames` case
-    public static func fromString(_ string: String?) -> CaptureName? { // swiftlint:disable:this cyclomatic_complexity
+    public static func fromString(_ string: String?) -> CaptureName? { // swiftlint:disable:this cyclomatic_complexity function_body_length
         guard let string else { return nil }
         switch string {
         case "include":
@@ -105,7 +118,7 @@ public enum CaptureName: Int8, CaseIterable, Sendable {
         case "keyword.function":
             return .keywordFunction
         case "function.builtin": return .functionBuiltin
-        case "function.method", "method.call": return .method
+        case "function.method", "function.method.call", "method.call": return .method
         case "function.call", "function.macro": return .function
         case "variable.parameter": return .parameter
         case "variable.member", "field": return .property
@@ -115,7 +128,9 @@ public enum CaptureName: Int8, CaseIterable, Sendable {
         case "punctuation", "punctuation.bracket", "punctuation.delimiter", "punctuation.special": return .punctuation
         case "escape", "string.escape": return .escape
         case "string.special", "string.regex", "string.special.symbol", "character": return .string
-        case "type.builtin", "type.definition", "type.qualifier": return .typeBuiltin
+        case "type.builtin", "type.qualifier": return .typeBuiltin
+        case "type.definition": return .type  // a declared type's name paints like its uses
+        case "keyword.conditional.ternary": return .operator
         case "attribute", "annotation", "decorator": return .attribute
         case "namespace", "module": return .namespace
         case "label": return .label
@@ -125,6 +140,19 @@ public enum CaptureName: Int8, CaseIterable, Sendable {
         case "keyword.type", "keyword.modifier", "keyword.storage", "keyword.coroutine": return .keyword
         case "comment.documentation", "spell": return .comment
         case "number.float": return .float
+        // Markup (markdown): nvim `markup.*` and the older `text.*` names.
+        case "markup.heading.1", "text.title.1": return .markupHeading1
+        case "markup.heading", "markup.heading.2", "markup.heading.3", "markup.heading.4",
+             "markup.heading.5", "markup.heading.6", "markup.heading.marker", "text.title": return .markupHeading
+        case "markup.strong", "markup.bold", "text.strong": return .markupStrong
+        case "markup.italic", "markup.emphasis", "text.emphasis": return .markupItalic
+        case "markup.strikethrough", "text.strike": return .markupStrikethrough
+        case "markup.raw", "markup.raw.block", "markup.raw.inline", "text.literal": return .markupRaw
+        case "markup.link", "markup.link.label", "markup.link.text", "text.reference": return .markupLink
+        case "markup.link.url", "text.uri": return .markupUrl
+        case "markup.list", "markup.list.checked", "markup.list.unchecked",
+             "markup.list.numbered", "markup.list.unnumbered": return .markupList
+        case "markup.quote": return .markupQuote
         default:
             // Unknown dotted capture: fall back to its head ("string.foo" → string).
             if let dot = string.firstIndex(of: "."), dot > string.startIndex {
@@ -189,6 +217,16 @@ public enum CaptureName: Int8, CaseIterable, Sendable {
         case .attribute: return "attribute"
         case .namespace: return "namespace"
         case .label: return "label"
+        case .markupHeading1: return "markup.heading.1"
+        case .markupHeading: return "markup.heading"
+        case .markupStrong: return "markup.strong"
+        case .markupItalic: return "markup.italic"
+        case .markupStrikethrough: return "markup.strikethrough"
+        case .markupRaw: return "markup.raw"
+        case .markupLink: return "markup.link"
+        case .markupUrl: return "markup.link.url"
+        case .markupList: return "markup.list"
+        case .markupQuote: return "markup.quote"
         }
     }
 }

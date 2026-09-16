@@ -67,7 +67,7 @@ enum Settings {
     }
 }
 
-/// `⌘,` / the bar's gear: one small panel, two controls. Atelier speaks in
+/// `⌘,` / the bar's gear: one compact panel, grouped by purpose. Atelier speaks in
 /// SF Pro here (§1.4); the panel is opaque chrome, not a field.
 final class SettingsWindowController: NSWindowController {
     static let shared = SettingsWindowController()
@@ -80,7 +80,7 @@ final class SettingsWindowController: NSWindowController {
 
     private init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 210),
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 370),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -89,9 +89,9 @@ final class SettingsWindowController: NSWindowController {
         window.isReleasedWhenClosed = false
         window.titlebarAppearsTransparent = true
         window.appearance = NSAppearance(named: .darkAqua)
-        window.backgroundColor = Theme.Elevation.surface0
+        window.backgroundColor = Theme.Elevation.overlayFill
         window.contentView?.wantsLayer = true
-        window.contentView?.layer?.backgroundColor = Theme.Elevation.surface0.cgColor
+        window.contentView?.layer?.backgroundColor = Theme.Elevation.overlayFill.cgColor
         super.init(window: window)
         NotificationCenter.default.addObserver(
             self, selector: #selector(settingsChanged), name: Settings.didChange, object: nil
@@ -105,7 +105,7 @@ final class SettingsWindowController: NSWindowController {
     private func build() {
         guard let content = window?.contentView else { return }
 
-        let alphaLabel = NSTextField(labelWithString: "Field opacity")
+        let alphaLabel = NSTextField(labelWithString: "Pane opacity")
         alphaLabel.font = Theme.Typography.ui(Theme.Typography.body)
         alphaLabel.textColor = Theme.chromeText
 
@@ -113,6 +113,7 @@ final class SettingsWindowController: NSWindowController {
         alphaSlider.maxValue = 1.0
         alphaSlider.doubleValue = Double(Settings.fieldAlpha)
         alphaSlider.isContinuous = true
+        alphaSlider.setAccessibilityLabel("Pane opacity")
         alphaSlider.target = self
         alphaSlider.action = #selector(alphaChanged)
 
@@ -121,7 +122,7 @@ final class SettingsWindowController: NSWindowController {
         alphaValue.alignment = .right
         refreshAlphaValue()
 
-        let alphaHint = NSTextField(labelWithString: "How much the panes cover the blur behind the window. Text is never affected.")
+        let alphaHint = NSTextField(labelWithString: "Adjust the background; text stays fully legible.")
         alphaHint.font = Theme.Typography.ui(Theme.Typography.small)
         alphaHint.textColor = Theme.chromeMutedText
         alphaHint.lineBreakMode = .byWordWrapping
@@ -135,7 +136,7 @@ final class SettingsWindowController: NSWindowController {
         worktreesToggle.target = self
         worktreesToggle.action = #selector(worktreesChanged)
 
-        let worktreesHint = NSTextField(labelWithString: "New sessions ask which worktree to start in, and can create one. Off: sessions start on the main checkout.")
+        let worktreesHint = NSTextField(labelWithString: "Choose or create a worktree when starting a session.")
         worktreesHint.font = Theme.Typography.ui(Theme.Typography.small)
         worktreesHint.textColor = Theme.chromeMutedText
         worktreesHint.lineBreakMode = .byWordWrapping
@@ -149,7 +150,7 @@ final class SettingsWindowController: NSWindowController {
         confirmCloseToggle.target = self
         confirmCloseToggle.action = #selector(confirmCloseChanged)
 
-        let confirmHint = NSTextField(labelWithString: "The tab's × asks first. Its \"Don't ask again\" turns this off.")
+        let confirmHint = NSTextField(labelWithString: "Confirm before closing from a session’s close button.")
         confirmHint.font = Theme.Typography.ui(Theme.Typography.small)
         confirmHint.textColor = Theme.chromeMutedText
         confirmHint.lineBreakMode = .byWordWrapping
@@ -163,40 +164,63 @@ final class SettingsWindowController: NSWindowController {
         autosaveToggle.target = self
         autosaveToggle.action = #selector(autosaveChanged)
 
-        let autosaveHint = NSTextField(labelWithString: "The editor writes the file a moment after each edit. Off: ⌘S, and a question before discarding changes.")
+        let autosaveHint = NSTextField(labelWithString: "Save after each edit. When off, use ⌘S to save.")
         autosaveHint.font = Theme.Typography.ui(Theme.Typography.small)
         autosaveHint.textColor = Theme.chromeMutedText
         autosaveHint.lineBreakMode = .byWordWrapping
         autosaveHint.maximumNumberOfLines = 2
 
-        let alphaRow = NSStackView(views: [alphaLabel, alphaSlider, alphaValue])
+        func heading(_ title: String) -> NSTextField {
+            let label = NSTextField(labelWithString: title)
+            label.font = Theme.Typography.ui(Theme.Typography.small, weight: .semibold)
+            label.textColor = Theme.chromeText
+            return label
+        }
+        func separator() -> NSBox {
+            let line = NSBox(); line.boxType = .custom; line.borderWidth = 0
+            line.fillColor = Theme.Elevation.frameLine
+            line.heightAnchor.constraint(equalToConstant: 1).isActive = true
+            return line
+        }
+        let alphaRow = NSStackView(views: [alphaLabel, NSView(), alphaValue])
         alphaRow.orientation = .horizontal
         alphaRow.spacing = 10
-
-        let stack = NSStackView(views: [alphaRow, alphaHint, autosaveToggle, autosaveHint, worktreesToggle, worktreesHint, confirmCloseToggle, confirmHint])
+        let rule1 = separator(), rule2 = separator()
+        let appearance = heading("Appearance"), editing = heading("Editing"), sessions = heading("Sessions")
+        let views: [NSView] = [appearance, alphaRow, alphaSlider, alphaHint, rule1,
+            editing, autosaveToggle, autosaveHint, rule2,
+            sessions, worktreesToggle, worktreesHint, confirmCloseToggle, confirmHint]
+        let stack = NSStackView(views: views)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 6
-        stack.setCustomSpacing(18, after: alphaHint)
-        stack.setCustomSpacing(18, after: autosaveHint)
-        stack.setCustomSpacing(18, after: worktreesHint)
+        stack.setCustomSpacing(12, after: appearance)
+        stack.setCustomSpacing(12, after: editing)
+        stack.setCustomSpacing(12, after: sessions)
+        stack.setCustomSpacing(16, after: alphaHint)
+        stack.setCustomSpacing(16, after: autosaveHint)
+        stack.setCustomSpacing(12, after: rule1)
+        stack.setCustomSpacing(12, after: rule2)
+        stack.setCustomSpacing(12, after: worktreesHint)
         stack.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(stack)
-
+        for view in [alphaRow, alphaSlider, alphaHint, autosaveHint, worktreesHint, confirmHint, rule1, rule2] {
+            view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        for hint in [alphaHint, autosaveHint, worktreesHint, confirmHint] {
+            hint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 18),
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
-            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -18),
-            alphaRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            alphaHint.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            worktreesHint.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            confirmHint.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            alphaValue.widthAnchor.constraint(equalToConstant: 40),
+            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 20),
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -20),
+            alphaValue.widthAnchor.constraint(equalToConstant: 42),
         ])
     }
 
     func show() {
+        autosaveToggle.state = Settings.autosave ? .on : .off
         alphaSlider.doubleValue = Double(Settings.fieldAlpha)
         worktreesToggle.state = Settings.worktreesEnabled ? .on : .off
         confirmCloseToggle.state = Settings.confirmClose ? .on : .off
@@ -207,7 +231,7 @@ final class SettingsWindowController: NSWindowController {
     }
 
     private func refreshAlphaValue() {
-        alphaValue.stringValue = String(format: "%.2f", Settings.fieldAlpha)
+        alphaValue.stringValue = String(format: "%.0f%%", Settings.fieldAlpha * 100)
     }
 
     @objc private func alphaChanged() {
@@ -229,6 +253,8 @@ final class SettingsWindowController: NSWindowController {
 
     /// The File menu's Autosave item flips the same switch; keep the box honest.
     @objc private func settingsChanged() {
+        alphaSlider.doubleValue = Double(Settings.fieldAlpha)
+        refreshAlphaValue()
         autosaveToggle.state = Settings.autosave ? .on : .off
         worktreesToggle.state = Settings.worktreesEnabled ? .on : .off
         confirmCloseToggle.state = Settings.confirmClose ? .on : .off

@@ -42,3 +42,10 @@ root overrides by identity with `Vendor/` copies.
 7. **⌘F seeds from the selection** (`Find/FindViewController+Toggle.swift`):
    a non-empty single-line selection becomes the find text when the panel
    is summoned (and re-seeds when it's already up).
+8. **Jump-to-definition reachable from AppKit** (`Controller/
+   TextViewController.swift`, `JumpToDefinition/JumpToDefinitionModel.swift`):
+   `jumpToDefinitionDelegate` + `linkHoverColor` public on the controller
+   (upstream sets the delegate only through the SwiftUI wrapper). The hover
+   now asks the delegate for links before showing the hand — an identifier
+   with no definition keeps the arrow — caches them for the click, and
+   underlines in the theme colour instead of a filled selection box.

@@ -2,7 +2,7 @@
 
 A terminal emulator that runs a local process without any UI.
 
-## Overview
+## Overview`
 
 `HeadlessTerminal` combines a ``Terminal`` engine with a ``LocalProcess``,
 providing a way to run commands and inspect their terminal output
@@ -11,7 +11,7 @@ scenarios where you need access to the full terminal state (including colors,
 cursor position, and escape sequence processing) but do not need a visual
 display.
 
-Access the underlying terminal through the ``terminal`` property to read
+Accessh the underlying terminal through the ``terminal`` property to read
 buffer contents, and use ``process`` to control the running subprocess.
 
 For a detailed guide, see <doc:HeadlessUsage>.

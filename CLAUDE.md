@@ -75,6 +75,19 @@ applied live via `Settings.didChange`, Enable worktrees), and inline tab rename 
 commits a hard override of the live Claude title, Esc cancels, empty reverts;
 titles uncapped).
 
+**2026-09-16 polish pass** (merged from the `codex-polish` branch): one
+`OverlayMaterialView` (base wash + hairline over the blur, opaque under
+Reduce Transparency) under the worktree chooser, palette, file picker and
+repo search; the chooser grew a labelled primary action (Start session /
+Choose / Create & start, with `↩`), local branch-name validation with an
+inline peach hint, a current-worktree checkmark, and a bounded scroll list
+that reveals the keyboard selection; the project row moves tabs past a
+180pt floor into an `…` overflow menu (the active tab always stays
+visible); Settings is grouped (Appearance / Editing / Sessions, opacity as
+a percentage); project/session items live in the File menu and "Find in
+Repo" reads "Find in Project"; bar and header buttons carry tooltips and
+accessibility labels. The pass is written up in `docs/devlog/2026-09-16-overlay-polish.md`.
+
 Milestone 2 (in progress): **M2.1 landed 2026-07-13** — the editor pane hosts a
 real buffer (CodeEditSourceEditor / TextKit 2, incremental tree-sitter
 highlighting, `Theme.Editor` Mocha syntax palette, background `base` at
@@ -108,7 +121,28 @@ meant for upstream, listed in each copy's `ATELIER.md` (hidden minimap
 swallowing clicks; widest-line width never escaping layout so nothing
 scrolled horizontally; scroll-to-visible following the selection box
 instead of the caret). Settings → Autosave (also File → Autosave) writes
-0.8s after each edit and silences the dirty guard. The triptych's two dividers can be dragged together from
+0.8s after each edit and silences the dirty guard. **2026-09-16:**
+`Vendor/CodeEditLanguages` (0.1.20) is the fourth override — its query
+path doubled `Resources/` under `swift build`, so no grammar ever
+highlighted before this; with that fixed the editor paints one Catppuccin
+colour per tree-sitter capture (`EditorPane.captureAttributes`,
+`Theme.Editor`), Python's keyword buckets are split in the vendored query,
+⌘F seeds from the selection, a diagnostic strip shows the message under
+the caret, the file header carries `< >` history (⌃⌘←/→), and the Python
+server is launched with the repo's `.venv` (root, one level down, or the
+main checkout's for a worktree) as `python.pythonPath` + an activated
+PATH. ⌘-hover shows the hand + underline only on symbols the server can
+resolve (the library's jump model, `EditorPane` as its delegate). Twelve
+more grammar queries were rewritten to nvim-treesitter buckets by a
+fan-out of agents (JS/TS, Go, Rust, Ruby, PHP, Java, C#, C/C++, Dart,
+Elixir, OCaml, Markdown; then bash, json, yaml, toml, css, html,
+dockerfile, go-mod) and gated with **`atelier-hlcheck`**
+(`swift run atelier-hlcheck <file>`; `Scripts/hlcheck/README.md`), which
+compiles a query against the bundled grammar and prints every span the
+way the editor resolves it — run it before touching any `highlights.scm`;
+the precedence trap (capture-name first mention, not pattern order) is
+documented there. `Scripts/hlcheck/shadow.sh` runs the prebuilt harness
+against another checkout's queries — the loop for parallel query work. The triptych's two dividers can be dragged together from
 where they cross (`SplitCornerHandle` in `Layout.swift`).
 
 Also landed 2026-07-14: **remote sessions** — the native successor of the

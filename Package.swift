@@ -22,6 +22,9 @@ let package = Package(
         // Local override of CodeEditTextView 0.12.1 carrying Atelier's
         // horizontal-scroll fix — see Vendor/CodeEditTextView/ATELIER.md.
         .package(path: "Vendor/CodeEditTextView"),
+        // Already transitive through CodeEditLanguages; named here so the
+        // highlight-query harness can drive tree-sitter directly.
+        .package(url: "https://github.com/ChimeHQ/SwiftTreeSitter.git", from: "0.25.0"),
     ],
     targets: [
         // Shared IPC contract: socket path + the message both ends encode/decode.
@@ -40,6 +43,19 @@ let package = Package(
                 .product(name: "CodeEditLanguages", package: "CodeEditLanguages"),
             ],
             path: "Sources/Atelier",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        // Dev harness: compile a language's highlight query against the
+        // bundled grammar and print every capture for a file — the way to
+        // test query work without launching the app (Scripts/hlcheck/README.md).
+        .executableTarget(
+            name: "atelier-hlcheck",
+            dependencies: [
+                .product(name: "CodeEditLanguages", package: "CodeEditLanguages"),
+                .product(name: "CodeEditSourceEditor", package: "CodeEditSourceEditor"),
+                .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
+            ],
+            path: "Sources/atelier-hlcheck",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         // Tiny CLI invoked by Claude Code's Stop/Notification hooks. Writes a

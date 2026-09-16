@@ -133,7 +133,7 @@ enum LSPServers {
 
     /// The login shell's PATH (once), then the app's own, then the usual
     /// tool bins in case the shell probe failed. Order preserved, deduped.
-    private static let searchPath: [String] = {
+    static let searchPath: [String] = {
         var dirs: [String] = []
         let probe = Process()
         probe.executableURL = URL(fileURLWithPath: "/bin/zsh")
@@ -182,12 +182,15 @@ final class LSPClient {
 
     let root: String
     let languageId: String
+    /// Workspace settings by section (`["python": ["pythonPath": …]]`).
+    private let settings: [String: Any]
     /// Fired on the main queue whenever the server publishes diagnostics.
     var onDiagnostics: ((_ path: String, _ diagnostics: [LSPDiagnostic]) -> Void)?
 
-    init?(root: String, command: [String], languageId: String) {
+    init?(root: String, command: [String], languageId: String, settings: [String: Any] = [:]) {
         self.root = root
         self.languageId = languageId
+        self.settings = settings
         guard let executable = command.first else { return nil }
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = Array(command.dropFirst())
@@ -195,6 +198,24 @@ final class LSPClient {
         process.standardInput = stdin
         process.standardOutput = stdout
         process.standardError = FileHandle.nullDevice
+        if Self.debugTrace != nil {
+            let errLog = NSHomeDirectory() + "/.local/state/atelier/lsp-stderr.log"
+            FileManager.default.createFile(atPath: errLog, contents: nil)
+            if let handle = FileHandle(forWritingAtPath: errLog) { process.standardError = handle }
+        }
+        // The environment the server sees. For Python, the venv's `bin` goes
+        // first on PATH and VIRTUAL_ENV is set — the same thing `source
+        // .venv/bin/activate` does — so a server that just runs `python`
+        // (pylsp, jedi, pyright's fallback) lands in the right interpreter
+        // without any protocol negotiation.
+        var environment = ProcessInfo.processInfo.environment
+        environment["PATH"] = LSPServers.searchPath.joined(separator: ":")
+        if let python = (settings["python"] as? [String: Any])?["pythonPath"] as? String {
+            let bin = (python as NSString).deletingLastPathComponent
+            environment["VIRTUAL_ENV"] = (bin as NSString).deletingLastPathComponent
+            environment["PATH"] = bin + ":" + (environment["PATH"] ?? "")
+        }
+        process.environment = environment
         do { try process.run() } catch { return nil }
 
         stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
@@ -228,12 +249,17 @@ final class LSPClient {
                     "diagnostic": [:],
                     "definition": [:],
                 ] as [String: Any],
+                "workspace": ["configuration": true] as [String: Any],
             ] as [String: Any],
             "workspaceFolders": [["uri": rootURI, "name": (root as NSString).lastPathComponent]],
         ]) { [weak self] _ in
             guard let self else { return }
             self.queue.async {
                 self.write(["jsonrpc": "2.0", "method": "initialized", "params": [:] as [String: Any]])
+                if !self.settings.isEmpty {
+                    self.write(["jsonrpc": "2.0", "method": "workspace/didChangeConfiguration",
+                                "params": ["settings": self.settings] as [String: Any]])
+                }
                 self.initialized = true
                 for message in self.deferredUntilReady { self.write(message) }
                 self.deferredUntilReady.removeAll()
@@ -377,8 +403,17 @@ final class LSPClient {
         return (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
     }
 
+    /// Dev hook: every server→client request and our answer.
+    static var debugTrace: ((String) -> Void)?
+
     private func dispatch(_ message: [String: Any]) {
         if let method = message["method"] as? String {
+            if message["id"] != nil, let trace = Self.debugTrace {
+                trace("server request \(method) params=\(message["params"].map { String(describing: $0) } ?? "-")")
+            } else if method == "window/logMessage", let trace = Self.debugTrace,
+                      let text = (message["params"] as? [String: Any])?["message"] as? String {
+                trace("log: \(text)")
+            }
             if let id = message["id"] {
                 // A request *from* the server: answer honestly-empty so it
                 // never stalls waiting on us. workspace/configuration wants
@@ -386,9 +421,21 @@ final class LSPClient {
                 var result: Any = NSNull()
                 if method == "workspace/configuration",
                    let params = message["params"] as? [String: Any],
-                   let items = params["items"] as? [Any] {
-                    result = Array(repeating: NSNull(), count: items.count)
+                   let items = params["items"] as? [[String: Any]] {
+                    // One answer per item: the requested section of our
+                    // settings ("python" → {pythonPath}, "python.analysis"
+                    // → its sub-dictionary), null when we have nothing.
+                    result = items.map { item -> Any in
+                        guard let section = item["section"] as? String else { return self.settings }
+                        var node: Any = self.settings
+                        for part in section.split(separator: ".") {
+                            guard let dict = node as? [String: Any], let next = dict[String(part)] else { return NSNull() }
+                            node = next
+                        }
+                        return node
+                    }
                 }
+                Self.debugTrace?("  answer \(String(describing: result))")
                 write(["jsonrpc": "2.0", "id": id, "result": result])
             } else if method == "textDocument/publishDiagnostics",
                       let params = message["params"] as? [String: Any],
@@ -422,6 +469,69 @@ final class LSPClient {
 /// One server per (repo root, language), spawned on first use, reused
 /// across sessions, torn down at quit. A language with no installed server
 /// simply gets no client and the editor stays plain.
+extension LSPServers {
+    /// What the server needs to know about the repo that it can't find on
+    /// its own. Python: the interpreter. Pyright looks for a venv at the
+    /// workspace root only; Atelier's roots are repos, and the environment
+    /// is often one folder down (`backend/.venv`). Answered through
+    /// `workspace/configuration` (section "python") and pushed once via
+    /// `workspace/didChangeConfiguration`.
+    static func workspaceSettings(for spec: Spec, root: String) -> [String: Any] {
+        switch spec.key {
+        case "python":
+            // A worktree carries no `.venv` (gitignored); borrow the main
+            // checkout's. Same packages, different source tree — pyright
+            // only wants site-packages from it.
+            let fallback = WorktreeManager.repoRoot(for: root)
+            guard let interpreter = pythonInterpreter(under: root)
+                    ?? fallback.flatMap({ $0 == root ? nil : pythonInterpreter(under: $0) }) else { return [:] }
+            // The venv's folder is the project's real root; when it sits a
+            // level down, add it to the import path so `import mypkg` in
+            // `backend/` resolves with the repo as the workspace.
+            let project = (interpreter as NSString).deletingLastPathComponent  // …/bin
+                .replacingOccurrences(of: "/bin", with: "")                     // …/.venv
+            let projectDir = (project as NSString).deletingLastPathComponent
+            var analysis: [String: Any] = [:]
+            // Import roots: the venv's folder, mirrored into this root when
+            // the venv was borrowed from the main checkout.
+            var extra: [String] = []
+            if projectDir != root { extra.append(projectDir) }
+            if let fallback, projectDir.hasPrefix(fallback + "/") {
+                let mirrored = root + projectDir.dropFirst(fallback.count)
+                if mirrored != root { extra.insert(mirrored, at: 0) }
+            }
+            if !extra.isEmpty { analysis["extraPaths"] = extra }
+            return ["python": ["pythonPath": interpreter, "analysis": analysis] as [String: Any]]
+        default:
+            return [:]
+        }
+    }
+
+    /// `.venv`/`venv` at the root, else the first one level down (sorted,
+    /// so the answer is stable). Nothing spawned: the folder is the fact.
+    static func pythonInterpreter(under root: String) -> String? {
+        let fm = FileManager.default
+        func interpreter(in dir: String) -> String? {
+            for name in [".venv", "venv"] {
+                let path = "\(dir)/\(name)/bin/python"
+                if fm.isExecutableFile(atPath: path) { return path }
+            }
+            return nil
+        }
+        if let found = interpreter(in: root) { return found }
+        let children = ((try? fm.contentsOfDirectory(atPath: root)) ?? [])
+            .filter { !$0.hasPrefix(".") && $0 != "node_modules" }
+            .sorted()
+        for child in children {
+            var isDir: ObjCBool = false
+            let path = "\(root)/\(child)"
+            guard fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else { continue }
+            if let found = interpreter(in: path) { return found }
+        }
+        return nil
+    }
+}
+
 enum LSPRegistry {
     private static var clients: [String: LSPClient] = [:]
 
@@ -430,7 +540,10 @@ enum LSPRegistry {
         let key = "\(root)|\(spec.key)"
         if let existing = clients[key] { return existing }
         guard let command = LSPServers.resolve(spec),
-              let client = LSPClient(root: root, command: command, languageId: spec.languageId) else { return nil }
+              let client = LSPClient(
+                root: root, command: command, languageId: spec.languageId,
+                settings: LSPServers.workspaceSettings(for: spec, root: root)
+              ) else { return nil }
         clients[key] = client
         return client
     }

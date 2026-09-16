@@ -32,8 +32,6 @@ final class EditorPane: NSView, WorkspacePane {
     var onOpenAtRequest: ((URL, SearchHit) -> Void)?
     /// Arrowing through sidebar search results: preview, optionally at a hit.
     var onPreviewRequest: ((URL, SearchHit?) -> Void)?
-    /// ⌘-click in the buffer: go to definition at the caret.
-    var onGoToDefinition: (() -> Void)?
     /// Everything right of the tree: the empty-state line, then the header
     /// strip and the buffer (or, for markdown in Preview, the rendering).
     private let contentHost = NSView()
@@ -51,7 +49,7 @@ final class EditorPane: NSView, WorkspacePane {
     var onHistoryChange: (() -> Void)?
     /// History navigation asks the controller to open (dirty guard, focus)
     /// rather than opening directly.
-    var onNavigateRequest: ((_ path: String, _ line: Int) -> Void)?
+    var onNavigateRequest: ((_ path: String, _ line: Int, _ column: Int) -> Void)?
     var canGoBack: Bool { historyIndex > 0 }
     var canGoForward: Bool { historyIndex >= 0 && historyIndex < history.count - 1 }
 
@@ -93,7 +91,7 @@ final class EditorPane: NSView, WorkspacePane {
         let entry = history[target]
         fileHeader.setHistory(back: canGoBack, forward: canGoForward)
         onHistoryChange?()
-        onNavigateRequest?(entry.path, entry.line)
+        onNavigateRequest?(entry.path, entry.line, 1)
     }
     private let preview = MarkdownPreviewView(frame: .zero)
     private var previewRenderDebounce: Timer?
@@ -304,12 +302,35 @@ final class EditorPane: NSView, WorkspacePane {
                 guard let self else { return }
                 self.reveal(line: line, column: column)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    let report = "diagnostics=\(self.lastDiagnostics.count) "
+                    let report = "root=\(self.lspRoot ?? "-") diagnostics=\(self.lastDiagnostics.count) "
                         + self.lastDiagnostics.prefix(5).map { "\($0.startLine + 1):\($0.startCharacter + 1)-\($0.endLine + 1):\($0.endCharacter + 1) \($0.severity) '\($0.message.prefix(60))'" }.joined(separator: " | ")
                         + "\nstrip hidden=\(self.diagnosticStrip.isHidden) text='\(self.diagnosticStrip.debugText)' frame=\(self.diagnosticStrip.frame)\n"
                     try? report.write(toFile: NSHomeDirectory() + "/.local/state/atelier/probe.txt", atomically: true, encoding: .utf8)
                 }
             }
+            return
+        }
+        if query.hasPrefix("probe:links=") {
+            let word = String(query.dropFirst("probe:links=".count))
+            guard let controller else { return }
+            let range = (controller.text as NSString).range(of: word)
+            guard range.location != NSNotFound else { return }
+            Task { @MainActor in
+                let links = await self.queryLinks(forRange: range, textView: controller) ?? []
+                let report = "links for '\(word)': \(links.count) " + links.map { "\($0.url?.lastPathComponent ?? "same-file"):\($0.targetRange.start.line):\($0.targetRange.start.column)" }.joined(separator: " ") + "\n"
+                try? report.write(toFile: NSHomeDirectory() + "/.local/state/atelier/probe.txt", atomically: true, encoding: .utf8)
+            }
+            return
+        }
+        if query.hasPrefix("probe:resize=") {
+            // `probe:resize=W,H` — the window, from its top-left; layout bugs
+            // on resize reproduce without a pointer.
+            let parts = query.dropFirst("probe:resize=".count).split(separator: ",").compactMap { Double($0) }
+            guard parts.count == 2, let window else { return }
+            var frame = window.frame
+            frame.origin.y = frame.maxY - parts[1]
+            frame.size = NSSize(width: parts[0], height: parts[1])
+            window.setFrame(frame, display: true, animate: false)
             return
         }
         if query == "probe:back" { goBack(); return }
@@ -513,7 +534,8 @@ final class EditorPane: NSView, WorkspacePane {
             controller.view.clipsToBounds = true
             controller.scrollView?.clipsToBounds = true
             installGutterMask(controller)
-            controller.textView?.onCommandClick = { [weak self] _ in self?.onGoToDefinition?() }
+            controller.jumpToDefinitionDelegate = self
+            controller.linkHoverColor = Theme.accentBlue
             contentHost.addSubview(diagnosticStrip, positioned: .above, relativeTo: controller.view)
             NotificationCenter.default.addObserver(
                 self, selector: #selector(caretMoved),
@@ -992,6 +1014,18 @@ final class EditorPane: NSView, WorkspacePane {
             .label: A(color: e.label),
             .tag: A(color: e.function),
             .comment: A(color: e.comment, italic: true),
+            // Markup (markdown). No strikethrough trait in the editor's
+            // Attribute, so ~~struck~~ is colour-only.
+            .markupHeading1: A(color: e.heading1, bold: true),
+            .markupHeading: A(color: e.heading, bold: true),
+            .markupStrong: A(color: e.text, bold: true),
+            .markupItalic: A(color: e.text, italic: true),
+            .markupStrikethrough: A(color: e.strikethrough),
+            .markupRaw: A(color: e.rawCode),
+            .markupLink: A(color: e.link),
+            .markupUrl: A(color: e.url, italic: true),
+            .markupList: A(color: e.listMarker),
+            .markupQuote: A(color: e.quote, italic: true),
         ]
     }()
 
@@ -1054,6 +1088,8 @@ final class EditorFileHeader: NSView {
     private let forward = HoverPadButton(frame: .zero)
 
     private let name = NSTextField(labelWithString: "")
+    private var markdownNameLimit: NSLayoutConstraint?
+    private var plainNameLimit: NSLayoutConstraint?
     private let dot = NSView()
     private let mode = NSSegmentedControl(labels: ["Text", "Preview"], trackingMode: .selectOne, target: nil, action: nil)
 
@@ -1065,6 +1101,7 @@ final class EditorFileHeader: NSView {
         name.font = Theme.Typography.mono(Theme.Typography.small)
         name.textColor = Theme.chromeText
         name.lineBreakMode = .byTruncatingMiddle
+        name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         name.translatesAutoresizingMaskIntoConstraints = false
         addSubview(name)
 
@@ -1075,6 +1112,9 @@ final class EditorFileHeader: NSView {
         dot.translatesAutoresizingMaskIntoConstraints = false
         addSubview(dot)
 
+        mode.setAccessibilityLabel("Markdown display")
+        mode.setToolTip("Edit markdown source", forSegment: 0)
+        mode.setToolTip("Preview rendered markdown", forSegment: 1)
         mode.controlSize = .small
         mode.font = Theme.Typography.ui(Theme.Typography.small)
         mode.segmentStyle = .roundRect
@@ -1091,6 +1131,8 @@ final class EditorFileHeader: NSView {
             let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
             button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(config)
             button.contentTintColor = Theme.chromeText
+            button.toolTip = symbol == "chevron.left" ? "Back  ⌃⌘←" : "Forward  ⌃⌘→"
+            button.setAccessibilityLabel(symbol == "chevron.left" ? "Back" : "Forward")
             button.target = self
             button.action = action
             button.isEnabled = false
@@ -1122,7 +1164,7 @@ final class EditorFileHeader: NSView {
             back.heightAnchor.constraint(equalToConstant: 20),
             mode.trailingAnchor.constraint(equalTo: back.leadingAnchor, constant: -10),
             mode.centerYAnchor.constraint(equalTo: centerYAnchor),
-            name.trailingAnchor.constraint(lessThanOrEqualTo: mode.leadingAnchor, constant: -24),
+
             hairline.leadingAnchor.constraint(equalTo: leadingAnchor),
             hairline.trailingAnchor.constraint(equalTo: trailingAnchor),
             hairline.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -1138,6 +1180,14 @@ final class EditorFileHeader: NSView {
     }
 
     func configure(name text: String, markdown: Bool, previewOn: Bool) {
+        if markdownNameLimit == nil {
+            markdownNameLimit = name.trailingAnchor.constraint(lessThanOrEqualTo: mode.leadingAnchor, constant: -20)
+            plainNameLimit = name.trailingAnchor.constraint(lessThanOrEqualTo: back.leadingAnchor, constant: -20)
+        }
+        markdownNameLimit?.isActive = false
+        plainNameLimit?.isActive = false
+        (markdown ? markdownNameLimit : plainNameLimit)?.isActive = true
+        name.toolTip = text
         name.stringValue = text
         mode.isHidden = !markdown
         mode.selectedSegment = previewOn ? 1 : 0
@@ -1220,5 +1270,42 @@ final class DiagnosticStrip: NSView {
         label.stringValue = diagnostic.message
             .split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? diagnostic.message
         toolTip = diagnostic.message
+    }
+}
+
+// MARK: - ⌘-hover / ⌘-click (the library's jump model, fed by the LSP client)
+
+extension EditorPane: JumpToDefinitionDelegate {
+    /// Definitions for the symbol at `range`. Same-file targets carry a
+    /// resolved range (the model selects it directly); cross-file targets
+    /// carry a URL and line/column and come back through `openLink`.
+    func queryLinks(forRange range: NSRange, textView controller: TextViewController) async -> [JumpToDefinitionLink]? {
+        guard !isPreview, let filePath, let client = bufferLSPClient,
+              let position = controller.resolveCursorPosition(CursorPosition(range: NSRange(location: range.location, length: 0))),
+              position.start.line > 0, position.start.column > 0 else { return nil }
+        let text = controller.text as NSString
+        guard NSMaxRange(range) <= text.length else { return nil }
+        let symbol = text.substring(with: range)
+        let targets = await withCheckedContinuation { (continuation: CheckedContinuation<[(path: String, line: Int, column: Int)], Never>) in
+            client.definition(path: filePath, line: position.start.line - 1, character: position.start.column - 1) {
+                continuation.resume(returning: $0)
+            }
+        }
+        return targets.compactMap { target in
+            if target.path == filePath {
+                guard let resolved = controller.resolveCursorPosition(CursorPosition(line: target.line, column: target.column)) else { return nil }
+                return JumpToDefinitionLink(url: nil, targetRange: resolved, typeName: symbol, sourcePreview: "", documentation: nil)
+            }
+            return JumpToDefinitionLink(
+                url: URL(fileURLWithPath: target.path),
+                targetRange: CursorPosition(line: target.line, column: target.column),
+                typeName: symbol, sourcePreview: "", documentation: nil
+            )
+        }
+    }
+
+    func openLink(link: JumpToDefinitionLink) {
+        guard let url = link.url else { return }
+        onNavigateRequest?(url.path, link.targetRange.start.line, link.targetRange.start.column)
     }
 }

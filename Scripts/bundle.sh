@@ -19,7 +19,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/Atelier" "$APP/Contents/MacOS/Atelier"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 
-# The app icon (regenerate with: swift Scripts/generate-icon.swift).
+# The app icon. Resources/AppIcon.icns is cut from Resources/AppIcon-1024.png
+# (see docs/POLISH_PLAN.md §4, "As built"); rebuild it with iconutil, never a script.
 if [[ -f "$ROOT/Resources/AppIcon.icns" ]]; then
   cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 fi

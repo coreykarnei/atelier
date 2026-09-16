@@ -1,0 +1,95 @@
+%YAML 1.2
+%TAG ! tag:example.com,2026:
+# Atelier deploy manifest — a dense YAML fixture for the highlight harness.
+---
+apiVersion: apps/v1          # trailing comment after a plain scalar
+kind: Deployment
+metadata:
+  name: atelier-api
+  namespace: sterling-core
+  labels: {app: atelier, tier: backend, "quoted key": 'single value'}
+  annotations:
+    deploy.sterlingcore.dev/revision: "42"
+    ? complex key
+    : complex value
+spec:
+  replicas: 3
+  minReadySeconds: -10
+  progressDeadline: 0x1F
+  ratio: 0.75
+  epsilon: 1.5e-9
+  infinity: .inf
+  notANumber: .NaN
+  paused: false
+  enabled: true
+  legacyYes: yes
+  legacyNo: no
+  toggled: True
+  disabled: FALSE
+  owner: ~
+  fallback: null
+  nothing:
+  defaults: &defaults
+    cpu: "500m"
+    memory: 512Mi
+    restartPolicy: Always
+  overrides:
+    <<: *defaults
+    cpu: "750m"
+  template:
+    metadata:
+      labels:
+        app: atelier
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/sterlingcore/atelier-api:1.4.2
+          args: ["--port", "8080", --verbose, 42, 3.14, null, true]
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          env:
+            - name: DATABASE_URL
+              valueFrom: {secretKeyRef: {name: db, key: url}}
+            - name: GREETING
+              value: "Hello,\tworld\né \x41 \\ end"
+            - name: MOTD
+              value: 'It''s a single-quoted string: no escapes here'
+            - name: SCRIPT
+              value: |
+                #!/bin/sh
+                echo "block literal keeps newlines"
+                exit 0
+            - name: DESCRIPTION
+              value: >-
+                Folded block scalar, joined
+                into a single line.
+            - !!str 123
+            - !!int "456"
+            - !Ref LogicalResourceId
+            - !!binary |
+                R0lGODlhDAAMAIQAAP
+          resources: *defaults
+      nodeSelector: !!map
+        kubernetes.io/os: linux
+      tolerations: []
+      volumes: {}
+timestamps:
+  created: 2026-09-16
+  updated: 2026-09-16T12:34:56Z
+  plain: this is a plain multi word scalar value
+  url: https://api.sterlingcore.dev/health
+  version: v1.2.3
+  path: /usr/local/bin/atelier-notify
+...
+---
+# second document: a bare sequence of mappings
+- host: pi
+  user: core
+  port: 22
+  tags: [remote, arm64]
+- host: laptop
+  user: core
+  port: 2222
+  tags: ["local", 'dev']
+...

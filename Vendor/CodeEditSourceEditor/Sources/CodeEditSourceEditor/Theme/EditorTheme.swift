@@ -90,6 +90,7 @@ public struct EditorTheme: Equatable {
     /// - Returns: Theme attributes for the capture.
     private func mapCapture(_ capture: CaptureName?) -> Attribute {
         if let capture, let exact = captures[capture] { return exact }
+        if let capture, let markup = markupFallback(capture) { return markup }
         switch capture {
         case .include, .constructor, .keyword, .boolean, .variableBuiltin,
                 .keywordReturn, .keywordFunction, .repeat, .conditional, .tag:
@@ -109,6 +110,23 @@ public struct EditorTheme: Equatable {
         case .namespace, .label: return types
         case .operator, .punctuation, .escape: return text
         default: return text
+        }
+    }
+
+    /// Atelier patch: markup (markdown) fallbacks for themes that don't set
+    /// them per capture — headings borrow the keyword colour in bold,
+    /// strong/italic are the text colour with the trait, raw code reads as a
+    /// string, links as types, list markers and quotes as comments.
+    private func markupFallback(_ capture: CaptureName) -> Attribute? {
+        switch capture {
+        case .markupHeading1, .markupHeading: return Attribute(color: keywords.color, bold: true)
+        case .markupStrong: return Attribute(color: text.color, bold: true)
+        case .markupItalic: return Attribute(color: text.color, italic: true)
+        case .markupStrikethrough: return comments
+        case .markupRaw: return strings
+        case .markupLink, .markupUrl: return types
+        case .markupList, .markupQuote: return comments
+        default: return nil
         }
     }
 

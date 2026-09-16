@@ -1,37 +1,44 @@
-;; From nvim-treesitter/nvim-treesitter
+; Atelier: markdown inline grammar → the editor's markup captures
+; (CaptureName.markup*), ported from nvim-treesitter / Helix. In the editor
+; an enclosing range beats the runs nested inside it, so `*emphasis*`,
+; `**strong**`, `~~struck~~` and `` `code` `` are captured whole (delimiters
+; included) and read as one styled run.
+(code_span) @markup.raw
+(emphasis) @markup.italic
+(strong_emphasis) @markup.strong
+(strikethrough) @markup.strikethrough
+
+; Links and images: text/labels blue, destinations teal, titles as strings.
 [
-  (code_span)
-  (link_title)
-] @text.literal
-
-[
-  (emphasis_delimiter)
-  (code_span_delimiter)
-] @punctuation.delimiter
-
-(emphasis) @text.emphasis
-
-(strong_emphasis) @text.strong
+  (link_text)
+  (link_label)
+  (image_description)
+] @markup.link.label
 
 [
   (link_destination)
   (uri_autolink)
-] @text.uri
+  (email_autolink)
+] @markup.link.url
 
-[
-  (link_label)
-  (link_text)
-  (image_description)
-] @text.reference
+(link_title) @string
 
+(inline_link ["[" "]" "(" ")"] @punctuation.bracket)
+(image ["!" "[" "]" "(" ")"] @punctuation.bracket)
+(full_reference_link ["[" "]"] @punctuation.bracket)
+(collapsed_reference_link ["[" "]"] @punctuation.bracket)
+(shortcut_link ["[" "]"] @punctuation.bracket)
+
+; Escapes, hard breaks, entities
 [
   (backslash_escape)
   (hard_line_break)
+  (entity_reference)
+  (numeric_character_reference)
 ] @string.escape
 
-(image ["!" "[" "]" "(" ")"] @punctuation.delimiter)
-(inline_link ["[" "]" "(" ")"] @punctuation.delimiter)
-(shortcut_link ["[" "]"] @punctuation.delimiter)
-
-; NOTE: extension not enabled by default
-; (wiki_link ["[" "|" "]"] @punctuation.delimiter)
+; Delimiters (the harness sees these; the editor paints the enclosing span).
+[
+  (emphasis_delimiter)
+  (code_span_delimiter)
+] @punctuation.delimiter

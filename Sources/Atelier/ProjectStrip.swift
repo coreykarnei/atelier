@@ -32,6 +32,9 @@ final class ProjectStripView: NSView {
 
     private var tabs: [ProjectTabView] = []
     private let newButton = HoverPadButton()
+    private let overflowButton = HoverPadButton()
+    private var infos: [ProjectTabInfo] = []
+    private var hiddenIndices: [Int] = []
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -43,6 +46,14 @@ final class ProjectStripView: NSView {
         newButton.target = self
         newButton.action = #selector(newTapped)
         addSubview(newButton)
+        overflowButton.image = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: "More projects")
+        overflowButton.symbolConfiguration = .init(pointSize: 12, weight: .medium)
+        overflowButton.contentTintColor = Theme.chromeText
+        overflowButton.toolTip = "More projects"
+        overflowButton.target = self
+        overflowButton.action = #selector(showOverflow)
+        overflowButton.isHidden = true
+        addSubview(overflowButton)
     }
 
     @available(*, unavailable)
@@ -56,6 +67,7 @@ final class ProjectStripView: NSView {
     }
 
     func update(tabs infos: [ProjectTabInfo]) {
+        self.infos = infos
         var existing: [ObjectIdentifier: ProjectTabView] = [:]
         for tab in tabs { existing[tab.id] = tab }
         var next: [ProjectTabView] = []
@@ -81,17 +93,52 @@ final class ProjectStripView: NSView {
         super.layout()
         let height = Self.tabHeight
         let y = (bounds.height - height) / 2
-        // Equal shares of the row, the `+` pinned at the trailing edge.
+        // Keep titles readable. Extra projects move into a native menu;
+        // the active project is always represented by a visible tab.
         let inset: CGFloat = 6
-        let available = bounds.width - inset - Self.plusWidth - Self.gap * CGFloat(tabs.count)
-        let width = tabs.isEmpty ? 0 : floor(available / CGFloat(tabs.count))
-        var x = inset
-        for tab in tabs {
-            tab.frame = CGRect(x: x, y: y, width: width, height: height)
-            x += width + Self.gap
+        let crowded = CGFloat(tabs.count) * (180 + Self.gap) > bounds.width - inset - Self.plusWidth
+        let trailing = Self.plusWidth * (crowded ? 2 : 1)
+        let count = max(1, Int((max(0, bounds.width - inset - trailing)) / (180 + Self.gap)))
+        var visible = Array(tabs.indices.prefix(crowded ? count : tabs.count))
+        if let active = infos.firstIndex(where: { $0.isActive }), !visible.contains(active), !visible.isEmpty {
+            visible[visible.count - 1] = active
         }
+        hiddenIndices = tabs.indices.filter { !visible.contains($0) }
+        let width = visible.isEmpty ? 0 : max(0, floor((bounds.width - inset - trailing - Self.gap * CGFloat(visible.count)) / CGFloat(visible.count)))
+        var x = inset
+        for (index, tab) in tabs.enumerated() {
+            tab.isHidden = !visible.contains(index)
+            if !tab.isHidden {
+                tab.frame = CGRect(x: x, y: y, width: width, height: height)
+                x += width + Self.gap
+            }
+        }
+        overflowButton.isHidden = hiddenIndices.isEmpty
+        overflowButton.toolTip = "\(hiddenIndices.count) more projects"
+        overflowButton.frame = CGRect(x: bounds.width - 2 * Self.plusWidth,
+            y: (bounds.height - Self.plusWidth) / 2, width: Self.plusWidth, height: Self.plusWidth)
         newButton.frame = CGRect(x: bounds.width - Self.plusWidth, y: (bounds.height - Self.plusWidth) / 2,
                                  width: Self.plusWidth, height: Self.plusWidth)
+    }
+
+    @objc private func showOverflow() {
+        let menu = NSMenu()
+        for index in hiddenIndices {
+            let info = infos[index]
+            let item = NSMenuItem(title: info.title, action: #selector(selectOverflow(_:)), keyEquivalent: "")
+            item.target = self; item.tag = index
+            if let attention = info.marks.first(where: { $0 == .needsInput }) ?? info.marks.first {
+                item.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: attention.rawValue)?
+                    .withSymbolConfiguration(.init(paletteColors: [Theme.attentionColor(attention)]))
+            }
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: overflowButton.frame.minX, y: overflowButton.frame.minY), in: self)
+    }
+
+    @objc private func selectOverflow(_ sender: NSMenuItem) {
+        guard infos.indices.contains(sender.tag) else { return }
+        onSelect?(infos[sender.tag].id)
     }
 
     @objc private func newTapped() { onNew?() }
@@ -154,6 +201,11 @@ private final class ProjectTabView: NSView {
     func apply(_ info: ProjectTabInfo) {
         if titleLabel.stringValue != info.title { titleLabel.stringValue = info.title }
         isActive = info.isActive
+        setAccessibilityElement(true)
+        setAccessibilityRole(.radioButton)
+        setAccessibilityLabel(info.title)
+        setAccessibilityValue(isActive ? 1 : 0)
+        closeButton.toolTip = "Close Project  ⌥⌘W"
         closeButton.isHidden = !isActive
         toolTip = info.title
         if info.marks != marks {
@@ -242,6 +294,8 @@ private final class ProjectTabView: NSView {
     override func mouseDown(with event: NSEvent) {
         onSelect?()
     }
+
+    override func accessibilityPerformPress() -> Bool { onSelect?(); return true }
 
     @objc private func closeTapped() { onClose?() }
 }

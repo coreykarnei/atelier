@@ -208,10 +208,14 @@ deferred (§7).
 - **No-escalation (§1.3) written into the attention-state code** as a comment
   with rule standing.
 
-**As built (2026-06-11):** the icon is generated, not commissioned —
-`Scripts/generate-icon.swift` draws the triptych mark (crust plate, two base
-panes, lavender agent pane) into `Resources/AppIcon.icns`; regenerate by
-re-running the script. Dock badge counts `doneUnseen + needsInput` across all
+**As built (2026-06-11, icon replaced 2026-09-16):** the flat triptych mark
+shipped first, drawn by a script. It was descriptive and not much fun, so it
+was replaced by a commissioned render: a chunky wooden desk under a tilted
+frosted-glass slate carrying lavender and peach code lines, the glow pooling
+on the wood — the atelier as one object. The 1024 master is
+`Resources/AppIcon-1024.png` (matted onto Apple's icon grid: 824pt tile,
+185pt corners, baked shadow), the raw render is `docs/icon/atelier-icon-render.png`,
+and `Resources/AppIcon.icns` is cut from the master with `iconutil`. Dock badge counts `doneUnseen + needsInput` across all
 windows via `AppDelegate.refreshDockBadge()`, riding every `updateBottomBar()`.
 **Caveat:** the Dock renders the badge only when the app has notification
 authorization including `.badge` (now requested) — with notifications denied

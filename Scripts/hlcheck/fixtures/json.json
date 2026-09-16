@@ -1,0 +1,82 @@
+{
+  // Atelier workspace config (jsonc — comments are tolerated by the grammar)
+  "$schema": "https://atelier.sterlingcore.dev/schema/workspace-v1.json",
+  "name": "atelier",
+  "version": "0.4.2",
+  "private": true,
+  "description": "Native macOS workspace: editor + shell + agent, side by side.",
+  /* Window geometry is restored on launch; null means "use the last frame". */
+  "window": {
+    "frame": null,
+    "width": 1440,
+    "height": 900.5,
+    "opacity": 0.75,
+    "blur": true,
+    "fullscreen": false,
+    "titlebar": "unified"
+  },
+  "theme": {
+    "flavor": "catppuccin-mocha",
+    "accent": "#89b4fa",
+    "typeScale": 1.0,
+    "font": {
+      "family": "JetBrains Mono",
+      "size": 14,
+      "ligatures": false
+    }
+  },
+  "panes": [
+    { "id": "editor", "position": "top-left", "ratio": 0.62, "visible": true },
+    { "id": "shell", "position": "bottom-left", "ratio": 0.38, "visible": true },
+    { "id": "agent", "position": "right", "ratio": 0.53, "visible": true }
+  ],
+  "sessions": [
+    {
+      "id": "8f1c2e40-3b7a-4d9e-a1f5-6c0d2b9e7a11",
+      "root": "/Users/core/repositories/atelier",
+      "worktree": null,
+      "layout": "triptych",
+      "openFiles": ["Sources/Atelier/Layout.swift", "docs/POLISH_PLAN.md"],
+      "attention": "working",
+      "lastSeen": 1789430400
+    },
+    {
+      "id": "b2e4d6f8-1a3c-5e7b-9d0f-2a4c6e8b0d13",
+      "root": "/Users/core/repositories/atelier",
+      "worktree": "polish-arrivals",
+      "layout": "split",
+      "openFiles": [],
+      "attention": "blocked",
+      "lastSeen": -1,
+      "remote": { "host": "pi", "tmux": "atelier", "reconnectBackoffMs": [500, 1000, 2000, 4000] }
+    }
+  ],
+  "keymap": {
+    "newProjectTab": "cmd+t",
+    "newSessionTab": "alt+cmd+t",
+    "reopenClosed": "cmd+shift+t",
+    "cycleLayout": "cmd+\\",
+    "commandPalette": "cmd+shift+p",
+    "goToFile": "cmd+p",
+    "findInRepo": "cmd+shift+f",
+    "focusHint": "Use \u2318 with h\/j\/k\/l\tto move between panes.\nEsc cancels.",
+    "quote": "She said \"ship it\" and closed the tab.",
+    "path": "C:\\Users\\core\\AppData\\Local\\atelier"
+  },
+  "hooks": {
+    "Stop": [{ "command": "atelier-notify stop --session-id $SESSION_ID", "timeout": 5 }],
+    "Notification": [{ "command": "atelier-notify notify", "timeout": 5 }]
+  },
+  "limits": {
+    "maxTabs": 9,
+    "scrollback": 100000,
+    "autosaveDelaySeconds": 0.8,
+    "searchCap": 2000,
+    "epsilon": 1e-9,
+    "negative": -42,
+    "exponent": 6.02E23,
+    "empty": {},
+    "nothing": [],
+    "mixed": [1, "two", 3.0, true, null, { "four": 4 }, [5]]
+  }
+}

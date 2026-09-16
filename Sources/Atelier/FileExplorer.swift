@@ -73,6 +73,11 @@ final class FileExplorerView: NSView {
     private let magnifier = HoverPadButton(frame: .zero)
     private let searchHost = NSView()
     private var searchHostHeight: NSLayoutConstraint!
+    /// Open: the panel is pinned to the bottom edge, so a window resize
+    /// resizes it in the same pass (a height *constant* recomputed in
+    /// `layout()` lagged a pass and left Auto Layout breaking a constraint —
+    /// the toggles ended up over the header).
+    private var searchHostBottom: NSLayoutConstraint!
     private let modeControl = NSSegmentedControl(labels: ["Files", "Text"], trackingMode: .selectAny, target: nil, action: nil)
     private let search = SummonList(style: .init(
         placeholder: "Search",
@@ -248,17 +253,19 @@ final class FileExplorerView: NSView {
         addSubview(header)
         rootLabel.font = Theme.Typography.ui(Theme.Typography.small, weight: .medium)
         rootLabel.textColor = Theme.chromeMutedText
-        rootLabel.lineBreakMode = .byTruncatingTail
+        rootLabel.lineBreakMode = .byTruncatingMiddle
         rootLabel.translatesAutoresizingMaskIntoConstraints = false
         header.addSubview(rootLabel)
         chevron.image = Self.chevronImage("chevron.left")
         chevron.toolTip = "Hide Explorer (⌘B)"
+        chevron.setAccessibilityLabel("Hide Explorer")
         chevron.target = self
         chevron.action = #selector(chevronClicked)
         chevron.translatesAutoresizingMaskIntoConstraints = false
         header.addSubview(chevron)
         magnifier.image = Self.symbol("magnifyingglass", size: 11)
         magnifier.toolTip = "Search files and text (⌘⇧E)"
+        magnifier.setAccessibilityLabel("Search files and text")
         magnifier.target = self
         magnifier.action = #selector(magnifierClicked)
         magnifier.translatesAutoresizingMaskIntoConstraints = false
@@ -266,10 +273,14 @@ final class FileExplorerView: NSView {
 
         // Search panel: hidden (0pt) until opened; then it takes the tree's
         // place under the header. Both summons live in it, one visible.
+        searchHost.isHidden = true
         searchHost.wantsLayer = true
         searchHost.layer?.masksToBounds = true
         searchHost.translatesAutoresizingMaskIntoConstraints = false
         addSubview(searchHost)
+        modeControl.setAccessibilityLabel("Search sources")
+        modeControl.setToolTip("Include file names", forSegment: 0)
+        modeControl.setToolTip("Include text in files", forSegment: 1)
         modeControl.controlSize = .small
         modeControl.font = Theme.Typography.ui(Theme.Typography.small)
         modeControl.segmentStyle = .roundRect
@@ -313,6 +324,7 @@ final class FileExplorerView: NSView {
         railChevron.imageScaling = .scaleNone
         railChevron.translatesAutoresizingMaskIntoConstraints = false
         rail.toolTip = "Show Explorer (⌘B)"
+        rail.setAccessibilityLabel("Show Explorer")
         rail.target = self
         rail.action = #selector(chevronClicked)
         rail.layer?.cornerRadius = 0
@@ -323,6 +335,7 @@ final class FileExplorerView: NSView {
         addSubview(railChevron)
 
         searchHostHeight = searchHost.heightAnchor.constraint(equalToConstant: 0)
+        searchHostBottom = searchHost.bottomAnchor.constraint(equalTo: bottomAnchor)
         NSLayoutConstraint.activate([
             rail.topAnchor.constraint(equalTo: topAnchor),
             rail.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -469,12 +482,15 @@ final class FileExplorerView: NSView {
         // The button now means "back to the tree".
         magnifier.image = Self.symbol("list.bullet.indent", size: 11)
         magnifier.toolTip = "Back to files (Esc)"
+        magnifier.setAccessibilityLabel("Back to files")
         modeControl.setSelected(filesOn, forSegment: 0)
         modeControl.setSelected(textOn, forSegment: 1)
         isSearchOpen = true
+        searchHost.isHidden = false
         scroll.isHidden = true
         sticky.isHidden = true
-        searchHostHeight.constant = max(0, bounds.height - header.frame.height)
+        searchHostHeight.isActive = false
+        searchHostBottom.isActive = true
         layoutSubtreeIfNeeded()
         runSearch(search.query)
         window?.makeFirstResponder(search.focusField)
@@ -484,11 +500,14 @@ final class FileExplorerView: NSView {
     func closeSearch(focusTree: Bool) {
         magnifier.image = Self.symbol("magnifyingglass", size: 11)
         magnifier.toolTip = "Search files and text (⌘⇧E)"
+        magnifier.setAccessibilityLabel("Search files and text")
         search.clearQuery()
         textRows = []
         guard isSearchOpen else { return }
         isSearchOpen = false
-        searchHostHeight.constant = 0
+        searchHost.isHidden = true
+        searchHostBottom.isActive = false
+        searchHostHeight.isActive = true
         scroll.isHidden = isCollapsed
         layoutSubtreeIfNeeded()
         updateSticky()
@@ -500,6 +519,7 @@ final class FileExplorerView: NSView {
     /// arrive from ripgrep a beat later and append. Stale text results for
     /// an older query are dropped.
     private func runSearch(_ query: String) {
+        search.emptyMessage = !filesOn && !textOn ? "Choose Files or Text above" : nil
         liveQuery = query
         let q = query.lowercased().trimmingCharacters(in: .whitespaces)
         if filesOn {
@@ -536,10 +556,6 @@ final class FileExplorerView: NSView {
     override func layout() {
         super.layout()
         if !sticky.isHidden { updateSticky() }
-        if isSearchOpen {
-            let target = max(0, bounds.height - header.frame.height)
-            if searchHostHeight.constant != target { searchHostHeight.constant = target }
-        }
     }
 
     /// Refill the search offer from `git ls-files` — on root change and on

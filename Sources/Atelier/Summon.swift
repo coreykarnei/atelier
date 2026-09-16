@@ -91,7 +91,7 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
     /// Natural height of the list area: the rows, or the one-line no-match
     /// state — never a collapsed sliver.
     var contentHeight: CGFloat {
-        let rows = filtered.isEmpty && !query.isEmpty ? 1 : filtered.count
+        let rows = filtered.isEmpty && (!query.isEmpty || emptyMessage != nil) ? 1 : filtered.count
         return CGFloat(rows) * style.rowHeight + 8
     }
 
@@ -101,6 +101,9 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
     private let scroll = NSScrollView()
     private let highlight = SlidingSelectionHighlight()
     private let noMatchLabel = NSTextField(labelWithString: "")
+    var emptyMessage: String? {
+        didSet { refilter() }
+    }
     private var items: [SummonItem] = []
     private var filtered: [SummonItem] = []
 
@@ -260,7 +263,8 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
                 .map(\.element)
         }
         table.reloadData()
-        noMatchLabel.isHidden = !(filtered.isEmpty && !q.isEmpty)
+        noMatchLabel.stringValue = emptyMessage ?? style.noMatchText
+        noMatchLabel.isHidden = !(filtered.isEmpty && (!q.isEmpty || emptyMessage != nil))
         if let keepId, let row = filtered.firstIndex(where: { $0.id == keepId }) {
             table.selectRowIndexes([row], byExtendingSelection: false)
             table.scrollRowToVisible(row)

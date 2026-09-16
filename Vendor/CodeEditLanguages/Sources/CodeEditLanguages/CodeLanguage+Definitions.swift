@@ -126,7 +126,9 @@ public extension CodeLanguage {
     static let dockerfile: CodeLanguage = .init(
         id: .dockerfile,
         tsName: "dockerfile",
-        extensions: ["Dockerfile"],
+        // Atelier patch: `Containerfile` and the `.dockerfile` extension
+        // (`dev.dockerfile`) alongside the bare `Dockerfile` name.
+        extensions: ["Dockerfile", "Containerfile", "dockerfile"],
         lineCommentString: "#",
         rangeCommentStrings: ("", "")
     )

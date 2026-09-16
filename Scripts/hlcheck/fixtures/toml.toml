@@ -1,0 +1,101 @@
+# Atelier project configuration
+# Every construct the highlight query needs to place lives in this file.
+
+title = "Atelier workspace" # trailing comment
+version = '0.3.1'
+"quoted key" = "value"
+'literal key' = 'value'
+release-date = 2026-09-16
+enabled = true
+archived = false
+
+[package]
+name = "atelier"
+edition = "2021"
+authors = ["Corey Karnei <cornkak@gmail.com>", "contributors"]
+description = """
+A native macOS workspace: editor, shell, and Claude Code
+side by side in one window.
+"""
+license-text = '''
+MIT License
+Copyright (c) 2026
+'''
+readme = 'README.md'
+keywords = [ "editor", "terminal", "agent", ]
+
+[package.metadata.atelier]
+bundle-id = "dev.sterlingcore.atelier"
+min-macos = 14.0
+signed = false
+
+[build]
+jobs = 8
+opt-level = 3
+hex = 0xDEADBEEF
+oct = 0o755
+bin = 0b1101_0110
+big = 1_000_000
+neg = -42
+pos = +17
+ratio = 6.626e-34
+pi = 3.14159
+exp = 1E6
+signed-float = -0.5
+infinite = inf
+negative-infinite = -inf
+positive-infinite = +inf
+not-a-number = nan
+neg-nan = -nan
+
+[schedule]
+created = 1979-05-27T07:32:00Z
+updated = 1979-05-27T00:32:00.999999-07:00
+space-separated = 1979-05-27 07:32:00Z
+local-datetime = 1979-05-27T07:32:00
+local-date = 1979-05-27
+local-time = 07:32:00
+precise-time = 00:32:00.999999
+
+[theme]
+name = "catppuccin-mocha"
+palette.base = "#1e1e2e"
+palette.text = "#cdd6f4"
+palette."accent colour" = "#89b4fa"
+font.family = "JetBrains Mono"
+font.size = 14
+escapes = "tab\tnewline\nquote\" unicode\u00E9 wide\U0001F600 backslash\\"
+
+[panes]
+layout = "triptych"
+editor = { path = "Sources/Editor", width = 0.5, visible = true }
+shell = { command = "zsh", args = ["-l"], env = { TERM = "xterm-256color" } }
+agent = { command = "claude", resume = true, nested = { deep = { deeper = 1 } } }
+
+[[worktree]]
+name = "main"
+path = "/Users/core/repositories/atelier"
+default = true
+
+[[worktree]]
+name = "feature/highlights"
+path = "/Users/core/repositories/atelier/.claude/worktrees/wf-1"
+default = false
+created = 2026-09-15T18:04:00-05:00
+
+[[worktree.hooks]]
+event = "Stop"
+command = "atelier-notify --event stop"
+
+[hosts.pi]
+address = "pi.local"
+port = 22
+identity = "~/.ssh/id_ed25519"
+tags = [
+  "remote", # arm64
+  "tmux",
+]
+
+[hosts."build box"]
+address = "10.0.0.7"
+port = 2222

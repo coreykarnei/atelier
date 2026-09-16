@@ -61,8 +61,9 @@ class SummonCardOverlay: NSView {
     /// Carries the floating shadow; the card itself masks to its rounded
     /// corners, which would clip a shadow set on its own layer.
     private let cardHost = NSView()
-    private let card = NSVisualEffectView()
+    private let card = OverlayMaterialView()
     private var listHeight: NSLayoutConstraint?
+    private var cardWidth: NSLayoutConstraint?
     private let maxListHeight: CGFloat
 
     init(summonStyle: SummonList.Style, maxListHeight: CGFloat = 300, onDismiss: @escaping () -> Void) {
@@ -109,10 +110,12 @@ class SummonCardOverlay: NSView {
         summon.onContentChange = { [weak self] in self?.trackContentHeight() }
         card.addSubview(summon)
 
+        let width = cardHost.widthAnchor.constraint(equalToConstant: 560)
+        cardWidth = width
         NSLayoutConstraint.activate([
             cardHost.topAnchor.constraint(equalTo: topAnchor, constant: 6),
             cardHost.centerXAnchor.constraint(equalTo: centerXAnchor),
-            cardHost.widthAnchor.constraint(equalToConstant: 560),
+            width,
 
             card.topAnchor.constraint(equalTo: cardHost.topAnchor),
             card.leadingAnchor.constraint(equalTo: cardHost.leadingAnchor),
@@ -135,12 +138,22 @@ class SummonCardOverlay: NSView {
         listHeight = height
     }
 
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        cardWidth?.constant = min(560, max(0, newSize.width - 32))
+        listHeight?.constant = min(summon.contentHeight, availableListHeight)
+    }
+
+    private var availableListHeight: CGFloat {
+        bounds.height > 0 ? min(maxListHeight, max(28, bounds.height - 76)) : maxListHeight
+    }
+
     func dismiss() { onDismissHandler() }
 
     /// The panel height tracks the results as you type (§6 — the single
     /// biggest "native" tell).
     private func trackContentHeight() {
-        let newHeight = min(summon.contentHeight, maxListHeight)
+        let newHeight = min(summon.contentHeight, availableListHeight)
         guard let listHeight, listHeight.constant != newHeight else { return }
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             listHeight.constant = newHeight
@@ -219,4 +232,53 @@ final class KeycapChipView: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+}
+
+/// One material for transient surfaces. The neutral wash keeps HUD vibrancy
+/// from making the chooser and palette look like unrelated stock panels.
+final class OverlayMaterialView: NSVisualEffectView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        NSWorkspace.shared.notificationCenter.addObserver(self,
+            selector: #selector(refreshMaterial),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
+        refreshMaterial()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    deinit { NSWorkspace.shared.notificationCenter.removeObserver(self) }
+
+    @objc private func refreshMaterial() {
+        layer?.backgroundColor = Theme.Elevation.overlayFill.withAlphaComponent(
+            NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency ? 1 : 0.78).cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = Theme.Elevation.hairline.cgColor
+    }
+}
+
+/// Consistent hover, press and disabled states for layer-drawn overlay buttons.
+class OverlayActionButton: NSButton {
+    private var hovered = false
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        addTrackingArea(NSTrackingArea(rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self, userInfo: nil))
+    }
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override var isEnabled: Bool { didSet { alphaValue = isEnabled ? 1 : 0.4; refresh() } }
+    override func mouseEntered(with event: NSEvent) { hovered = true; refresh() }
+    override func mouseExited(with event: NSEvent) { hovered = false; refresh() }
+    override func highlight(_ flag: Bool) { super.highlight(flag); refresh() }
+    private func refresh() {
+        layer?.backgroundColor = (isEnabled && (hovered || isHighlighted)
+            ? Theme.Elevation.surface1 : Theme.Elevation.surface0).cgColor
+        layer?.borderWidth = isHighlighted ? 1 : 0
+        layer?.borderColor = Theme.chromeMutedText.withAlphaComponent(0.4).cgColor
+    }
 }

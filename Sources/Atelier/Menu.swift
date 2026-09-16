@@ -31,6 +31,14 @@ enum Menu {
         main.addItem(fileItem)
         let fileMenu = NSMenu(title: "File")
         fileItem.submenu = fileMenu
+        fileMenu.addItem(withTitle: "New Project Tab", action: #selector(AppDelegate.newProject(_:)), keyEquivalent: "t")
+        fileMenu.addItem(chord("Close Project", #selector(AppDelegate.closeProject(_:)), "w", [.command, .option]))
+        fileMenu.addItem(chord("New Session…", #selector(AppDelegate.newSession(_:)), "t", [.command, .option]))
+        fileMenu.addItem(withTitle: "Open IDE Here", action: #selector(AppDelegate.openIDEHere(_:)), keyEquivalent: "\r")
+        fileMenu.addItem(withTitle: "Close Session", action: #selector(AppDelegate.closeSession(_:)), keyEquivalent: "w")
+        // ⌘⇧T is the browser's reopen chord — muscle memory the close `×` earns.
+        fileMenu.addItem(chord("Reopen Closed Session", #selector(AppDelegate.reopenSession(_:)), "t", [.command, .shift]))
+        fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Open…", action: #selector(AppDelegate.openFile(_:)), keyEquivalent: "o")
         fileMenu.addItem(withTitle: "Save", action: #selector(AppDelegate.saveFile(_:)), keyEquivalent: "s")
         fileMenu.addItem(.separator())
@@ -64,7 +72,7 @@ enum Menu {
         viewMenu.addItem(withTitle: "Toggle Layout", action: #selector(AppDelegate.toggleLayout(_:)), keyEquivalent: "\\")
         viewMenu.addItem(chord("Command Palette…", #selector(AppDelegate.showPalette(_:)), "p", [.command, .shift]))
         viewMenu.addItem(withTitle: "Go to File…", action: #selector(AppDelegate.goToFile(_:)), keyEquivalent: "p")
-        viewMenu.addItem(chord("Find in Repo…", #selector(AppDelegate.searchRepo(_:)), "f", [.command, .shift]))
+        viewMenu.addItem(chord("Find in Project…", #selector(AppDelegate.searchRepo(_:)), "f", [.command, .shift]))
         viewMenu.addItem(withTitle: "Toggle Explorer", action: #selector(AppDelegate.toggleExplorer(_:)), keyEquivalent: "b")
         viewMenu.addItem(chord("Search Files and Text", #selector(AppDelegate.explorerSearch(_:)), "e", [.command, .shift]))
         // F12 — the VSCode instinct (§2.6). Function keys carry no modifier.
@@ -77,13 +85,6 @@ enum Menu {
                                String(UnicodeScalar(UInt16(NSRightArrowFunctionKey))!), [.control, .command]))
         viewMenu.addItem(.separator())
 
-        viewMenu.addItem(withTitle: "New Project Tab", action: #selector(AppDelegate.newProject(_:)), keyEquivalent: "t")
-        viewMenu.addItem(chord("Close Project", #selector(AppDelegate.closeProject(_:)), "w", [.command, .option]))
-        viewMenu.addItem(chord("New Session…", #selector(AppDelegate.newSession(_:)), "t", [.command, .option]))
-        viewMenu.addItem(withTitle: "Open IDE Here", action: #selector(AppDelegate.openIDEHere(_:)), keyEquivalent: "\r")
-        viewMenu.addItem(withTitle: "Close Session", action: #selector(AppDelegate.closeSession(_:)), keyEquivalent: "w")
-        // ⌘⇧T is the browser's reopen chord — muscle memory the close `×` earns.
-        viewMenu.addItem(chord("Reopen Closed Session", #selector(AppDelegate.reopenSession(_:)), "t", [.command, .shift]))
         viewMenu.addItem(chord("Next Session", #selector(AppDelegate.nextSession(_:)), "]", [.command, .shift]))
         viewMenu.addItem(chord("Previous Session", #selector(AppDelegate.prevSession(_:)), "[", [.command, .shift]))
         viewMenu.addItem(chord("Next Project", #selector(AppDelegate.nextProject(_:)), "\t", [.control]))

@@ -29,10 +29,10 @@ local override by package identity, the same way `Vendor/CodeEditSymbols` is.
    down — so a caret that was off screen lands with room around it rather
    than flush against the edge, the VSCode/Sublime manner.
 
-3. **⌥-click adds a caret; ⌘-click hook** (`TextView/TextView+Mouse.swift`,
-   `TextView/TextView.swift`). Upstream binds add-caret to ⌃⇧-click only;
-   ⌥-click now does the same (VSCode). `onCommandClick` lets the host treat
-   ⌘-click as go-to-definition.
+3. **⌥-click adds a caret** (`TextView/TextView+Mouse.swift`). Upstream
+   binds add-caret to ⌃⇧-click only; ⌥-click now does the same (VSCode).
+   (A ⌘-click hook lived here briefly; ⌘-click is CodeEditSourceEditor's
+   jump-to-definition model now — see that package's patch 8.)
 
 4. **Recycled fragment views are detached, not hidden**
    (`Utils/ViewReuseQueue.swift`). `enqueueView` set `isHidden = true` on a

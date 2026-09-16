@@ -188,6 +188,16 @@ public class TextViewController: NSViewController {
 
     var jumpToDefinitionModel: JumpToDefinitionModel?
 
+    /// Atelier patch: the jump-to-definition delegate, settable after init
+    /// (upstream only reaches it through the SwiftUI `SourceEditor`). With
+    /// a delegate set, ⌘-hover shows a pointing hand + underline on symbols
+    /// that resolve, and ⌘-click / mouse-up jumps.
+    public weak var jumpToDefinitionDelegate: JumpToDefinitionDelegate? {
+        didSet { jumpToDefinitionModel?.delegate = jumpToDefinitionDelegate }
+    }
+    /// Atelier patch: the ⌘-hover underline colour (a theme's link/accent).
+    public var linkHoverColor: NSColor = .linkColor
+
     var cancellables = Set<AnyCancellable>()
 
     /// The trailing inset for the editor. Grows when line wrapping is disabled or when the minimap is shown.

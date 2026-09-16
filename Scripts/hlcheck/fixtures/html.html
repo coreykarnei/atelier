@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<!-- Atelier fixture: a small project landing page. -->
+<html lang="en" data-theme=mocha>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Atelier &mdash; a native workspace</title>
+  <link rel="stylesheet" href="/static/site.css">
+  <link rel="icon" href="https://coreykarnei.com/favicon.ico" type="image/x-icon">
+  <style>
+    :root { --base: #1e1e2e; --text: #cdd6f4; }
+    body { background: var(--base); color: var(--text); font: 14px/1.5 "JetBrains Mono", monospace; }
+    .hero > h1 { margin-top: 0; }
+  </style>
+  <script type="module" src="/static/app.js"></script>
+  <script>
+    const state = { sessions: 3, focused: null };
+    document.addEventListener("DOMContentLoaded", () => {
+      console.log(`sessions: ${state.sessions}`);
+    });
+  </script>
+</head>
+<body class="landing dark">
+  <header id="top" role="banner">
+    <nav aria-label="Primary">
+      <a href="/">Home</a>
+      <a href="/docs/milestones.html" target="_blank" rel="noopener">Milestones</a>
+      <a href="mailto:cornkak@gmail.com">Contact &amp; feedback</a>
+    </nav>
+  </header>
+
+  <main class="hero">
+    <h1>Code, shell, agent &mdash; side by side</h1>
+    <h2>One window. One clipboard. Native blur.</h2>
+    <p>
+      Atelier is the native successor to Ghostty + tmux + Helix + Claude Code.
+      It hosts <code>claude</code> unchanged and owns the chrome, keyboard,
+      clipboard &amp; notifications itself. Copy from any pane returns the
+      <strong>actual</strong> text &#8212; paragraphs as paragraphs, no
+      gutter-indent leaking in. Use <kbd>&#x2318;P</kbd> to go to a file.
+    </p>
+    <img src="/static/triptych.png" alt="The triptych layout" width="960" height="540">
+    <figure>
+      <img src=/static/tabs.png alt="Project tabs" loading="lazy">
+      <figcaption>Projects as tabs; sessions as bottom-bar tabs.</figcaption>
+    </figure>
+
+    <h3>Milestones</h3>
+    <ol start="0">
+      <li><em>M0</em> &ndash; two PTY panes, notification bridge</li>
+      <li>M1 &ndash; projects, sessions, worktrees, persistence</li>
+      <li>M2 &ndash; editor, &lt;picker&gt;, find in repo, LSP</li>
+    </ol>
+
+    <h4>Keyboard</h4>
+    <table>
+      <thead>
+        <tr><th scope="col">Chord</th><th scope="col">Action</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>&#8984;T</td><td>New project tab</td></tr>
+        <tr><td>&#8984;&#8679;P</td><td>Command palette</td></tr>
+        <tr><td>&#8984;&#92;</td><td>Toggle layout</td></tr>
+      </tbody>
+    </table>
+
+    <h5>Settings</h5>
+    <form action="/settings" method="post" autocomplete="off">
+      <label for="opacity">Field opacity</label>
+      <input id="opacity" name="opacity" type="range" min="0" max="1" step="0.05" value="0.75">
+      <input type="checkbox" name="worktrees" checked disabled>
+      <select name="theme">
+        <option value="mocha" selected>Catppuccin Mocha</option>
+        <option value="latte">Catppuccin Latte</option>
+      </select>
+      <textarea name="notes" rows="3" placeholder="Anything else?"></textarea>
+      <button type="submit" class="primary" onclick="track('save')">Save</button>
+    </form>
+
+    <h6>Status</h6>
+    <p>Build <span class="ok">&#10003; passing</span> &middot; <s>M2.4 pending</s> <del>old</del></p>
+  </main>
+
+  <footer>
+    <hr>
+    <small>&copy; 2026 Corey Karnei &bull; <a href="https://github.com/coreykarnei">GitHub</a></small>
+    <br/>
+  </footer>
+</body>
+</html>

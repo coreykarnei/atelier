@@ -146,10 +146,6 @@ open class TextView: NSView, NSTextContent {
         }
     }
 
-    /// Determines if the text view responds to selection events, such as clicks.
-    /// Atelier: ⌘-click lands here with the clicked offset — the host jumps
-    /// to the definition. Nil = a plain click.
-    public var onCommandClick: ((Int) -> Void)?
     /// Atelier dev hook.
     public static var debugTrace: ((String) -> Void)?
     func trace(_ what: String) {

@@ -92,13 +92,13 @@ final class BottomBar: NSView {
     private let pillLabel = NSTextField(labelWithString: "")
     /// Manual-layout home of the tab views; sits between pill and clock.
     private let tabsArea = TabsAreaView()
-    private let addButton = NSButton()
-    private let overflowButton = NSButton()
+    private let addButton = HoverPadButton()
+    private let overflowButton = HoverPadButton()
     private let clockPrefixLabel = NSTextField(labelWithString: "")
     private let clockColonLabel = BreathingColonLabel(labelWithString: ":")
     private let clockSuffixLabel = NSTextField(labelWithString: "")
-    private let layoutButton = NSButton()
-    private let settingsButton = NSButton()
+    private let layoutButton = HoverPadButton()
+    private let settingsButton = HoverPadButton()
     private let topBorder = NSBox()
     /// The mantle field — the visible bar. Pinned to the bottom `desiredHeight`.
     private let backdrop = NSView()
@@ -202,8 +202,12 @@ final class BottomBar: NSView {
         addSubview(tabsArea)
 
         configureIconButton(addButton, symbol: "plus", action: #selector(addTapped))
+        addButton.toolTip = "New Session…  ⌥⌘T"
+        addButton.setAccessibilityLabel("New session")
         tabsArea.addSubview(addButton)
         configureIconButton(overflowButton, symbol: "chevron.right.2", action: nil)
+        overflowButton.toolTip = "More sessions"
+        overflowButton.setAccessibilityLabel("More sessions")
         overflowButton.isHidden = true
         tabsArea.addSubview(overflowButton)
 
@@ -219,9 +223,13 @@ final class BottomBar: NSView {
         configureIconButton(layoutButton, symbol: "rectangle.split.3x1", action: #selector(layoutTapped))
         // The toggle and gear are constraint-anchored (unlike the flow-placed
         // buttons, which are positioned by frame inside tabsArea).
+        layoutButton.toolTip = "Switch Layout  ⌘\\"
+        layoutButton.setAccessibilityLabel("Switch layout")
         layoutButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(layoutButton)
         configureIconButton(settingsButton, symbol: "gearshape", action: #selector(settingsTapped))
+        settingsButton.toolTip = "Settings…  ⌘,"
+        settingsButton.setAccessibilityLabel("Settings")
         settingsButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(settingsButton)
 
@@ -1067,6 +1075,11 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     func apply(info: SessionTabInfo, isActive: Bool) {
         index = info.index
         rawTitle = info.title
+        setAccessibilityElement(true)
+        setAccessibilityRole(.radioButton)
+        setAccessibilityLabel(Self.label(for: info))
+        setAccessibilityValue(isActive ? 1 : 0)
+        closeButton.toolTip = "Close Session  ⌘W"
         let text = Self.label(for: info)
         if titleLabel.stringValue != text { titleLabel.stringValue = text }
 
@@ -1089,6 +1102,8 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         applied = true
         needsLayout = true
     }
+
+    override func accessibilityPerformPress() -> Bool { onSelect?(index); return true }
 
     override func layout() {
         super.layout()

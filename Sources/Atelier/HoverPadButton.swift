@@ -29,6 +29,14 @@ final class HoverPadButton: NSButton {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    override func mouseEntered(with event: NSEvent) { layer?.backgroundColor = hoverFill.cgColor }
-    override func mouseExited(with event: NSEvent) { layer?.backgroundColor = nil }
+    private var hovered = false
+    override var isEnabled: Bool { didSet { refreshPad() } }
+    override func mouseEntered(with event: NSEvent) { hovered = true; refreshPad() }
+    override func mouseExited(with event: NSEvent) { hovered = false; refreshPad() }
+    override func highlight(_ flag: Bool) { super.highlight(flag); refreshPad() }
+    override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); hovered = false; refreshPad() }
+    private func refreshPad() {
+        layer?.backgroundColor = isEnabled && (hovered || isHighlighted)
+            ? hoverFill.withAlphaComponent(isHighlighted ? 0.18 : 0.10).cgColor : nil
+    }
 }

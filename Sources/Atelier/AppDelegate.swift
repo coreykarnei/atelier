@@ -37,6 +37,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         notificationServer.onDebug = { [weak self] debug in self?.handle(debug) }
+        if ProcessInfo.processInfo.environment["ATELIER_LSP_TRACE"] != nil {
+            let log = NSHomeDirectory() + "/.local/state/atelier/lsp.log"
+            LSPClient.debugTrace = { line in
+                if let handle = FileHandle(forWritingAtPath: log) ?? (FileManager.default.createFile(atPath: log, contents: nil) ? FileHandle(forWritingAtPath: log) : nil) {
+                    handle.seekToEndOfFile(); handle.write((line + "\n").data(using: .utf8)!); handle.closeFile()
+                }
+            }
+        }
         notificationServer.start()
 
         restoreOrOpenFresh()

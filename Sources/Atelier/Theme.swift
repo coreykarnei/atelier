@@ -73,6 +73,10 @@ enum Theme {
         static let surface0 = nsColor(0x313244)
         /// Floating surfaces — fan, palette — over stronger blur.
         static let surface1 = nsColor(0x45475A)
+        /// Opaque base: the wash floating material (chooser, palette) lays
+        /// over its blur, and the Settings panel's ground. Not a field — it
+        /// never carries `fieldAlpha`.
+        static let overlayFill = nsColor(0x1E1E2E)
 
         /// 1 px line between stacked chrome surfaces (bar top border, dividers).
         static let frameLine = nsColor(0x313244) // surface0
@@ -267,6 +271,17 @@ enum Theme {
         static let punctuation = nsColor(0x9399B2) // overlay2
         static let namespace = nsColor(0xB4BEFE)   // lavender
         static let label = nsColor(0x74C7EC)       // sapphire
+        // Markup (markdown), catppuccin/nvim's markdown mapping; code spans
+        // and blocks share the preview's green (MarkdownPreview paints code
+        // spans in `string`).
+        static let heading1 = nsColor(0xB4BEFE)    // lavender — h1
+        static let heading = nsColor(0x89B4FA)     // blue — h2…h6, table headers
+        static let strikethrough = nsColor(0x7F849C) // overlay1
+        static let rawCode = nsColor(0xA6E3A1)     // green — same as `string`
+        static let link = nsColor(0x89B4FA)        // blue — link text and labels
+        static let url = nsColor(0x94E2D5)         // teal — destinations, autolinks
+        static let listMarker = nsColor(0xCBA6F7)  // mauve
+        static let quote = nsColor(0x9399B2)       // overlay2
         static let selection = nsColor(0x585B70).withAlphaComponent(0.5)     // surface2
         static let lineHighlight = nsColor(0x313244).withAlphaComponent(0.5) // surface0
     }

@@ -1,0 +1,86 @@
+/* Atelier workspace chrome — Catppuccin Mocha tokens and layout.
+   Edited by hand; keep the two-voice type system intact. */
+@charset "UTF-8";
+@import url("fonts/jetbrains-mono.css") screen;
+@import "tokens.css" layer(base);
+@namespace svg url(http://www.w3.org/2000/svg);
+@layer base, components;
+
+:root {
+  --ctp-base: #1e1e2e;
+  --ctp-text: #cdd6f4;
+  --ctp-peach: rgb(250, 179, 135);
+  --field-alpha: 0.75;
+  --chrome-font: "SF Pro", system-ui, sans-serif;
+  --gap: calc(var(--unit, 4px) * 2);
+}
+
+html, body {
+  margin: 0;
+  padding: 0 1rem;
+  font: 14px/1.4 "JetBrains Mono", monospace;
+  color: var(--ctp-text);
+  background-color: rgba(30, 30, 46, var(--field-alpha));
+}
+
+/* Project strip: tabs under the titlebar */
+nav.project-strip > ul.tabs {
+  display: flex;
+  gap: var(--gap);
+  list-style: none;
+}
+
+ul.tabs > li.tab + li.tab { margin-left: -1px; }
+ul.tabs > li.tab ~ li.tab::after { content: "\00b7"; }
+li.tab#active, li.tab.selected {
+  background: #313244 !important;
+  border-radius: 6px 6px 0 0;
+  transition: background 120ms ease-in-out, transform .12s;
+}
+
+li.tab:hover, li.tab:focus-visible { outline: 2px solid hsl(217deg 92% 76% / 40%); }
+li.tab:not(.selected):nth-child(2n + 1) { opacity: 0.85; }
+li.tab::before, li.tab::marker { color: #6c7086; }
+a[href^="https://"], a[target="_blank" i], input[type=text], img[alt~='hero'] {
+  text-decoration: underline dotted;
+}
+svg|circle, *[data-state] { stroke-width: 1.5; }
+.card & .title { font-weight: 600; }
+
+@media screen and (min-width: 768px) and (max-width: 1279.98px), print {
+  .triptych {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: calc(100% - 2 * var(--gap));
+    aspect-ratio: 16 / 9;
+  }
+}
+
+@media not all and (prefers-reduced-motion: reduce) {
+  .arrival { animation: fade-in 240ms cubic-bezier(0.2, 0, 0, 1) both; }
+}
+
+@supports (backdrop-filter: blur(20px)) or (-webkit-backdrop-filter: blur(20px)) {
+  .field { backdrop-filter: blur(20px) saturate(1.2); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  50%  { opacity: .6; }
+  to   { opacity: 1; transform: none; }
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../fonts/JetBrainsMono.woff2") format("woff2");
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131;
+}
+
+@container sidebar (inline-size > 320px) {
+  .explorer { padding-inline: 1.25em 2ch; }
+}
+
+.editor::selection { background: color-mix(in srgb, #89b4fa 30%, transparent); }
+.editor .line-number { color: rgb(108 112 134 / 0.5); font-variant-numeric: tabular-nums; }
+.editor .gutter { width: 3.5rem; height: 100vh; margin: -2px auto 0; z-index: 10; }
+button:disabled, .btn.is-disabled { cursor: not-allowed; opacity: 40%; }

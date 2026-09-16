@@ -2,7 +2,7 @@ import AppKit
 
 /// The worktree chooser (MILESTONE_1 §6, revised 2026-09-03/08): the small
 /// modal the `+` / `⌥⌘T` raise before a session starts. One caption, one
-/// dropdown, `↩`. The suggestion is the worktree you're already in, so the
+/// dropdown, and a labeled Return action. The suggestion is the worktree you're already in, so the
 /// fast path is *plus, enter*; the dropdown unfolds an inline list of the
 /// repo's worktrees (each removable by its hover `×`, behind a confirmation)
 /// and offers a new one, which turns the dropdown into a name field. Typing
@@ -18,7 +18,8 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
     private let onDismissHandler: () -> Void
 
     private let cardHost = NSView()
-    private let card = NSVisualEffectView()
+    private let card = OverlayMaterialView()
+    private let hint = NSTextField(labelWithString: "")
     private let caption = NSTextField(labelWithString: "")
     private let picker = ChooserKeyView()
     private let dropdown = DropdownButton()
@@ -26,13 +27,13 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
     private let nameField = CenteredTextField()
     private let list: WorktreeListView
     private var listHeight: NSLayoutConstraint?
+    private var cardWidth: NSLayoutConstraint?
     private let returnKey = ReturnKeyButton()
 
     private enum Mode { case pick, name }
     private var mode: Mode = .pick
     private var listOpen = false
 
-    static let controlWidth: CGFloat = 264
 
     /// `initial` is the suggestion (the active session's worktree); `prefill`
     /// opens the chooser already naming a new worktree.
@@ -79,21 +80,21 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
         card.addSubview(topHairline)
 
         // × — top-left, muted until hovered (the tab-close idiom).
-        let close = HoverFadeIconButton()
+        let close = HoverPadButton()
         close.bezelStyle = .regularSquare
         close.isBordered = false
         close.imagePosition = .imageOnly
         close.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Dismiss")
         close.symbolConfiguration = .init(pointSize: 9, weight: .medium)
         close.contentTintColor = Theme.chromeMutedText
-        close.alphaValue = HoverFadeIconButton.restingAlpha
+        close.alphaValue = HoverPadButton.restingAlpha
         close.target = self
         close.action = #selector(dismissTapped)
         close.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(close)
 
         // The caption is Atelier speaking — SF Pro, body, the chrome cap (§1.4).
-        caption.font = Theme.Typography.ui(Theme.Typography.body)
+        caption.font = Theme.Typography.ui(Theme.Typography.body, weight: .medium)
         caption.textColor = Theme.chromeText
         caption.alignment = .center
         caption.translatesAutoresizingMaskIntoConstraints = false
@@ -123,7 +124,13 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
         nameHost.isHidden = true
         nameHost.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(nameHost)
-        nameField.placeholderString = "branch name"
+        let placeholderParagraph = NSMutableParagraphStyle()
+        placeholderParagraph.alignment = .center
+        nameField.placeholderAttributedString = NSAttributedString(string: "branch name", attributes: [
+            .font: Theme.Typography.mono(Theme.Typography.body),
+            .foregroundColor: Theme.chromeMutedText,
+            .paragraphStyle: placeholderParagraph,
+        ])
         nameField.font = Theme.Typography.mono(Theme.Typography.body, weight: .medium)
         nameField.textColor = Theme.chromeText
         nameField.alignment = .center
@@ -141,20 +148,32 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
         list.onRemove = { [weak self] worktree in self?.onRemove?(worktree) }
         list.onHover = { [weak self] index in self?.list.select(index) }
         list.alphaValue = 0
+        list.isHidden = true
         card.addSubview(list)
 
         returnKey.target = self
         returnKey.action = #selector(returnTapped)
         returnKey.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(returnKey)
+        hint.font = Theme.Typography.ui(Theme.Typography.small)
+        hint.textColor = Theme.chromeMutedText
+        hint.lineBreakMode = .byTruncatingTail
+        hint.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(hint)
+        close.toolTip = "Dismiss (Esc)"
+        nameField.setAccessibilityLabel("New worktree branch name")
+        nameHost.layer?.borderWidth = 1
+        nameHost.layer?.borderColor = Theme.chromeMutedText.withAlphaComponent(0.45).cgColor
 
         let height = list.heightAnchor.constraint(equalToConstant: 0)
         listHeight = height
 
+        let width = cardHost.widthAnchor.constraint(equalToConstant: 352)
+        cardWidth = width
         NSLayoutConstraint.activate([
             cardHost.centerXAnchor.constraint(equalTo: centerXAnchor),
             cardHost.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 40), // sits a little above center
-            cardHost.widthAnchor.constraint(equalToConstant: 340),
+            width,
 
             card.topAnchor.constraint(equalTo: cardHost.topAnchor),
             card.leadingAnchor.constraint(equalTo: cardHost.leadingAnchor),
@@ -166,10 +185,10 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
             topHairline.trailingAnchor.constraint(equalTo: card.trailingAnchor),
             topHairline.heightAnchor.constraint(equalToConstant: 1),
 
-            close.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
+            close.topAnchor.constraint(equalTo: card.topAnchor, constant: 10),
             close.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
-            close.widthAnchor.constraint(equalToConstant: 16),
-            close.heightAnchor.constraint(equalToConstant: 16),
+            close.widthAnchor.constraint(equalToConstant: 24),
+            close.heightAnchor.constraint(equalToConstant: 24),
 
             caption.topAnchor.constraint(equalTo: card.topAnchor, constant: 20),
             caption.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 40),
@@ -177,8 +196,8 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
 
             picker.topAnchor.constraint(equalTo: caption.bottomAnchor, constant: 14),
             picker.centerXAnchor.constraint(equalTo: card.centerXAnchor),
-            picker.widthAnchor.constraint(equalToConstant: Self.controlWidth),
-            picker.heightAnchor.constraint(equalToConstant: 30),
+            picker.widthAnchor.constraint(equalTo: card.widthAnchor, constant: -48),
+            picker.heightAnchor.constraint(equalToConstant: 36),
 
             dropdown.topAnchor.constraint(equalTo: picker.topAnchor),
             dropdown.bottomAnchor.constraint(equalTo: picker.bottomAnchor),
@@ -187,8 +206,8 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
 
             nameHost.centerYAnchor.constraint(equalTo: picker.centerYAnchor),
             nameHost.centerXAnchor.constraint(equalTo: card.centerXAnchor),
-            nameHost.widthAnchor.constraint(equalToConstant: Self.controlWidth),
-            nameHost.heightAnchor.constraint(equalToConstant: 30),
+            nameHost.widthAnchor.constraint(equalTo: picker.widthAnchor),
+            nameHost.heightAnchor.constraint(equalToConstant: 36),
             nameField.centerYAnchor.constraint(equalTo: nameHost.centerYAnchor),
             nameField.leadingAnchor.constraint(equalTo: nameHost.leadingAnchor, constant: 12),
             nameField.trailingAnchor.constraint(equalTo: nameHost.trailingAnchor, constant: -12),
@@ -200,12 +219,32 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
             height,
 
             returnKey.topAnchor.constraint(equalTo: list.bottomAnchor, constant: 14),
-            returnKey.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
-            returnKey.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12),
+            returnKey.trailingAnchor.constraint(equalTo: picker.trailingAnchor),
+            returnKey.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -16),
+            hint.leadingAnchor.constraint(equalTo: picker.leadingAnchor),
+            hint.trailingAnchor.constraint(lessThanOrEqualTo: returnKey.leadingAnchor, constant: -12),
+            hint.centerYAnchor.constraint(equalTo: returnKey.centerYAnchor),
         ])
 
         applyMode()
     }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        // Keep this a constant: a width equality to the host can make AppKit
+        // resize the entire window to the card's fitting width.
+        cardWidth?.constant = min(352, max(0, newSize.width - 32))
+        if listOpen {
+            listHeight?.constant = min(list.naturalHeight, listLimit)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.listOpen else { return }
+                self.layoutSubtreeIfNeeded()
+                self.list.revealSelection()
+            }
+        }
+    }
+
+    private var listLimit: CGFloat { max(64, min(260, bounds.height - 260)) }
 
     // MARK: Modes
 
@@ -214,6 +253,8 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
         case .pick:
             caption.stringValue = "Start a session in"
             dropdown.title = selected.branch
+            dropdown.toolTip = selected.path
+            list.markCurrent(path: selected.path)
             dropdown.isHidden = false
             nameHost.isHidden = true
         case .name:
@@ -221,6 +262,7 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
             dropdown.isHidden = true
             nameHost.isHidden = false
         }
+        updateAction()
     }
 
     private func enterNameMode(seed: String) {
@@ -244,16 +286,21 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
 
     // MARK: The list
 
-    private func toggleList() { setListOpen(!listOpen) }
+    private func toggleList() {
+        setListOpen(!listOpen)
+        window?.makeFirstResponder(picker)
+    }
 
     private func setListOpen(_ open: Bool) {
         guard open != listOpen else { return }
         listOpen = open
+        list.isHidden = !open
+        updateAction()
         dropdown.isOpen = open
         if open {
             list.select(worktrees.firstIndex(where: { $0.path == selected.path }) ?? 0)
         }
-        let target: CGFloat = open ? list.naturalHeight : 0
+        let target: CGFloat = open ? min(list.naturalHeight, listLimit) : 0
         let animate = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = animate ? 0.15 : 0
@@ -262,6 +309,9 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
             listHeight?.animator().constant = target
             list.animator().alphaValue = open ? 1 : 0
             self.layoutSubtreeIfNeeded()
+        } completionHandler: { [weak self] in
+            guard let self, self.listOpen else { return }
+            self.list.revealSelection(fromTop: true)
         }
     }
 
@@ -302,8 +352,8 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
                 onStart?(selected)
             }
         case .name:
-            let name = nameField.stringValue.trimmingCharacters(in: .whitespaces)
-            guard !name.isEmpty else {
+            let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, nameIssue(name) == nil else {
                 NSSound.beep()
                 return
             }
@@ -315,6 +365,36 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
             }
         }
     }
+
+    // Validate without spawning git on the typing path. Git remains authoritative
+    // for repository-specific conflicts when the action is committed.
+    private func nameIssue(_ name: String) -> String? {
+        if name.isEmpty { return nil }
+        let invalid = CharacterSet(charactersIn: " ~^:?*[\\").union(.controlCharacters)
+        if name == "@" || name.hasPrefix("-") || name.hasSuffix(".") ||
+            name.contains("..") || name.contains("@{") ||
+            name.unicodeScalars.contains(where: { invalid.contains($0) }) ||
+            name.split(separator: "/", omittingEmptySubsequences: false).contains(where: {
+                $0.isEmpty || $0.hasPrefix(".") || $0.hasSuffix(".lock")
+            }) {
+            return "Use a valid branch name"
+        }
+        return nil
+    }
+
+    private func updateAction() {
+        let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let issue = mode == .name ? nameIssue(name) : nil
+        let existing = worktrees.contains { $0.branch == name }
+        returnKey.actionTitle = mode == .pick ? (listOpen ? "Choose" : "Start session")
+            : (existing ? "Start session" : "Create & start")
+        returnKey.isEnabled = mode == .pick || (!name.isEmpty && issue == nil)
+        hint.stringValue = issue ?? (mode == .name ? "Esc to go back" : (listOpen ? "↑ ↓ to navigate" : "↓ to choose worktree"))
+        hint.textColor = issue == nil ? Theme.chromeMutedText : Theme.accentPeach
+        hint.toolTip = issue
+    }
+
+    func controlTextDidChange(_ obj: Notification) { updateAction() }
 
     func dismiss() { onDismissHandler() }
 
@@ -403,8 +483,9 @@ private final class ChooserKeyView: NSView {
 /// The inline worktree list: one row per worktree (the primary tagged
 /// "main checkout", the others removable by a hover `×`), then "New
 /// worktree…". A single selection highlight; hover moves it, keys walk it.
-private final class WorktreeListView: NSView {
-    static let rowHeight: CGFloat = 28
+private final class WorktreeListView: NSScrollView {
+    static let rowHeight: CGFloat = 32
+    private let content = NSView()
     var onPick: ((Int) -> Void)?
     var onRemove: ((Worktree) -> Void)?
     var onHover: ((Int) -> Void)?
@@ -418,6 +499,11 @@ private final class WorktreeListView: NSView {
     init(worktrees: [Worktree]) {
         self.worktrees = worktrees
         super.init(frame: .zero)
+        drawsBackground = false
+        hasVerticalScroller = true
+        autohidesScrollers = true
+        scrollerStyle = .overlay
+        documentView = content
         wantsLayer = true
         for (index, worktree) in worktrees.enumerated() {
             let row = ListRow(
@@ -427,16 +513,17 @@ private final class WorktreeListView: NSView {
                 removable: !worktree.isPrimary
             )
             row.onClick = { [weak self] in self?.onPick?(index) }
+            row.toolTip = worktree.path
             row.onRemove = { [weak self] in self?.onRemove?(worktree) }
             row.onHover = { [weak self] in self?.onHover?(index) }
             rows.append(row)
-            addSubview(row)
+            content.addSubview(row)
         }
         let new = ListRow(title: "New worktree…", mono: false, suffix: nil, removable: false)
         new.onClick = { [weak self] in self?.onPick?(worktrees.count) }
         new.onHover = { [weak self] in self?.onHover?(worktrees.count) }
         rows.append(new)
-        addSubview(new)
+        content.addSubview(new)
         // Clip the fold: rows below the animated height stay hidden.
         layer?.masksToBounds = true
     }
@@ -446,12 +533,13 @@ private final class WorktreeListView: NSView {
 
     override func layout() {
         super.layout()
+        content.setFrameSize(NSSize(width: contentSize.width, height: naturalHeight))
         for (index, row) in rows.enumerated() {
             row.frame = CGRect(
                 x: 0,
                 y: naturalHeight - 2 - CGFloat(index + 1) * Self.rowHeight,
-                width: bounds.width,
-                height: Self.rowHeight
+                width: content.bounds.width,
+                height: Self.rowHeight - 2
             )
             // A hairline over the "New…" row separates it from the worktrees.
             row.showsTopRule = index == worktrees.count
@@ -463,8 +551,27 @@ private final class WorktreeListView: NSView {
         for (i, row) in rows.enumerated() { row.isSelected = i == selection }
     }
 
+    func markCurrent(path: String) {
+        for (index, row) in rows.enumerated() {
+            row.isCurrent = index < worktrees.count && worktrees[index].path == path
+        }
+    }
+
+    func revealSelection(fromTop: Bool = false) {
+        layoutSubtreeIfNeeded()
+        let row = rows[selection].frame.insetBy(dx: 0, dy: -2)
+        var visible = contentView.bounds
+        if fromTop { visible.origin.y = naturalHeight - visible.height }
+        if row.minY < visible.minY { visible.origin.y = row.minY }
+        if row.maxY > visible.maxY { visible.origin.y = row.maxY - visible.height }
+        visible.origin.y = max(0, min(visible.origin.y, naturalHeight - visible.height))
+        contentView.scroll(to: visible.origin)
+        reflectScrolledClipView(contentView)
+    }
+
     func move(_ delta: Int) {
         select((selection + delta + rows.count) % rows.count)
+        revealSelection()
     }
 }
 
@@ -480,8 +587,10 @@ private final class ListRow: NSView {
     }
 
     private let label = NSTextField(labelWithString: "")
+    private let check = NSImageView()
+    var isCurrent = false { didSet { check.isHidden = !isCurrent } }
     private let suffixLabel = NSTextField(labelWithString: "")
-    private let remove = HoverFadeIconButton()
+    private let remove = HoverPadButton()
     private let rule = NSView()
     private var tracking: NSTrackingArea?
 
@@ -496,6 +605,7 @@ private final class ListRow: NSView {
             : Theme.Typography.ui(Theme.Typography.body)
         label.textColor = Theme.chromeText
         label.lineBreakMode = .byTruncatingMiddle
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
 
@@ -503,6 +613,7 @@ private final class ListRow: NSView {
         suffixLabel.font = Theme.Typography.ui(Theme.Typography.small)
         suffixLabel.textColor = Theme.chromeMutedText
         suffixLabel.isHidden = suffix == nil
+        suffixLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         suffixLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(suffixLabel)
 
@@ -513,11 +624,23 @@ private final class ListRow: NSView {
         remove.symbolConfiguration = .init(pointSize: 9, weight: .medium)
         remove.contentTintColor = Theme.chromeMutedText
         remove.alphaValue = 0 // revealed on row hover
+        remove.toolTip = "Remove worktree…"
+        remove.setAccessibilityLabel("Remove \(title)")
         remove.isHidden = !removable
         remove.target = self
         remove.action = #selector(removeTapped)
         remove.translatesAutoresizingMaskIntoConstraints = false
         addSubview(remove)
+
+        check.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Current worktree")
+        check.symbolConfiguration = .init(pointSize: 10, weight: .semibold)
+        check.contentTintColor = Theme.chromeText
+        check.isHidden = true
+        check.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(check)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(title + (suffix.map { ", " + $0 } ?? ""))
 
         rule.wantsLayer = true
         rule.layer?.backgroundColor = Theme.Elevation.hairline.cgColor
@@ -526,15 +649,18 @@ private final class ListRow: NSView {
         addSubview(rule)
 
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            check.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            check.centerYAnchor.constraint(equalTo: centerYAnchor),
+            check.widthAnchor.constraint(equalToConstant: 14),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 28),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            suffixLabel.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 8),
+            suffixLabel.leadingAnchor.constraint(greaterThanOrEqualTo: label.trailingAnchor, constant: 8),
             suffixLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             suffixLabel.trailingAnchor.constraint(lessThanOrEqualTo: remove.leadingAnchor, constant: -8),
             remove.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             remove.centerYAnchor.constraint(equalTo: centerYAnchor),
-            remove.widthAnchor.constraint(equalToConstant: 16),
-            remove.heightAnchor.constraint(equalToConstant: 16),
+            remove.widthAnchor.constraint(equalToConstant: 24),
+            remove.heightAnchor.constraint(equalToConstant: 24),
             rule.topAnchor.constraint(equalTo: topAnchor, constant: -1),
             rule.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             rule.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
@@ -555,7 +681,7 @@ private final class ListRow: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         onHover?()
-        if !remove.isHidden { remove.alphaValue = HoverFadeIconButton.restingAlpha }
+        if !remove.isHidden { remove.alphaValue = HoverPadButton.restingAlpha }
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -567,12 +693,14 @@ private final class ListRow: NSView {
         if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
     }
 
+    override func accessibilityPerformPress() -> Bool { onClick?(); return true }
+
     @objc private func removeTapped() { onRemove?() }
 }
 
 /// The dropdown: the branch centered in mono on a raised surface0 fill, a
 /// chevron at the trailing edge that turns when the list is open.
-private final class DropdownButton: NSButton {
+private final class DropdownButton: OverlayActionButton {
     private let label = NSTextField(labelWithString: "")
     private let chevron = NSImageView()
 
@@ -619,7 +747,7 @@ private final class DropdownButton: NSButton {
 
     override var title: String {
         get { label.stringValue }
-        set { label.stringValue = newValue }
+        set { label.stringValue = newValue; setAccessibilityLabel("Worktree: " + newValue) }
     }
 
     override func draw(_ dirtyRect: NSRect) {} // the layer is the whole look
@@ -634,12 +762,12 @@ private final class CenteredTextField: NSTextField {
     }
 }
 
-/// The confirm affordance: a `↩` keycap you can click — it says "just hit
-/// Enter" by being the key itself (Theme.Typography.Keycap).
-private final class ReturnKeyButton: NSButton {
-    private let label = NSTextField(labelWithString: "↩")
-    private var tracking: NSTrackingArea?
-
+/// The compact primary action: a verb and a Return hint, with shared control feedback.
+private final class ReturnKeyButton: OverlayActionButton {
+    var actionTitle = "Start session" {
+        didSet { label.stringValue = actionTitle; setAccessibilityLabel(actionTitle) }
+    }
+    private let label = NSTextField(labelWithString: "Start session")
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         isBordered = false
@@ -648,11 +776,20 @@ private final class ReturnKeyButton: NSButton {
         layer?.backgroundColor = Theme.Typography.Keycap.fill.cgColor
         layer?.cornerRadius = Theme.Typography.Keycap.radius
 
-        label.font = Theme.Typography.mono(Theme.Typography.body)
+        label.font = Theme.Typography.ui(Theme.Typography.small, weight: .medium)
         label.textColor = Theme.chromeText
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
 
+        let key = NSTextField(labelWithString: "↩")
+        key.font = Theme.Typography.Keycap.font
+        key.textColor = Theme.chromeMutedText
+        key.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(key)
+        NSLayoutConstraint.activate([
+            key.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
+            key.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
         let topEdge = NSView()
         topEdge.wantsLayer = true
         topEdge.layer?.backgroundColor = Theme.Typography.Keycap.topEdge.cgColor
@@ -660,9 +797,9 @@ private final class ReturnKeyButton: NSButton {
         addSubview(topEdge)
 
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 34),
-            heightAnchor.constraint(equalToConstant: 24),
-            label.centerXAnchor.constraint(equalTo: centerXAnchor),
+            heightAnchor.constraint(equalToConstant: 28),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -30),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
             topEdge.topAnchor.constraint(equalTo: topAnchor),
             topEdge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Theme.Typography.Keycap.radius),
@@ -676,36 +813,4 @@ private final class ReturnKeyButton: NSButton {
 
     override func draw(_ dirtyRect: NSRect) {}
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let tracking { removeTrackingArea(tracking) }
-        let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self, userInfo: nil)
-        addTrackingArea(area)
-        tracking = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        layer?.backgroundColor = Theme.Elevation.surface1.cgColor
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        layer?.backgroundColor = Theme.Typography.Keycap.fill.cgColor
-    }
-}
-
-/// A muted icon button that comes to full alpha under the pointer.
-private final class HoverFadeIconButton: NSButton {
-    static let restingAlpha: CGFloat = 0.55
-    private var tracking: NSTrackingArea?
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let tracking { removeTrackingArea(tracking) }
-        let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self, userInfo: nil)
-        addTrackingArea(area)
-        tracking = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { alphaValue = 1.0 }
-    override func mouseExited(with event: NSEvent) { alphaValue = Self.restingAlpha }
 }

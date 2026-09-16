@@ -261,10 +261,9 @@ final class ProjectController: NSObject, BottomBarDelegate {
             if session.editorPane.isDirty, !Settings.autosave { return }
             self.openInEditor(url: url, session: session, hit: hit, preview: true)
         }
-        session.editorPane.onGoToDefinition = { [weak self] in self?.goToDefinition() }
-        session.editorPane.onNavigateRequest = { [weak self, weak session] path, line in
+        session.editorPane.onNavigateRequest = { [weak self, weak session] path, line, column in
             guard let self, let session else { return }
-            self.openInEditor(url: URL(fileURLWithPath: path), session: session, cursor: (line, 1))
+            self.openInEditor(url: URL(fileURLWithPath: path), session: session, cursor: (line, column))
         }
         session.onRemoteRequested = { [weak self, weak session] host, dir in
             guard let self, let session else { return }
@@ -1373,7 +1372,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
             commands.append(PaletteCommand(id: "editor.goto", title: "Editor: Go to File…", key: "⌘P") { [weak self] in
                 self?.showFilePicker()
             })
-            commands.append(PaletteCommand(id: "editor.search", title: "Editor: Find in Repo…", key: "⌘⇧F") { [weak self] in
+            commands.append(PaletteCommand(id: "editor.search", title: "Editor: Find in Project…", key: "⌘⇧F") { [weak self] in
                 self?.showRepoSearch()
             })
             commands.append(PaletteCommand(id: "editor.open", title: "Editor: Open File…", key: "⌘O") { [weak self] in
