@@ -24,15 +24,14 @@ case "blocked", "input-blocked", "permission":
     defaultTitle = "Claude needs you"
     defaultBody = "Permission or a question is blocking the agent."
 case "waiting", "input-waiting", "idle":
-    // Notification hook, matcher `idle_prompt` — done, your move. The body
-    // keeps the word "waiting": legacy-configured apps classify by it.
+    // Notification hook, matcher `idle_prompt` — done, your move.
     kind = .inputNeeded
     defaultTitle = "Claude is waiting"
     defaultBody = "The agent is waiting on your next prompt."
 case "input", "inputNeeded", "notification":
-    // Legacy unmatched Notification hook (pre-matcher settings merge): the
-    // app classifies by message body. Kept so an un-migrated
-    // ~/.claude/settings.json keeps working.
+    // Unmatched Notification hook (a settings.json without the matchers):
+    // treated as "your move"; only the `permission_prompt` matcher can raise
+    // a blocker.
     kind = .inputNeeded
     defaultTitle = "Claude needs you"
     defaultBody = "The agent is waiting for input."

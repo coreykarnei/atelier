@@ -130,10 +130,16 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
         // `working` is tab-state only — no banner for "you pressed Enter."
         guard msg.kind != .working else { return }
 
+        // The sound vocabulary the dotfiles IDE used (POLISH_PLAN §7, resolved
+        // 2026-09-16): Blow = finished, Tink = needs you. One audio path — the
+        // app plays it, the banner stays silent — so it's heard whether or not
+        // banners are authorised, and for remote sessions it sounds *here*.
+        Self.sound(for: msg.kind)?.play()
+
         let content = UNMutableNotificationContent()
         content.title = msg.title
         content.body = msg.body
-        content.sound = .default
+        content.sound = nil
         if let sessionId = msg.sessionId {
             content.userInfo = ["sessionId": sessionId]
         }
@@ -141,6 +147,14 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
             identifier: UUID().uuidString, content: content, trigger: nil
         )
         UNUserNotificationCenter.current().add(request)
+    }
+
+    private static func sound(for kind: NotifyMessage.Kind) -> NSSound? {
+        switch kind {
+        case .stop: return NSSound(named: "Blow")
+        case .blocked, .inputNeeded: return NSSound(named: "Tink")
+        case .working: return nil
+        }
     }
 
     // MARK: UNUserNotificationCenterDelegate
@@ -152,7 +166,7 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound])
+        completionHandler([.banner])
     }
 
     // Click-to-focus: the banner carries the Claude session id; route to the app.

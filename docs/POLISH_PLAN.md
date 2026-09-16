@@ -17,10 +17,9 @@ kept as the plan's compass:
 > pixel-level craft — and let the transition set-pieces go.*
 
 **Status: Phases 0–4 built (2026-06-11).** The palette physiology is
-visually verified; the fan's new overlay (popover replaced) builds and is
-code-complete but still needs one live look — open the pill fan and judge
-the rise, the height tracking, and the sliding highlight before calling the
-pass closed. Nothing here blocks Milestone 2.
+visually verified. (The worktree pill fan this note once asked for a live
+look at was deleted 2026-09-03 in favour of the worktree chooser — see
+MILESTONE_1.) Nothing here blocks Milestone 2.
 
 ---
 
@@ -304,12 +303,13 @@ the dropped-items list. Reduce Motion: every one of these is a plain appear.
   **keyboard-invoked** (palette switch-to rows or a chord), hard-capped at one
   paragraph, no scrolling. Re-evaluate first whether the Dock badge +
   elapsed-time hover already killed the need.
-- **Designed sound** (two-note completion / question vocabulary; unseen-only
-  routing) — the routing rule is right and the events exist, but the
-  banner-sound vs. in-app-sound doubling must be resolved to **one audio
-  path** first (bundle the designed sounds as `UNNotificationSound`s, *or* own
-  playback and silence the banner — never both). The notes themselves are real
-  design work on their own clock.
+- **Designed sound** — *resolved 2026-09-16, not as designed:* the owner
+  chose parity with the dotfiles IDE over new notes. Atelier plays the same
+  two system sounds (`Blow` = finished, `Tink` = needs you) itself via
+  `NSSound` and posts silent banners — one audio path, audible whether or
+  not banners are authorised, and remote sessions sound on this machine.
+  The dotfiles' `afplay` hooks double it while both are merged into
+  `~/.claude/settings.json`; drop those once Atelier is the daily driver.
 - **The promote transition, kernel only** — keep continuous identity (the
   landing terminal *becomes* the shell pane; recents fade; one fast ≤250 ms
   settle). No unfolding dividers, no spring theater.

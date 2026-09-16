@@ -89,7 +89,7 @@ final class Session: NSObject, NSSplitViewDelegate {
     }
 
     /// Fired after the session is promoted to an IDE session, so the window can
-    /// refresh the branch pill, tabs, and focus.
+    /// refresh the project pill, tab strip, and focus.
     var onPromoted: (() -> Void)?
 
     /// A Landing chose a remote target. Promotion-in-place can't cross

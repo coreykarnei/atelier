@@ -199,7 +199,15 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// screen (deferred so terminals get a real size first).
     func startProcesses() {
         processesStarted = true
-        for session in sessions { session.start() }
+        // One runloop turn late, on purpose: at launch, `forkpty` in the same
+        // turn as `applicationDidFinishLaunching` has raced a system
+        // framework (UIIntelligenceSupport) still taking the dyld/objc lock —
+        // the child forked with the lock held and the app hung on startup.
+        // Letting the launch turn finish before the first fork sidesteps it.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            for session in self.sessions { session.start() }
+        }
         focus(activeSession?.defaultFocusView)
         startTitleTimer()
     }
@@ -930,12 +938,10 @@ final class ProjectController: NSObject, BottomBarDelegate {
             // fired. This is the `!`.
             sessions[index].attention = .needsInput
         case .inputNeeded:
-            // `idle_prompt`-matched hooks send this for "your move". Legacy
-            // unmatched Notification hooks also land here carrying blockers —
-            // for those, fall back to classifying by the message body.
-            sessions[index].attention = message.body.lowercased().contains("waiting")
-                ? .waiting
-                : .needsInput
+            // `idle_prompt`-matched hooks: done, your move. Blockers arrive
+            // structured as `.blocked` (the `permission_prompt` matcher), so
+            // nothing is classified by message copy any more.
+            sessions[index].attention = .waiting
         case .stop:
             sessions[index].attention = onScreen ? .waiting : .doneUnseen
         }
