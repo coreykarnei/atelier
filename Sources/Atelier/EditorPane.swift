@@ -67,6 +67,10 @@ final class EditorPane: NSView, WorkspacePane {
     private var isSwiftBuffer = false
     private var lspChangeDebounce: Timer?
     private var autosaveDebounce: Timer?
+    /// The open file's on-disk watcher (M2.6): stash, agent, formatter — any
+    /// outside write reloads a clean buffer in place. See `watchFile`.
+    private var fileWatch: DispatchSourceFileSystemObject?
+    private var fileReloadDebounce: Timer?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -100,6 +104,7 @@ final class EditorPane: NSView, WorkspacePane {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     deinit {
+        stopWatchingFile()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         NotificationCenter.default.removeObserver(self)
         NotificationCenter.default.removeObserver(self)
@@ -264,10 +269,80 @@ final class EditorPane: NSView, WorkspacePane {
         emptyLabel.isHidden = true
         explorer.reveal(path: path)
         isSwiftBuffer = language == .swift
+        watchFile(path)
 
         if !preview {
             announceOpen(path: path, text: text)
             setExplorerExpanded(false)
+        }
+    }
+
+    // MARK: On-disk changes
+
+    /// Follow the file with a vnode source. Git and most editors replace a
+    /// file by rename, which kills the descriptor's identity — so on any
+    /// rename/delete the watch re-arms on the path once the new file is
+    /// there. Events coalesce over a short debounce.
+    private func watchFile(_ path: String) {
+        stopWatchingFile()
+        let fd = Darwin.open(path, O_EVTONLY)
+        guard fd >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .extend, .delete, .rename, .revoke],
+            queue: .main
+        )
+        source.setEventHandler { [weak self] in
+            guard let self else { return }
+            let events = source.data
+            if events.contains(.delete) || events.contains(.rename) || events.contains(.revoke) {
+                // The inode is gone; the path may already carry its successor.
+                self.stopWatchingFile()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    guard let self, self.filePath == path else { return }
+                    self.watchFile(path)
+                    self.scheduleReloadFromDisk()
+                }
+                return
+            }
+            self.scheduleReloadFromDisk()
+        }
+        source.setCancelHandler { Darwin.close(fd) }
+        source.resume()
+        fileWatch = source
+    }
+
+    private func stopWatchingFile() {
+        fileWatch?.cancel()
+        fileWatch = nil
+    }
+
+    private func scheduleReloadFromDisk() {
+        fileReloadDebounce?.invalidate()
+        fileReloadDebounce = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { [weak self] _ in
+            self?.reloadFromDiskIfClean()
+        }
+    }
+
+    /// The file changed under us. A clean buffer takes the new text, keeping
+    /// caret and scroll where they were. A dirty buffer keeps your edits —
+    /// nothing is thrown away silently; the next save wins.
+    private func reloadFromDiskIfClean() {
+        guard let controller, let filePath, !isDirty,
+              let text = try? String(contentsOfFile: filePath, encoding: .utf8),
+              text != controller.text else { return }
+        let cursors = controller.cursorPositions
+        let origin = controller.scrollView?.contentView.bounds.origin
+        controller.text = text
+        isDirty = false
+        if !cursors.isEmpty { controller.setCursorPositions(cursors) }
+        if let origin, let clip = controller.scrollView?.contentView {
+            clip.scroll(to: origin)
+            controller.scrollView?.reflectScrolledClipView(clip)
+        }
+        if !isPreview, let client = lspClient {
+            client.didChange(path: filePath, text: text)
+            client.requestDiagnostics(path: filePath)
         }
     }
 
