@@ -1,77 +1,117 @@
 # Atelier
 
-<img src="Resources/AppIcon-1024.png" width="128" align="right" alt="">
+<img src="Resources/AppIcon-1024.png" width="128" align="right" alt="Atelier: a wooden workbench with a luminous code panel">
 
-A native macOS workspace for agent-assisted coding: an editor, a shell, and
-**Claude Code** composed side-by-side in one app that owns its own chrome,
-keyboard, clipboard, and notifications — replacing a Ghostty + tmux + Helix +
-Claude Code stack that worked, but leaked.
+**An editor, a shell, and Claude Code. One native macOS workspace.**
 
-**State: v1.0.0.** The workspace, the editor, remote sessions and the polish
-pass are built. Atelier is the author's daily driver.
+Atelier keeps your code and your agent in view, with a workspace for each
+project and session. Move between branches, follow what your agents are doing,
+and pick up your conversations when you return.
 
-- **Projects are tabs of one window; sessions are tabs within them** — each
-  session a fixed pane shape (editor / shell / agent) hosting its own unchanged
-  `claude` process, its tab titled live from Claude's own session summary.
-- **A real editor** — TextKit 2 buffer with tree-sitter highlighting in the
-  Catppuccin palette (twenty grammars, queries tuned by hand), a file
-  explorer with search (files and ripgrep text in one list), `⌘P` go-to-file,
-  multi-cursor with VSCode chords, LSP go-to-definition and diagnostics
-  (Swift out of the box; the first installed server wins for Python,
-  TypeScript, Rust, Go, C/C++, Ruby and more), autosave, markdown preview.
-- **Truthful copy** — selecting agent text yields clean logical markdown,
-  reconstructed from Claude's persisted transcript (the Milestone 0 bet).
-  Terminal panes have clipboard parity with Ghostty: copy-on-select, OSC 52.
-- **Worktrees are first-class** — starting a session asks which worktree; tabs
-  group into folders named for their worktree; an `atelier` CLI (`atelier`,
-  `-b <branch>`, `-rm <branch>`) ports the `ide` script's semantics.
-  Worktrees live at `~/.local/share/worktrees/`.
-- **Remote sessions** — a session can live on an ssh host, both panes riding
-  `tmux` on the far side so the work survives link death and app quits.
-- **Sessions survive restart** — the window→session tree snapshots on quit;
-  agents resume their conversations (`claude --resume`).
-- **The agent talks to the OS** — hook-driven notifications carry the session
-  id: banners click through to the exact tab, and tabs wear the agent's live
-  state (working / waiting / blocked / unseen-done); the Dock badge counts
-  the sessions waiting on you.
-- **Catppuccin Mocha, transparent, native blur** — the aesthetic is a spec
-  requirement, not decoration.
+Built with AppKit, with a keyboard-first workflow, Catppuccin Mocha colors,
+and native translucency. Claude Code runs as its own process, with its tools
+and permissions intact.
 
-Built for one developer, on purpose. The design will not bend to generalize —
-see [VISION.md](VISION.md) (the what and why), [TECHNICAL_PLAN.md](TECHNICAL_PLAN.md)
-(the how and the milestones), [docs/POLISH_PLAN.md](docs/POLISH_PLAN.md) (the
-design rules), and [docs/devlog/](docs/devlog/) (how it actually went).
+Atelier is the author's daily driver. Version **1.0.0** is available in the
+source history; the instructions below build the app locally.
 
-## Running it
+## A place to work
 
-Requirements: macOS 14+, Xcode command-line tools (Swift 6 toolchain), and
-[Claude Code](https://claude.com/claude-code) on your `PATH` as `claude`.
-Optional: `rg` for text search, and whichever language servers you already
-have on your login-shell `PATH` (`pyright`, `typescript-language-server`,
-`rust-analyzer`, `gopls`, `clangd`…); `sourcekit-lsp` ships with Xcode.
+- **Code, shell, and agent together.** A focused three-pane layout, with
+  projects across the top and sessions along the bottom. Session titles follow
+  Claude's conversation summaries, or you can name them yourself.
+- **An editor with familiar controls.** Syntax highlighting, a file explorer,
+  file and text search, multiple cursors, Markdown preview, and optional
+  autosave. Installed language servers add navigation and diagnostics.
+- **Workspaces for your branches.** Choose or create a Git worktree when
+  starting a session. Sessions group by worktree, and the optional `atelier`
+  command brings the same workflow to your shell.
+- **Copy you can use.** Agent selections use Claude's saved transcript to
+  recover Markdown without terminal wrapping and gutter indentation.
+- **Know when to come back.** Notification hooks update session indicators
+  and the Dock badge. Click a notification to return to its session.
+- **Continue where you left off.** Atelier restores projects and sessions on
+  relaunch and resumes Claude conversations. Remote shell and agent sessions
+  run inside tmux on the host and can reconnect after a dropped connection.
+
+Atelier grew out of a personal Ghostty, tmux, Helix, and Claude Code setup.
+It keeps that workflow in a deliberately small native app. It is opinionated
+about its layout and scope; there is no plugin marketplace or arbitrary pane
+system. If this way of working suits you, you are welcome here.
+
+## Build and run
+
+The current bundle script targets **Apple Silicon Macs running macOS 14 or
+later**. You will need a Swift 6 toolchain, Xcode command-line tools, Git, and
+[Claude Code](https://claude.com/claude-code) installed and authenticated.
+Check that `claude` works in your terminal before launching Atelier.
+
+From the repository root:
 
 ```sh
-make run          # build, bundle, launch .build/Atelier.app
-make install      # symlink it into /Applications for Spotlight and the Dock
-make install-cli  # symlink the `atelier` CLI into ~/.local/bin
-
-make bundle CONFIG=release   # optimised build
+make run
 ```
 
-Notifications need a real `.app` launch and a one-time permission grant. To
-let the agent drive tab state and banners, merge
-`Resources/hooks/atelier-hooks.json` into `~/.claude/settings.json`. To stop
-macOS re-asking for permissions on every rebuild, create the stable
-self-signed identity once with `Scripts/make-signing-cert.sh`.
+This builds the app, assembles `.build/Atelier.app`, and launches it. The first
+build downloads Swift package dependencies. Open a project from the landing
+screen to start working.
 
-## Layout
+To make the app available in Applications, Spotlight, and the Dock:
 
+```sh
+make install
 ```
-Sources/Atelier        the app (AppKit)
-Sources/AtelierIPC     socket/message contract shared with the CLIs
-Sources/atelier-notify hook helper Claude Code calls
-Sources/atelier-cli    the `atelier` worktree CLI
-Sources/atelier-hlcheck highlight-query harness (Scripts/hlcheck/README.md)
-Vendor/                SwiftTerm and the CodeEdit packages, each carrying
-                       Atelier's patches (listed in its ATELIER.md)
-```
+
+This creates a symlink to the build in this checkout, rather than copying the
+app. Keep the checkout in place. See the [setup guide](docs/SETUP.md) for
+notification hooks, the optional CLI, language servers, and remote sessions.
+
+Local builds use ad-hoc signing or a local development certificate. The build
+script does not produce a Developer ID-signed, notarized distribution.
+
+## A few useful shortcuts
+
+| Action | Shortcut |
+| --- | --- |
+| Command palette | ⇧⌘P |
+| Go to file | ⌘P |
+| Find in project | ⇧⌘F |
+| Explorer search | ⇧⌘E |
+| Show or hide explorer | ⌘B |
+| New project | ⌘T |
+| New session | ⌥⌘T |
+| Reopen closed session | ⇧⌘T |
+| Switch layout | ⌘\ |
+| Settings | ⌘, |
+
+Worktree selection and autosave can be enabled in Settings. Both are off by
+default. Remote sessions use the shell/agent layout; the local editor and
+worktree tools are not available there.
+
+## Help shape Atelier
+
+Useful bug reports, documentation improvements, and focused fixes are welcome.
+For larger changes, start with the workflow you want to improve so we can
+agree on the scope before you invest in an implementation.
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, verification, and what to
+include in an issue or pull request. This is a personal project; response times
+and feature requests are handled as time allows.
+
+## Under the hood
+
+Atelier uses [SwiftTerm](Vendor/SwiftTerm) for terminals and the
+[CodeEdit packages](Vendor/CodeEditSourceEditor) for its editor, with tree-sitter
+syntax highlighting and the Catppuccin palette. Vendored changes are recorded
+in the packages' `ATELIER.md` files; dependency licenses remain with their sources.
+
+- [Vision](VISION.md): the workflow and design principles.
+- [Technical plan](TECHNICAL_PLAN.md): architecture and development history.
+- [Design rules](docs/POLISH_PLAN.md): typography, surfaces, and interaction.
+- [Development log](docs/devlog/): implementation notes and tradeoffs.
+- [Release checklist](docs/RELEASING.md): preparing a public release.
+
+## License
+
+Atelier's original code is available under the [MIT License](LICENSE). Vendored
+libraries and other third-party components retain their own licenses and notices.

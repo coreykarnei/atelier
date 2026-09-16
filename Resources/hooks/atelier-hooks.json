@@ -1,12 +1,12 @@
 {
-  "//": "Atelier notification hooks. Merge this into ~/.claude/settings.json (under the top-level \"hooks\" key), the same way the dotfiles claude/hooks.json fragment is manually merged. Replace the command path if Atelier.app lives somewhere other than the dev build dir. The Notification matchers split genuine blockers (permission_prompt -> the peach !) from idle your-move pings (idle_prompt -> plain waiting) — structured at the source instead of sniffing message copy.",
+  "//": "Merge these hook entries into the top-level hooks object in ~/.claude/settings.json, preserving existing settings and hooks. This example assumes make install has linked Atelier.app into /Applications. Update every helper path if the app lives elsewhere. See docs/SETUP.md.",
   "hooks": {
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/core/repositories/atelier/.build/Atelier.app/Contents/MacOS/atelier-notify stop"
+            "command": "/Applications/Atelier.app/Contents/MacOS/atelier-notify stop"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/core/repositories/atelier/.build/Atelier.app/Contents/MacOS/atelier-notify blocked"
+            "command": "/Applications/Atelier.app/Contents/MacOS/atelier-notify blocked"
           }
         ]
       },
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/core/repositories/atelier/.build/Atelier.app/Contents/MacOS/atelier-notify waiting"
+            "command": "/Applications/Atelier.app/Contents/MacOS/atelier-notify waiting"
           }
         ]
       }
@@ -36,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/core/repositories/atelier/.build/Atelier.app/Contents/MacOS/atelier-notify working"
+            "command": "/Applications/Atelier.app/Contents/MacOS/atelier-notify working"
           }
         ]
       }
