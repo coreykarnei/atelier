@@ -32,11 +32,20 @@ final class FileExplorerView: NSView {
     private let rail = HoverPadButton(frame: .zero)
     private let railChevron = NSImageView()
 
-    /// The search bar (VSCode's Go to File, given a home): the shared summon
-    /// surface over the repo's file offer. Empty query → the tree shows
-    /// beneath it; typing swaps the tree for the match list; `↩`/click opens
-    /// for real; `Esc` clears, then returns focus to the tree.
-    private let search = SummonList(style: .init(
+    /// A text hit was chosen (search bar, Text mode): open at line:column.
+    var onOpenAt: ((URL, Int, Int) -> Void)?
+
+    /// The search panel (VSCode's Go to File and Find in Files, given a home
+    /// in the sidebar). Opened by the header's magnifier or ⌘⇧E, it takes
+    /// the tree's place: a Files/Text toggle over the shared summon surface —
+    /// Files is the ⌘P offer, Text is the ⌘⇧F ripgrep engine. `↩`/click opens
+    /// for real (Text: at the hit); `Esc` clears the query, then closes.
+    enum SearchMode: Int { case files, text }
+    private let magnifier = HoverPadButton(frame: .zero)
+    private let searchHost = NSView()
+    private var searchHostHeight: NSLayoutConstraint!
+    private let modeControl = NSSegmentedControl(labels: ["Files", "Text"], trackingMode: .selectOne, target: nil, action: nil)
+    private let fileSearch = SummonList(style: .init(
         placeholder: "Search files",
         fieldFont: Theme.Typography.mono(Theme.Typography.small),
         placeholderFont: Theme.Typography.ui(Theme.Typography.small),
@@ -45,8 +54,24 @@ final class FileExplorerView: NSView {
         noMatchText: "No matching files",
         escClearsQueryFirst: true
     ))
-    private var searchListHeight: NSLayoutConstraint!
-    private var isSearching = false
+    private let textSearch = SummonList(style: .init(
+        placeholder: "Search text",
+        fieldFont: Theme.Typography.mono(Theme.Typography.small),
+        placeholderFont: Theme.Typography.ui(Theme.Typography.small),
+        rowHeight: 22,
+        rowInset: 8,
+        noMatchText: "No matches",
+        escClearsQueryFirst: true,
+        filtersLocally: false
+    ))
+    private var textEngine: RepoTextSearch?
+    private(set) var isSearchOpen = false
+    private static let modeKey = "explorer.searchMode"
+    private var mode: SearchMode {
+        get { SearchMode(rawValue: UserDefaults.standard.integer(forKey: Self.modeKey)) ?? .files }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: Self.modeKey) }
+    }
+    private var activeSearch: SummonList { mode == .files ? fileSearch : textSearch }
 
     private(set) var root: String?
     private var rootNode: FileNode?
@@ -88,15 +113,18 @@ final class FileExplorerView: NSView {
     func setCollapsed(_ collapsed: Bool) {
         guard collapsed != isCollapsed else { return }
         isCollapsed = collapsed
-        scroll.isHidden = collapsed || isSearching
+        if collapsed, isSearchOpen { closeSearch(focusTree: false) }
+        scroll.isHidden = collapsed || isSearchOpen
         header.isHidden = collapsed
-        search.isHidden = collapsed
+        searchHost.isHidden = collapsed
         rail.isHidden = !collapsed
         railChevron.isHidden = !collapsed
     }
 
-    private static func chevronImage(_ name: String) -> NSImage? {
-        let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
+    private static func chevronImage(_ name: String) -> NSImage? { symbol(name, size: 10) }
+
+    private static func symbol(_ name: String, size: CGFloat) -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: size, weight: .semibold)
             .applying(.init(paletteColors: [Theme.chromeText]))
         return NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(config)
     }
@@ -169,32 +197,54 @@ final class FileExplorerView: NSView {
         chevron.action = #selector(chevronClicked)
         chevron.translatesAutoresizingMaskIntoConstraints = false
         header.addSubview(chevron)
+        magnifier.image = Self.symbol("magnifyingglass", size: 11)
+        magnifier.toolTip = "Search files and text (⌘⇧E)"
+        magnifier.target = self
+        magnifier.action = #selector(magnifierClicked)
+        magnifier.translatesAutoresizingMaskIntoConstraints = false
+        header.addSubview(magnifier)
 
-        // Search bar: hugs its field until a query arrives, then the list
-        // takes the tree's place.
-        search.translatesAutoresizingMaskIntoConstraints = false
-        searchListHeight = search.makeListHeightConstraint(constant: 0)
-        search.rank = RepoFileOffer.rank
-        search.onQueryChange = { [weak self] query in
-            guard let self else { return }
-            let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
-            guard searching != self.isSearching else { return }
-            self.isSearching = searching
-            self.scroll.isHidden = searching || self.isCollapsed
-            self.sizeSearchList()
+        // Search panel: hidden (0pt) until opened; then it takes the tree's
+        // place under the header. Both summons live in it, one visible.
+        searchHost.wantsLayer = true
+        searchHost.layer?.masksToBounds = true
+        searchHost.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(searchHost)
+        modeControl.controlSize = .small
+        modeControl.font = Theme.Typography.ui(Theme.Typography.small)
+        modeControl.segmentStyle = .roundRect
+        modeControl.target = self
+        modeControl.action = #selector(modeChanged)
+        modeControl.translatesAutoresizingMaskIntoConstraints = false
+        searchHost.addSubview(modeControl)
+        for summon in [fileSearch, textSearch] {
+            summon.translatesAutoresizingMaskIntoConstraints = false
+            summon.onEscape = { [weak self] in self?.closeSearch(focusTree: true) }
+            searchHost.addSubview(summon)
+            NSLayoutConstraint.activate([
+                summon.topAnchor.constraint(equalTo: modeControl.bottomAnchor, constant: -6),
+                summon.leadingAnchor.constraint(equalTo: searchHost.leadingAnchor),
+                summon.trailingAnchor.constraint(equalTo: searchHost.trailingAnchor),
+                summon.bottomAnchor.constraint(equalTo: searchHost.bottomAnchor),
+            ])
         }
-        search.onActivate = { [weak self] item in
+        fileSearch.rank = RepoFileOffer.rank
+        fileSearch.onActivate = { [weak self] item in
             guard let self, let root = self.root else { return }
             RecentFilesStore.record(item.id, root: root)
-            self.search.clearQuery()
+            self.closeSearch(focusTree: false)
             self.onOpen?(URL(fileURLWithPath: item.id), true)
         }
-        search.onEscape = { [weak self] in
-            guard let self else { return }
-            self.search.clearQuery()
-            self.window?.makeFirstResponder(self.outline)
+        textSearch.onQueryChange = { [weak self] query in
+            guard let self, let engine = self.textEngine else { return }
+            engine.search(query) { [weak self] items in self?.textSearch.setItems(items) }
         }
-        addSubview(search)
+        textSearch.onActivate = { [weak self] item in
+            guard let self, let root = self.root,
+                  let hit = RepoTextSearch.location(of: item, root: root) else { return }
+            self.closeSearch(focusTree: false)
+            self.onOpenAt?(hit.url, hit.line, hit.column)
+        }
 
         // The rail: one tall button under a chevron glyph that lets clicks
         // through to it. Hidden until the tree folds.
@@ -211,6 +261,7 @@ final class FileExplorerView: NSView {
         addSubview(rail)
         addSubview(railChevron)
 
+        searchHostHeight = searchHost.heightAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
             rail.topAnchor.constraint(equalTo: topAnchor),
             rail.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -229,13 +280,19 @@ final class FileExplorerView: NSView {
             chevron.widthAnchor.constraint(equalToConstant: 20),
             chevron.heightAnchor.constraint(equalToConstant: 20),
             rootLabel.leadingAnchor.constraint(equalTo: chevron.trailingAnchor, constant: 4),
-            rootLabel.trailingAnchor.constraint(lessThanOrEqualTo: header.trailingAnchor, constant: -8),
             rootLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            search.topAnchor.constraint(equalTo: header.bottomAnchor),
-            search.leadingAnchor.constraint(equalTo: leadingAnchor),
-            search.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -1),
-            searchListHeight,
-            scroll.topAnchor.constraint(equalTo: search.bottomAnchor),
+            magnifier.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -4),
+            magnifier.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            magnifier.widthAnchor.constraint(equalToConstant: 20),
+            magnifier.heightAnchor.constraint(equalToConstant: 20),
+            rootLabel.trailingAnchor.constraint(lessThanOrEqualTo: magnifier.leadingAnchor, constant: -6),
+            searchHost.topAnchor.constraint(equalTo: header.bottomAnchor),
+            searchHost.leadingAnchor.constraint(equalTo: leadingAnchor),
+            searchHost.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -1),
+            searchHostHeight,
+            modeControl.topAnchor.constraint(equalTo: searchHost.topAnchor, constant: 4),
+            modeControl.leadingAnchor.constraint(equalTo: searchHost.leadingAnchor, constant: 10),
+            scroll.topAnchor.constraint(equalTo: searchHost.bottomAnchor),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
             scroll.trailingAnchor.constraint(equalTo: edge.leadingAnchor),
@@ -255,7 +312,8 @@ final class FileExplorerView: NSView {
         self.root = root
         rootNode = FileNode(path: root, isDirectory: true)
         rootLabel.stringValue = (root as NSString).lastPathComponent
-        search.clearQuery()
+        textEngine = RepoTextSearch(root: root)
+        closeSearch(focusTree: false)
         refreshOffer()
         ignored = []
         outline.reloadData()
@@ -285,37 +343,78 @@ final class FileExplorerView: NSView {
         if scroll { outline.scrollRowToVisible(row) }
     }
 
-    /// Search bar's field — the place ⌃⌘H-then-type wants to land.
-    var searchField: NSView { search.focusField }
 
     /// Dev-only (snapshots): geometry of the sidebar's parts.
     var debugGeometry: String {
-        "explorer bounds=\(bounds.size) collapsed=\(isCollapsed) searching=\(isSearching) "
-            + "header=\(header.frame) search=\(search.frame) listH=\(searchListHeight.constant) "
-            + "tree=\(scroll.frame) treeHidden=\(scroll.isHidden) searchHidden=\(search.isHidden) "
-            + "hasAmbiguous=\(search.hasAmbiguousLayout)"
+        "explorer bounds=\(bounds.size) collapsed=\(isCollapsed) searchOpen=\(isSearchOpen) mode=\(mode) "
+            + "header=\(header.frame) host=\(searchHost.frame) active=\(activeSearch.frame) "
+            + "tree=\(scroll.frame) treeHidden=\(scroll.isHidden)"
     }
 
-    /// Dev-only (snapshots): put a query in the bar as if typed.
+    /// Dev-only (snapshots): open the panel and type `query`; a `text:`
+    /// prefix picks Text mode.
     func debugSetQuery(_ query: String) {
-        window?.makeFirstResponder(search.focusField)
-        search.setQuery(query)
+        if query.hasPrefix("text:") {
+            openSearch(mode: .text)
+            textSearch.setQuery(String(query.dropFirst(5)))
+        } else {
+            openSearch(mode: .files)
+            fileSearch.setQuery(query)
+        }
     }
 
-    /// The list under the search bar sizes to the pane while a query is
-    /// live, and to nothing otherwise (the field stays; the tree follows).
-    /// The field block's height is measured, not guessed.
-    private func sizeSearchList() {
-        let fieldBlock = search.frame.height - searchListHeight.constant
-        let target = isSearching ? max(0, bounds.height - header.frame.height - fieldBlock) : 0
-        guard searchListHeight.constant != target else { return }
-        searchListHeight.constant = target
+    // MARK: Search panel
+
+    @objc private func magnifierClicked() {
+        if isSearchOpen { closeSearch(focusTree: true) } else { openSearch() }
+    }
+
+    @objc private func modeChanged() {
+        let from = activeSearch
+        mode = SearchMode(rawValue: modeControl.selectedSegment) ?? .files
+        let to = activeSearch
+        guard from !== to else { return }
+        from.isHidden = true
+        to.isHidden = false
+        to.setQuery(from.query) // the words you typed carry across
+        from.clearQuery()
+        window?.makeFirstResponder(to.focusField)
+    }
+
+    /// Open the panel (⌘⇧E / the magnifier) in `mode` — or the remembered
+    /// mode. The tree steps aside; the field takes focus.
+    func openSearch(mode: SearchMode? = nil) {
+        guard root != nil else { return }
+        if let mode { self.mode = mode }
+        modeControl.selectedSegment = self.mode.rawValue
+        fileSearch.isHidden = self.mode != .files
+        textSearch.isHidden = self.mode != .text
+        isSearchOpen = true
+        scroll.isHidden = true
+        searchHostHeight.constant = max(0, bounds.height - header.frame.height)
         layoutSubtreeIfNeeded()
+        window?.makeFirstResponder(activeSearch.focusField)
+    }
+
+    /// Close the panel: queries cleared, tree back, focus to it if asked.
+    func closeSearch(focusTree: Bool) {
+        fileSearch.clearQuery()
+        textSearch.clearQuery()
+        textSearch.setItems([])
+        guard isSearchOpen else { return }
+        isSearchOpen = false
+        searchHostHeight.constant = 0
+        scroll.isHidden = isCollapsed
+        layoutSubtreeIfNeeded()
+        if focusTree { window?.makeFirstResponder(outline) }
     }
 
     override func layout() {
         super.layout()
-        if isSearching { sizeSearchList() }
+        if isSearchOpen {
+            let target = max(0, bounds.height - header.frame.height)
+            if searchHostHeight.constant != target { searchHostHeight.constant = target }
+        }
     }
 
     /// Refill the search offer from `git ls-files` — on root change and on
@@ -324,7 +423,7 @@ final class FileExplorerView: NSView {
         guard let root else { return }
         RepoFileOffer.gather(root: root, rowFont: Theme.Typography.small) { [weak self] items in
             guard let self, self.root == root else { return }
-            self.search.setItems(items)
+            self.fileSearch.setItems(items)
         }
     }
 

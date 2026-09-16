@@ -28,6 +28,8 @@ final class EditorPane: NSView, WorkspacePane {
     /// (open for real) from a single click (preview).
     let explorer = FileExplorerView(frame: .zero)
     var onOpenRequest: ((URL, _ commit: Bool) -> Void)?
+    /// A text-search hit from the sidebar: open for real at line:column.
+    var onOpenAtRequest: ((URL, Int, Int) -> Void)?
     /// Everything right of the tree: the empty-state line, then the buffer.
     private let contentHost = NSView()
     private var contentLeading: NSLayoutConstraint!
@@ -80,6 +82,7 @@ final class EditorPane: NSView, WorkspacePane {
         buildEmptyState()
         explorer.onOpen = { [weak self] url, commit in self?.onOpenRequest?(url, commit) }
         explorer.onToggle = { [weak self] in self?.toggleExplorer() }
+        explorer.onOpenAt = { [weak self] url, line, column in self?.onOpenAtRequest?(url, line, column) }
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
             selector: #selector(accessibilityDisplayChanged),
@@ -162,6 +165,13 @@ final class EditorPane: NSView, WorkspacePane {
         lspRoot = root
         explorer.setRoot(root)
         layoutExplorer()
+    }
+
+    /// ⌘⇧E — the sidebar's search panel, tree unfolded if it was a rail.
+    func focusExplorerSearch() {
+        guard explorer.root != nil else { return }
+        setExplorerExpanded(true)
+        explorer.openSearch()
     }
 
     /// ⌘B / the chevron — unfold the tree or fold it to the rail.

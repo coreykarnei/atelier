@@ -336,6 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func searchRepo(_ sender: Any?) { keyController?.showRepoSearch() }
     @objc func goToDefinition(_ sender: Any?) { keyController?.goToDefinition() }
     @objc func toggleExplorer(_ sender: Any?) { keyController?.toggleExplorer() }
+    @objc func explorerSearch(_ sender: Any?) { keyController?.focusExplorerSearch() }
 
     // Content type scale: app-global by design — every terminal and editor
     // in every window observes the token, so the chords never need a target.

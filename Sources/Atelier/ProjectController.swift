@@ -242,6 +242,10 @@ final class ProjectController: NSObject, BottomBarDelegate {
             guard let self, let session else { return }
             self.openInEditor(url: url, session: session, preview: !commit)
         }
+        session.editorPane.onOpenAtRequest = { [weak self, weak session] url, line, column in
+            guard let self, let session else { return }
+            self.openInEditor(url: url, session: session, cursor: (line, column))
+        }
         session.onRemoteRequested = { [weak self, weak session] host, dir in
             guard let self, let session else { return }
             self.replaceLanding(session, withRemote: host, dir: dir)
@@ -514,6 +518,13 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// Dev-only: drive the explorer's search bar from the socket.
     func debugExplorerSearch(_ query: String) {
         activeSession?.editorPane.explorer.debugSetQuery(query)
+    }
+
+    /// ⌘⇧E — the sidebar search panel.
+    func focusExplorerSearch() {
+        guard let session = activeSession, session.state == .ide, !session.isRemote else { return }
+        if session.layoutMode == .split { toggleLayout() }
+        session.editorPane.focusExplorerSearch()
     }
 
     /// ⌘B — the editor's file tree, shown or hidden for every session.
@@ -1347,6 +1358,9 @@ final class ProjectController: NSObject, BottomBarDelegate {
             if !(activeSession?.isRemote ?? true) {
                 commands.append(PaletteCommand(id: "editor.explorer", title: "Editor: Toggle Explorer", key: "⌘B") { [weak self] in
                     self?.toggleExplorer()
+                })
+                commands.append(PaletteCommand(id: "editor.explorer.search", title: "Editor: Search Files and Text", key: "⌘⇧E") { [weak self] in
+                    self?.focusExplorerSearch()
                 })
             }
             if editorHasFile {

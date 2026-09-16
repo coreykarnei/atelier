@@ -7,68 +7,50 @@ import AppKit
 /// and `↩` opens the hit in the buffer at its line and column. Keyboard-
 /// navigable end to end; the fixed pane shape stays fixed — results live on
 /// the card, not a fourth panel.
-final class RepoSearchOverlay: SummonCardOverlay {
-    /// A capped offer stays honest: the tail row says what was left out.
-    private static let cap = 300
-    private static let moreRowId = "__more__"
+/// The repo text search engine, shared by ⌘⇧F and the explorer's search bar:
+/// debounced (~150 ms) ripgrep — fixed-string, smart-case; `git grep` when rg
+/// isn't installed — one process in flight, matches as summon rows, a capped
+/// offer with an honest tail row.
+final class RepoTextSearch {
+    static let cap = 300
+    static let moreRowId = "__more__"
 
-    private let root: String
-    private let onOpen: (URL, Int, Int) -> Void
+    let root: String
     private var pendingSearch: DispatchWorkItem?
     private var runningProcess: Process?
     /// Serialized process bookkeeping (searches finish off-main).
     private let searchQueue = DispatchQueue(label: "atelier.repo-search")
 
-    init(root: String, onDismiss: @escaping () -> Void, onOpen: @escaping (URL, Int, Int) -> Void) {
-        self.root = root
-        self.onOpen = onOpen
-        super.init(
-            summonStyle: .init(
-                placeholder: "Find in repo…",
-                // The query is code text — mono; the placeholder is Atelier
-                // speaking (§1.4).
-                fieldFont: Theme.Typography.mono(Theme.Typography.body),
-                placeholderFont: Theme.Typography.ui(Theme.Typography.body),
-                rowHeight: 24,
-                rowInset: 14,
-                noMatchText: "No matches",
-                escClearsQueryFirst: true,
-                filtersLocally: false
-            ),
-            maxListHeight: 19 * 24, // taller than the pickers — results want room
-            onDismiss: onDismiss
-        )
-
-        summon.onQueryChange = { [weak self] query in self?.scheduleSearch(query) }
-        summon.onActivate = { [weak self] item in
-            guard let self, item.id != Self.moreRowId else { return }
-            let parts = item.id.split(separator: "\u{0}").map(String.init)
-            guard parts.count == 3, let line = Int(parts[1]), let column = Int(parts[2]) else { return }
-            self.dismiss()
-            self.onOpen(URL(fileURLWithPath: "\(self.root)/\(parts[0])"), line, column)
-        }
-    }
+    init(root: String) { self.root = root }
 
     deinit {
         pendingSearch?.cancel()
         runningProcess?.terminate()
     }
 
-    // MARK: Search execution
-
-    private func scheduleSearch(_ query: String) {
+    /// Debounce, then search; `completion` runs on main with the rows. An
+    /// empty query completes at once with nothing.
+    func search(_ query: String, completion: @escaping ([SummonItem]) -> Void) {
         pendingSearch?.cancel()
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
-            summon.setItems([])
+            completion([])
             return
         }
-        let work = DispatchWorkItem { [weak self] in self?.runSearch(trimmed) }
+        let work = DispatchWorkItem { [weak self] in self?.run(trimmed, completion: completion) }
         pendingSearch = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
-    private func runSearch(_ query: String) {
+    /// A row's coordinates, or nil for the tail row.
+    static func location(of item: SummonItem, root: String) -> (url: URL, line: Int, column: Int)? {
+        guard item.id != moreRowId else { return nil }
+        let parts = item.id.split(separator: "\u{0}").map(String.init)
+        guard parts.count == 3, let line = Int(parts[1]), let column = Int(parts[2]) else { return nil }
+        return (URL(fileURLWithPath: "\(root)/\(parts[0])"), line, column)
+    }
+
+    private func run(_ query: String, completion: @escaping ([SummonItem]) -> Void) {
         let root = self.root
         searchQueue.async { [weak self] in
             self?.runningProcess?.terminate()
@@ -121,7 +103,7 @@ final class RepoSearchOverlay: SummonCardOverlay {
                     chord: nil
                 ))
             }
-            DispatchQueue.main.async { [weak self] in self?.summon.setItems(items) }
+            DispatchQueue.main.async { completion(items) }
         }
     }
 
@@ -162,4 +144,40 @@ final class RepoSearchOverlay: SummonCardOverlay {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return path.isEmpty ? nil : path
     }()
+}
+
+final class RepoSearchOverlay: SummonCardOverlay {
+    private let engine: RepoTextSearch
+    private let onOpen: (URL, Int, Int) -> Void
+
+    init(root: String, onDismiss: @escaping () -> Void, onOpen: @escaping (URL, Int, Int) -> Void) {
+        self.engine = RepoTextSearch(root: root)
+        self.onOpen = onOpen
+        super.init(
+            summonStyle: .init(
+                placeholder: "Find in repo…",
+                // The query is code text — mono; the placeholder is Atelier
+                // speaking (§1.4).
+                fieldFont: Theme.Typography.mono(Theme.Typography.body),
+                placeholderFont: Theme.Typography.ui(Theme.Typography.body),
+                rowHeight: 24,
+                rowInset: 14,
+                noMatchText: "No matches",
+                escClearsQueryFirst: true,
+                filtersLocally: false
+            ),
+            maxListHeight: 19 * 24, // taller than the pickers — results want room
+            onDismiss: onDismiss
+        )
+
+        summon.onQueryChange = { [weak self] query in
+            guard let self else { return }
+            self.engine.search(query) { [weak self] items in self?.summon.setItems(items) }
+        }
+        summon.onActivate = { [weak self] item in
+            guard let self, let hit = RepoTextSearch.location(of: item, root: self.engine.root) else { return }
+            self.dismiss()
+            self.onOpen(hit.url, hit.line, hit.column)
+        }
+    }
 }
