@@ -36,8 +36,8 @@ final class EditorPane: NSView, WorkspacePane {
     private var explorerExpanded = true
     /// The buffer is a click-preview: soft-wrapped, not yet the session's
     /// file — persistence and the language server ignore it. Editable all
-    /// the same: the first keystroke quietly makes it the real buffer (wrap
-    /// and tree left as they are, so nothing shifts under the caret).
+    /// the same: the first keystroke enters the file for real (unwrap, fold
+    /// the tree), exactly like double-click/↩.
     private(set) var isPreview = false
     /// Soft-wrap follows the preview in, and leaves on a gesture commit only.
     private var isWrapped = false
@@ -213,15 +213,8 @@ final class EditorPane: NSView, WorkspacePane {
         // Clicking the file that's already here changes nothing — a committed
         // buffer must not fall back to a read-only preview of itself.
         if preview, filePath == path { return }
-        if !preview, filePath == path, let controller, isPreview || isWrapped {
-            // Preview → real by gesture: same text, unwrapped, the server
-            // learns of it, the tree folds away.
-            let wasPreview = isPreview
-            isPreview = false
-            isWrapped = false
-            controller.configuration = Self.configuration(wrap: false)
-            if wasPreview { announceOpen(path: path, text: controller.text) }
-            setExplorerExpanded(false)
+        if !preview, filePath == path, isPreview || isWrapped {
+            commitPreview()
             return
         }
 
@@ -346,6 +339,19 @@ final class EditorPane: NSView, WorkspacePane {
         }
     }
 
+    /// Preview → real: same text, unwrapped, the server learns of it, the
+    /// tree folds away. Reached by double-click/↩ in the tree, the search
+    /// bar, or the first keystroke into a preview.
+    private func commitPreview() {
+        guard let controller, let filePath else { return }
+        let wasPreview = isPreview
+        isPreview = false
+        isWrapped = false
+        controller.configuration = Self.configuration(wrap: false)
+        if wasPreview { announceOpen(path: filePath, text: controller.text) }
+        setExplorerExpanded(false)
+    }
+
     /// Tell the language server a real buffer exists (Swift only).
     private func announceOpen(path: String, text: String) {
         guard let client = lspClient else { return }
@@ -361,11 +367,10 @@ final class EditorPane: NSView, WorkspacePane {
     /// (full-document sync — the buffer is small and the protocol allows it).
     private func bufferChanged() {
         isDirty = true
-        if isPreview, let filePath, let controller {
-            // Typing into a preview makes it the buffer — quietly. Wrap and
-            // the tree stay put; the server is told; persistence now sees it.
-            isPreview = false
-            announceOpen(path: filePath, text: controller.text)
+        if isPreview {
+            // Typing into a preview is entering the file: unwrap, fold the
+            // tree, tell the server — same as double-click/↩ (owner call).
+            commitPreview()
         }
         if Settings.autosave, !isPreview {
             autosaveDebounce?.invalidate()

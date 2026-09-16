@@ -91,6 +91,7 @@ public struct DebugMessage: Codable {
         case snapshot // write a PNG per visible window into `path`
         case lspProbe // run go-to-definition at line/column in the active editor; dump to `path`
         case seedAttention // give the active project one session per attention state (dev)
+        case toggleExplorer // ⌘B over the socket, for snapshots of the tree (dev)
     }
 
     public let debug: Action

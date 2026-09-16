@@ -32,6 +32,22 @@ final class FileExplorerView: NSView {
     private let rail = HoverPadButton(frame: .zero)
     private let railChevron = NSImageView()
 
+    /// The search bar (VSCode's Go to File, given a home): the shared summon
+    /// surface over the repo's file offer. Empty query → the tree shows
+    /// beneath it; typing swaps the tree for the match list; `↩`/click opens
+    /// for real; `Esc` clears, then returns focus to the tree.
+    private let search = SummonList(style: .init(
+        placeholder: "Search files",
+        fieldFont: Theme.Typography.mono(Theme.Typography.small),
+        placeholderFont: Theme.Typography.ui(Theme.Typography.small),
+        rowHeight: 22,
+        rowInset: 8,
+        noMatchText: "No matching files",
+        escClearsQueryFirst: true
+    ))
+    private var searchListHeight: NSLayoutConstraint!
+    private var isSearching = false
+
     private(set) var root: String?
     private var rootNode: FileNode?
     private let outline = NSOutlineView()
@@ -72,8 +88,9 @@ final class FileExplorerView: NSView {
     func setCollapsed(_ collapsed: Bool) {
         guard collapsed != isCollapsed else { return }
         isCollapsed = collapsed
-        scroll.isHidden = collapsed
+        scroll.isHidden = collapsed || isSearching
         header.isHidden = collapsed
+        search.isHidden = collapsed
         rail.isHidden = !collapsed
         railChevron.isHidden = !collapsed
     }
@@ -153,6 +170,32 @@ final class FileExplorerView: NSView {
         chevron.translatesAutoresizingMaskIntoConstraints = false
         header.addSubview(chevron)
 
+        // Search bar: hugs its field until a query arrives, then the list
+        // takes the tree's place.
+        search.translatesAutoresizingMaskIntoConstraints = false
+        searchListHeight = search.makeListHeightConstraint(constant: 0)
+        search.rank = RepoFileOffer.rank
+        search.onQueryChange = { [weak self] query in
+            guard let self else { return }
+            let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
+            guard searching != self.isSearching else { return }
+            self.isSearching = searching
+            self.scroll.isHidden = searching || self.isCollapsed
+            self.needsLayout = true
+        }
+        search.onActivate = { [weak self] item in
+            guard let self, let root = self.root else { return }
+            RecentFilesStore.record(item.id, root: root)
+            self.search.clearQuery()
+            self.onOpen?(URL(fileURLWithPath: item.id), true)
+        }
+        search.onEscape = { [weak self] in
+            guard let self else { return }
+            self.search.clearQuery()
+            self.window?.makeFirstResponder(self.outline)
+        }
+        addSubview(search)
+
         // The rail: one tall button under a chevron glyph that lets clicks
         // through to it. Hidden until the tree folds.
         railChevron.image = Self.chevronImage("chevron.right")
@@ -188,7 +231,11 @@ final class FileExplorerView: NSView {
             rootLabel.leadingAnchor.constraint(equalTo: chevron.trailingAnchor, constant: 4),
             rootLabel.trailingAnchor.constraint(lessThanOrEqualTo: header.trailingAnchor, constant: -8),
             rootLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            scroll.topAnchor.constraint(equalTo: header.bottomAnchor),
+            search.topAnchor.constraint(equalTo: header.bottomAnchor),
+            search.leadingAnchor.constraint(equalTo: leadingAnchor),
+            search.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -1),
+            searchListHeight,
+            scroll.topAnchor.constraint(equalTo: search.bottomAnchor),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
             scroll.trailingAnchor.constraint(equalTo: edge.leadingAnchor),
@@ -208,6 +255,8 @@ final class FileExplorerView: NSView {
         self.root = root
         rootNode = FileNode(path: root, isDirectory: true)
         rootLabel.stringValue = (root as NSString).lastPathComponent
+        search.clearQuery()
+        refreshOffer()
         ignored = []
         outline.reloadData()
         refreshIgnored()
@@ -234,6 +283,28 @@ final class FileExplorerView: NSView {
         guard row >= 0 else { return }
         outline.selectRowIndexes([row], byExtendingSelection: false)
         if scroll { outline.scrollRowToVisible(row) }
+    }
+
+    /// Search bar's field — the place ⌃⌘H-then-type wants to land.
+    var searchField: NSView { search.focusField }
+
+    /// The list under the search bar sizes to the pane while a query is
+    /// live, and to nothing otherwise (the field stays; the tree follows).
+    override func layout() {
+        super.layout()
+        let fieldBlock: CGFloat = 46 // field padding + divider + list bottom pad
+        let target = isSearching ? max(0, bounds.height - 26 - fieldBlock) : 0
+        if searchListHeight.constant != target { searchListHeight.constant = target }
+    }
+
+    /// Refill the search offer from `git ls-files` — on root change and on
+    /// every tree reload (a new file should be findable at once).
+    private func refreshOffer() {
+        guard let root else { return }
+        RepoFileOffer.gather(root: root, rowFont: Theme.Typography.small) { [weak self] items in
+            guard let self, self.root == root else { return }
+            self.search.setItems(items)
+        }
     }
 
     // MARK: Actions
@@ -367,6 +438,7 @@ final class FileExplorerView: NSView {
         outline.reloadData()
         if let revealedPath { reveal(path: revealedPath, scroll: false) }
         refreshIgnored()
+        refreshOffer()
     }
 }
 

@@ -212,6 +212,16 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
         refilter(preserving: keep)
     }
 
+    /// Host-driven reset (the explorer's search after an open): empty field,
+    /// full offer, listeners told.
+    func clearQuery() {
+        guard !query.isEmpty || !field.stringValue.isEmpty else { return }
+        field.stringValue = ""
+        query = ""
+        refilter()
+        onQueryChange?("")
+    }
+
     // MARK: Filtering
 
     private func refilter(preserving keepId: String? = nil) {

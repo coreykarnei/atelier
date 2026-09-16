@@ -96,8 +96,10 @@ buffers only): F12 go-to-definition (same-file reveals, cross-file rides the
 feel-check. **M2.6 landed 2026-09-15** — the file explorer
 (`FileExplorer.swift`): a tree of the session root (worktree-aware, `.git`
 hidden, gitignored dimmed, FSEvents-refreshed) down the editor pane's left
-edge; single click previews (soft-wrapped, read-only), double-click/`↩`
-commits and folds the tree to a 26pt rail with a chevron; `⌘B` toggles.
+edge, with a search bar (the ⌘P offer, given a home) under its header;
+single click previews (soft-wrapped), double-click/`↩`/the first keystroke
+commits — unwrap, fold the tree to a 26pt rail with a chevron; `⌘B`
+toggles. The open file is watched on disk; a clean buffer reloads in place.
 `Vendor/CodeEditSourceEditor` (0.15.2) and `Vendor/CodeEditTextView`
 (0.12.1) are vendored like SwiftTerm — editor-side fixes go there, each
 meant for upstream, listed in each copy's `ATELIER.md` (hidden minimap

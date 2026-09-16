@@ -225,6 +225,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("Atelier: debug snapshot written to \(debug.path)")
         case .seedAttention:
             keyController?.debugSeedAttention()
+        case .toggleExplorer:
+            keyController?.toggleExplorer()
         case .lspProbe:
             let path = debug.path
             let controller = keyController ?? projects.first
