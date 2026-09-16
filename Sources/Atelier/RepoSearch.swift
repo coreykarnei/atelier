@@ -30,14 +30,15 @@ final class RepoTextSearch {
 
     /// Debounce, then search; `completion` runs on main with the rows. An
     /// empty query completes at once with nothing.
-    func search(_ query: String, completion: @escaping ([SummonItem]) -> Void) {
+    /// `compact` stacks the snippet under the coordinates for narrow hosts.
+    func search(_ query: String, compact: Bool = false, completion: @escaping ([SummonItem]) -> Void) {
         pendingSearch?.cancel()
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
             completion([])
             return
         }
-        let work = DispatchWorkItem { [weak self] in self?.run(trimmed, completion: completion) }
+        let work = DispatchWorkItem { [weak self] in self?.run(trimmed, compact: compact, completion: completion) }
         pendingSearch = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
@@ -50,7 +51,7 @@ final class RepoTextSearch {
         return (URL(fileURLWithPath: "\(root)/\(parts[0])"), line, column)
     }
 
-    private func run(_ query: String, completion: @escaping ([SummonItem]) -> Void) {
+    private func run(_ query: String, compact: Bool, completion: @escaping ([SummonItem]) -> Void) {
         let root = self.root
         searchQueue.async { [weak self] in
             self?.runningProcess?.terminate()
@@ -87,7 +88,9 @@ final class RepoTextSearch {
                 // is bounded.
                 let parts = raw.split(separator: ":", maxSplits: 3, omittingEmptySubsequences: false)
                 guard parts.count == 4, let line = Int(parts[1]), let column = Int(parts[2]) else { continue }
-                items.append(Self.item(rel: String(parts[0]), line: line, column: column, snippet: String(parts[3])))
+                items.append(Self.item(
+                    rel: String(parts[0]), line: line, column: column, snippet: String(parts[3]), compact: compact
+                ))
             }
             if lines.count > Self.cap {
                 items.append(SummonItem(
@@ -107,7 +110,7 @@ final class RepoTextSearch {
         }
     }
 
-    private static func item(rel: String, line: Int, column: Int, snippet: String) -> SummonItem {
+    private static func item(rel: String, line: Int, column: Int, snippet: String, compact: Bool) -> SummonItem {
         let name = (rel as NSString).lastPathComponent
         let text = NSMutableAttributedString()
         // File coordinates and code are terminal-pasteable: mono (§1.4).
@@ -115,15 +118,20 @@ final class RepoTextSearch {
             .font: Theme.Typography.mono(Theme.Typography.small, weight: .medium),
             .foregroundColor: Theme.chromeText,
         ]))
-        text.append(NSAttributedString(string: "  \(snippet.trimmingCharacters(in: .whitespaces))", attributes: [
-            .font: Theme.Typography.mono(Theme.Typography.small),
-            .foregroundColor: Theme.chromeMutedText,
-        ]))
+        let snippetText = NSAttributedString(
+            string: "\(compact ? "" : "  ")\(snippet.trimmingCharacters(in: .whitespaces))",
+            attributes: [
+                .font: Theme.Typography.mono(Theme.Typography.small),
+                .foregroundColor: Theme.chromeMutedText,
+            ]
+        )
+        if !compact { text.append(snippetText) }
         return SummonItem(
             id: "\(rel)\u{0}\(line)\u{0}\(column)",
             text: text,
             matchText: rel.lowercased(),
-            chord: nil
+            chord: nil,
+            detail: compact ? snippetText : nil
         )
     }
 

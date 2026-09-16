@@ -29,6 +29,10 @@ struct SummonItem {
     /// re-sources the walk. `⇥` only ever rewrites the query; it never
     /// activates. Nil = the row offers no completion.
     var fill: String? = nil
+    /// Optional second line under `text` (narrow hosts: the sidebar's text
+    /// hits put the snippet under the coordinates). Single line, truncated —
+    /// size the host's `rowHeight` for two lines when rows carry one.
+    var detail: NSAttributedString? = nil
 }
 
 /// Subsequence match — `wt` finds "worktree: …", `tl` finds "toggle layout".
@@ -340,10 +344,25 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
         title.cell?.usesSingleLineMode = true
         title.translatesAutoresizingMaskIntoConstraints = false
         cell.addSubview(title)
-        NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: style.rowInset),
-            title.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-        ])
+        title.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: style.rowInset).isActive = true
+
+        if let detailText = item.detail {
+            // Two single-line labels stacked and centred as a pair — each
+            // truncates on its own; nothing wraps.
+            let detail = NSTextField(labelWithAttributedString: detailText)
+            detail.lineBreakMode = .byTruncatingTail
+            detail.cell?.usesSingleLineMode = true
+            detail.translatesAutoresizingMaskIntoConstraints = false
+            cell.addSubview(detail)
+            NSLayoutConstraint.activate([
+                title.bottomAnchor.constraint(equalTo: cell.centerYAnchor, constant: 1),
+                detail.topAnchor.constraint(equalTo: cell.centerYAnchor, constant: -1),
+                detail.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+                detail.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -style.rowInset),
+            ])
+        } else {
+            title.centerYAnchor.constraint(equalTo: cell.centerYAnchor).isActive = true
+        }
 
         if let key = item.chord {
             let chord = KeycapChipView(chord: key)

@@ -58,7 +58,7 @@ final class FileExplorerView: NSView {
         placeholder: "Search text",
         fieldFont: Theme.Typography.mono(Theme.Typography.small),
         placeholderFont: Theme.Typography.ui(Theme.Typography.small),
-        rowHeight: 22,
+        rowHeight: 36,
         rowInset: 8,
         noMatchText: "No matches",
         escClearsQueryFirst: true,
@@ -237,7 +237,7 @@ final class FileExplorerView: NSView {
         }
         textSearch.onQueryChange = { [weak self] query in
             guard let self, let engine = self.textEngine else { return }
-            engine.search(query) { [weak self] items in self?.textSearch.setItems(items) }
+            engine.search(query, compact: true) { [weak self] items in self?.textSearch.setItems(items) }
         }
         textSearch.onActivate = { [weak self] item in
             guard let self, let root = self.root,
