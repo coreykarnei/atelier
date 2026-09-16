@@ -37,41 +37,44 @@ final class FileExplorerView: NSView {
 
     /// The search panel (VSCode's Go to File and Find in Files, given a home
     /// in the sidebar). Opened by the header's magnifier or ⌘⇧E, it takes
-    /// the tree's place: a Files/Text toggle over the shared summon surface —
-    /// Files is the ⌘P offer, Text is the ⌘⇧F ripgrep engine. `↩`/click opens
-    /// for real (Text: at the hit); `Esc` clears the query, then closes.
-    enum SearchMode: Int { case files, text }
+    /// the tree's place: two independent toggles — Files (the ⌘P offer) and
+    /// Text (the ⌘⇧F ripgrep engine) — over one summon list, both on by
+    /// default (owner call): file matches land at once, text hits follow
+    /// beneath them as two-line rows. `↩`/click opens for real (Text: at the
+    /// hit); `Esc` clears the query, then closes.
     private let magnifier = HoverPadButton(frame: .zero)
     private let searchHost = NSView()
     private var searchHostHeight: NSLayoutConstraint!
-    private let modeControl = NSSegmentedControl(labels: ["Files", "Text"], trackingMode: .selectOne, target: nil, action: nil)
-    private let fileSearch = SummonList(style: .init(
-        placeholder: "Search files",
+    private let modeControl = NSSegmentedControl(labels: ["Files", "Text"], trackingMode: .selectAny, target: nil, action: nil)
+    private let search = SummonList(style: .init(
+        placeholder: "Search",
         fieldFont: Theme.Typography.mono(Theme.Typography.small),
         placeholderFont: Theme.Typography.ui(Theme.Typography.small),
         rowHeight: 22,
         rowInset: 8,
-        noMatchText: "No matching files",
-        escClearsQueryFirst: true
-    ))
-    private let textSearch = SummonList(style: .init(
-        placeholder: "Search text",
-        fieldFont: Theme.Typography.mono(Theme.Typography.small),
-        placeholderFont: Theme.Typography.ui(Theme.Typography.small),
-        rowHeight: 36,
-        rowInset: 8,
         noMatchText: "No matches",
         escClearsQueryFirst: true,
-        filtersLocally: false
+        filtersLocally: false,
+        detailRowHeight: 36
     ))
     private var textEngine: RepoTextSearch?
+    private var fileOffer: [SummonItem] = []
+    private var fileRows: [SummonItem] = []
+    private var textRows: [SummonItem] = []
+    private var liveQuery = ""
     private(set) var isSearchOpen = false
-    private static let modeKey = "explorer.searchMode"
-    private var mode: SearchMode {
-        get { SearchMode(rawValue: UserDefaults.standard.integer(forKey: Self.modeKey)) ?? .files }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: Self.modeKey) }
+    private static let filesKey = "explorer.search.files"
+    private static let textKey = "explorer.search.text"
+    private var filesOn: Bool {
+        get { UserDefaults.standard.object(forKey: Self.filesKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: Self.filesKey) }
     }
-    private var activeSearch: SummonList { mode == .files ? fileSearch : textSearch }
+    private var textOn: Bool {
+        get { UserDefaults.standard.object(forKey: Self.textKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: Self.textKey) }
+    }
+    /// Files rows are capped while a query is live so text hits stay in reach.
+    private static let fileRowCap = 40
 
     private(set) var root: String?
     private var rootNode: FileNode?
@@ -217,34 +220,27 @@ final class FileExplorerView: NSView {
         modeControl.action = #selector(modeChanged)
         modeControl.translatesAutoresizingMaskIntoConstraints = false
         searchHost.addSubview(modeControl)
-        for summon in [fileSearch, textSearch] {
-            summon.translatesAutoresizingMaskIntoConstraints = false
-            summon.onEscape = { [weak self] in self?.closeSearch(focusTree: true) }
-            searchHost.addSubview(summon)
-            NSLayoutConstraint.activate([
-                summon.topAnchor.constraint(equalTo: modeControl.bottomAnchor, constant: -6),
-                summon.leadingAnchor.constraint(equalTo: searchHost.leadingAnchor),
-                summon.trailingAnchor.constraint(equalTo: searchHost.trailingAnchor),
-                summon.bottomAnchor.constraint(equalTo: searchHost.bottomAnchor),
-            ])
-        }
-        fileSearch.rank = RepoFileOffer.rank
-        fileSearch.onActivate = { [weak self] item in
+        search.translatesAutoresizingMaskIntoConstraints = false
+        search.onEscape = { [weak self] in self?.closeSearch(focusTree: true) }
+        search.onQueryChange = { [weak self] query in self?.runSearch(query) }
+        search.onActivate = { [weak self] item in
             guard let self, let root = self.root else { return }
-            RecentFilesStore.record(item.id, root: root)
-            self.closeSearch(focusTree: false)
-            self.onOpen?(URL(fileURLWithPath: item.id), true)
+            if let hit = RepoTextSearch.location(of: item, root: root) {
+                self.closeSearch(focusTree: false)
+                self.onOpenAt?(hit.url, hit.line, hit.column)
+            } else if item.id != RepoTextSearch.moreRowId {
+                RecentFilesStore.record(item.id, root: root)
+                self.closeSearch(focusTree: false)
+                self.onOpen?(URL(fileURLWithPath: item.id), true)
+            }
         }
-        textSearch.onQueryChange = { [weak self] query in
-            guard let self, let engine = self.textEngine else { return }
-            engine.search(query, compact: true) { [weak self] items in self?.textSearch.setItems(items) }
-        }
-        textSearch.onActivate = { [weak self] item in
-            guard let self, let root = self.root,
-                  let hit = RepoTextSearch.location(of: item, root: root) else { return }
-            self.closeSearch(focusTree: false)
-            self.onOpenAt?(hit.url, hit.line, hit.column)
-        }
+        searchHost.addSubview(search)
+        NSLayoutConstraint.activate([
+            search.topAnchor.constraint(equalTo: modeControl.bottomAnchor, constant: -6),
+            search.leadingAnchor.constraint(equalTo: searchHost.leadingAnchor),
+            search.trailingAnchor.constraint(equalTo: searchHost.trailingAnchor),
+            search.bottomAnchor.constraint(equalTo: searchHost.bottomAnchor),
+        ])
 
         // The rail: one tall button under a chevron glyph that lets clicks
         // through to it. Hidden until the tree folds.
@@ -346,21 +342,15 @@ final class FileExplorerView: NSView {
 
     /// Dev-only (snapshots): geometry of the sidebar's parts.
     var debugGeometry: String {
-        "explorer bounds=\(bounds.size) collapsed=\(isCollapsed) searchOpen=\(isSearchOpen) mode=\(mode) "
-            + "header=\(header.frame) host=\(searchHost.frame) active=\(activeSearch.frame) "
+        "explorer bounds=\(bounds.size) collapsed=\(isCollapsed) searchOpen=\(isSearchOpen) files=\(filesOn) text=\(textOn) "
+            + "header=\(header.frame) host=\(searchHost.frame) search=\(search.frame) rows=\(fileRows.count)+\(textRows.count) "
             + "tree=\(scroll.frame) treeHidden=\(scroll.isHidden)"
     }
 
-    /// Dev-only (snapshots): open the panel and type `query`; a `text:`
-    /// prefix picks Text mode.
+    /// Dev-only (snapshots): open the panel and type `query`.
     func debugSetQuery(_ query: String) {
-        if query.hasPrefix("text:") {
-            openSearch(mode: .text)
-            textSearch.setQuery(String(query.dropFirst(5)))
-        } else {
-            openSearch(mode: .files)
-            fileSearch.setQuery(query)
-        }
+        openSearch()
+        search.setQuery(query)
     }
 
     // MARK: Search panel
@@ -370,43 +360,74 @@ final class FileExplorerView: NSView {
     }
 
     @objc private func modeChanged() {
-        let from = activeSearch
-        mode = SearchMode(rawValue: modeControl.selectedSegment) ?? .files
-        let to = activeSearch
-        guard from !== to else { return }
-        from.isHidden = true
-        to.isHidden = false
-        to.setQuery(from.query) // the words you typed carry across
-        from.clearQuery()
-        window?.makeFirstResponder(to.focusField)
+        filesOn = modeControl.isSelected(forSegment: 0)
+        textOn = modeControl.isSelected(forSegment: 1)
+        runSearch(liveQuery)
+        window?.makeFirstResponder(search.focusField)
     }
 
-    /// Open the panel (⌘⇧E / the magnifier) in `mode` — or the remembered
-    /// mode. The tree steps aside; the field takes focus.
-    func openSearch(mode: SearchMode? = nil) {
+    /// Open the panel (⌘⇧E / the magnifier). The tree steps aside; the
+    /// field takes focus; the offer is what the toggles say.
+    func openSearch() {
         guard root != nil else { return }
-        if let mode { self.mode = mode }
-        modeControl.selectedSegment = self.mode.rawValue
-        fileSearch.isHidden = self.mode != .files
-        textSearch.isHidden = self.mode != .text
+        modeControl.setSelected(filesOn, forSegment: 0)
+        modeControl.setSelected(textOn, forSegment: 1)
         isSearchOpen = true
         scroll.isHidden = true
         searchHostHeight.constant = max(0, bounds.height - header.frame.height)
         layoutSubtreeIfNeeded()
-        window?.makeFirstResponder(activeSearch.focusField)
+        runSearch(search.query)
+        window?.makeFirstResponder(search.focusField)
     }
 
-    /// Close the panel: queries cleared, tree back, focus to it if asked.
+    /// Close the panel: query cleared, tree back, focus to it if asked.
     func closeSearch(focusTree: Bool) {
-        fileSearch.clearQuery()
-        textSearch.clearQuery()
-        textSearch.setItems([])
+        search.clearQuery()
+        textRows = []
         guard isSearchOpen else { return }
         isSearchOpen = false
         searchHostHeight.constant = 0
         scroll.isHidden = isCollapsed
         layoutSubtreeIfNeeded()
         if focusTree { window?.makeFirstResponder(outline) }
+    }
+
+    /// One query, two sources. Files filter locally and land at once (the
+    /// whole offer when the field is empty — a browsable list); text hits
+    /// arrive from ripgrep a beat later and append. Stale text results for
+    /// an older query are dropped.
+    private func runSearch(_ query: String) {
+        liveQuery = query
+        let q = query.lowercased().trimmingCharacters(in: .whitespaces)
+        if filesOn {
+            if q.isEmpty {
+                fileRows = fileOffer
+            } else {
+                fileRows = fileOffer
+                    .filter { fuzzyMatches(query: q, candidate: $0.matchText) }
+                    .enumerated()
+                    .sorted { a, b in
+                        let ra = RepoFileOffer.rank(a.element, q), rb = RepoFileOffer.rank(b.element, q)
+                        return ra != rb ? ra > rb : a.offset < b.offset
+                    }
+                    .prefix(Self.fileRowCap)
+                    .map(\.element)
+            }
+        } else {
+            fileRows = []
+        }
+        textRows = []
+        publishRows()
+        guard textOn, !q.isEmpty, let engine = textEngine else { return }
+        engine.search(query, compact: true) { [weak self] items in
+            guard let self, self.liveQuery == query else { return }
+            self.textRows = items
+            self.publishRows()
+        }
+    }
+
+    private func publishRows() {
+        search.setItems(fileRows + textRows)
     }
 
     override func layout() {
@@ -423,7 +444,8 @@ final class FileExplorerView: NSView {
         guard let root else { return }
         RepoFileOffer.gather(root: root, rowFont: Theme.Typography.small) { [weak self] items in
             guard let self, self.root == root else { return }
-            self.fileSearch.setItems(items)
+            self.fileOffer = items
+            if self.isSearchOpen { self.runSearch(self.liveQuery) }
         }
     }
 

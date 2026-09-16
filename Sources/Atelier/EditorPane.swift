@@ -73,6 +73,11 @@ final class EditorPane: NSView, WorkspacePane {
     /// outside write reloads a clean buffer in place. See `watchFile`.
     private var fileWatch: DispatchSourceFileSystemObject?
     private var fileReloadDebounce: Timer?
+    /// Clips the text view to the right of the gutter: the gutter floats
+    /// over the text, translucent like the pane, so text scrolled under it
+    /// showed through the line numbers. An opaque gutter would kill the blur
+    /// in that strip; masking the text is the honest fix.
+    private let gutterMask = CALayer()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -259,6 +264,7 @@ final class EditorPane: NSView, WorkspacePane {
             // Free two-axis scrolling: with wrapping off a code view is a plane,
             // and AppKit's axis lock makes diagonal trackpad gestures stutter.
             controller.scrollView?.usesPredominantAxisScrolling = false
+            installGutterMask(controller)
             NSLayoutConstraint.activate([
                 controller.view.topAnchor.constraint(equalTo: contentHost.topAnchor),
                 controller.view.leadingAnchor.constraint(equalTo: contentHost.leadingAnchor),
@@ -278,6 +284,46 @@ final class EditorPane: NSView, WorkspacePane {
             announceOpen(path: path, text: text)
             setExplorerExpanded(false)
         }
+    }
+
+    // MARK: Gutter clip
+
+    private func installGutterMask(_ controller: TextViewController) {
+        guard let scrollView = controller.scrollView else { return }
+        gutterMask.backgroundColor = NSColor.black.cgColor
+        controller.textView?.layer?.mask = gutterMask
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(gutterGeometryChanged),
+            name: NSView.boundsDidChangeNotification, object: scrollView.contentView
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(gutterGeometryChanged),
+            name: NSView.frameDidChangeNotification, object: controller.textView as Any?
+        )
+        updateGutterMask()
+    }
+
+    @objc private func gutterGeometryChanged() { updateGutterMask() }
+
+    private func updateGutterMask() {
+        guard let controller, let clip = controller.scrollView?.contentView,
+              let textView = controller.textView else { return }
+        // The gutter is the library's floating subview; find it by type so
+        // the width follows its own line-count sizing.
+        func gutter(in view: NSView) -> NSView? {
+            if String(describing: type(of: view)) == "GutterView" { return view }
+            for sub in view.subviews { if let hit = gutter(in: sub) { return hit } }
+            return nil
+        }
+        let gutterWidth = gutter(in: controller.view).map { $0.isHidden ? 0 : $0.frame.width } ?? 0
+        let visibleX = clip.bounds.origin.x
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        gutterMask.frame = CGRect(
+            x: visibleX + gutterWidth, y: 0,
+            width: max(0, textView.bounds.width - visibleX - gutterWidth), height: textView.bounds.height
+        )
+        CATransaction.commit()
     }
 
     // MARK: On-disk changes
@@ -494,7 +540,7 @@ final class EditorPane: NSView, WorkspacePane {
         let minimap = find(controller.view)
         let minimapLine = "minimap hidden=\(minimap?.isHidden ?? true) frame=\(minimap?.frame ?? .zero) "
             + "superHidden=\(minimap?.isHiddenOrHasHiddenAncestor ?? true)"
-        var out = "preview=\(isPreview) wrap=\(controller.wrapLines) hScroller=\(sv.hasHorizontalScroller) "
+        var out = "preview=\(isPreview) wrap=\(controller.wrapLines) hScroller=\(sv.hasHorizontalScroller) mask=\(gutterMask.frame) "
         out += "content=\(sv.contentSize) doc=\(controller.textView.frame.size) "
         out += "docVisible=\(sv.documentVisibleRect) estWidth=\(controller.textView.layoutManager.estimatedWidth())\n"
         out += "  hits: " + hits.joined(separator: " ") + "\n  " + minimapLine

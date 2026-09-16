@@ -96,7 +96,9 @@ buffers only): F12 go-to-definition (same-file reveals, cross-file rides the
 feel-check. **M2.6 landed 2026-09-15** — the file explorer
 (`FileExplorer.swift`): a tree of the session root (worktree-aware, `.git`
 hidden, gitignored dimmed, FSEvents-refreshed) down the editor pane's left
-edge, with a search bar (the ⌘P offer, given a home) under its header;
+edge, with a search panel (magnifier / ⌘⇧E: Files + Text toggles, both on
+by default — the ⌘P offer and the ⌘⇧F ripgrep engine in one list) in place
+of the tree;
 single click previews (soft-wrapped), double-click/`↩`/the first keystroke
 commits — unwrap, fold the tree to a 26pt rail with a chevron; `⌘B`
 toggles. The open file is watched on disk; a clean buffer reloads in place.

@@ -65,6 +65,8 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
         /// listens on `onQueryChange` and calls `setItems` with fresh results
         /// (⌘⇧F repo search).
         var filtersLocally: Bool = true
+        /// Height of a row that carries a `detail` line. Nil = rowHeight.
+        var detailRowHeight: CGFloat? = nil
     }
 
     var onActivate: ((SummonItem) -> Void)?
@@ -334,6 +336,10 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
     // MARK: Table
 
     func numberOfRows(in tableView: NSTableView) -> Int { filtered.count }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        filtered[row].detail == nil ? style.rowHeight : (style.detailRowHeight ?? style.rowHeight)
+    }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let item = filtered[row]
