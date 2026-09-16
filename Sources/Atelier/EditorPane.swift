@@ -38,6 +38,7 @@ final class EditorPane: NSView, WorkspacePane {
     /// strip and the buffer (or, for markdown in Preview, the rendering).
     private let contentHost = NSView()
     private let fileHeader = EditorFileHeader()
+    private let diagnosticStrip = DiagnosticStrip()
     private let preview = MarkdownPreviewView(frame: .zero)
     private var previewRenderDebounce: Timer?
     private var isMarkdown: Bool { bufferLanguage?.id == .markdown }
@@ -178,6 +179,9 @@ final class EditorPane: NSView, WorkspacePane {
         preview.translatesAutoresizingMaskIntoConstraints = false
         preview.isHidden = true
         contentHost.addSubview(preview)
+        diagnosticStrip.translatesAutoresizingMaskIntoConstraints = false
+        diagnosticStrip.isHidden = true
+        contentHost.addSubview(diagnosticStrip)
         NSLayoutConstraint.activate([
             fileHeader.topAnchor.constraint(equalTo: contentHost.topAnchor),
             fileHeader.leadingAnchor.constraint(equalTo: contentHost.leadingAnchor),
@@ -187,6 +191,9 @@ final class EditorPane: NSView, WorkspacePane {
             preview.leadingAnchor.constraint(equalTo: contentHost.leadingAnchor),
             preview.trailingAnchor.constraint(equalTo: contentHost.trailingAnchor),
             preview.bottomAnchor.constraint(equalTo: contentHost.bottomAnchor),
+            diagnosticStrip.leadingAnchor.constraint(equalTo: contentHost.leadingAnchor),
+            diagnosticStrip.trailingAnchor.constraint(equalTo: contentHost.trailingAnchor),
+            diagnosticStrip.bottomAnchor.constraint(equalTo: contentHost.bottomAnchor),
         ])
         NSLayoutConstraint.activate([
             explorer.topAnchor.constraint(equalTo: topAnchor),
@@ -229,6 +236,24 @@ final class EditorPane: NSView, WorkspacePane {
     /// `probe:dupundo` instead exercises ⇧⌥↓ then ⌘Z on the buffer and
     /// writes what happened to ~/.local/state/atelier/probe.txt.
     func debugExplorer(_ query: String) {
+        if query.hasPrefix("probe:diag=") {
+            // `probe:diag=/path:L:C` — open committed, park the caret, and
+            // after the server has had 4s report diagnostics + strip state.
+            let spec = String(query.dropFirst("probe:diag=".count)).split(separator: ":").map(String.init)
+            guard spec.count == 3, let line = Int(spec[1]), let column = Int(spec[2]) else { return }
+            try? open(path: spec[0], preview: false)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                guard let self else { return }
+                self.reveal(line: line, column: column)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    let report = "diagnostics=\(self.lastDiagnostics.count) "
+                        + self.lastDiagnostics.prefix(5).map { "\($0.startLine + 1):\($0.startCharacter + 1)-\($0.endLine + 1):\($0.endCharacter + 1) \($0.severity) '\($0.message.prefix(60))'" }.joined(separator: " | ")
+                        + "\nstrip hidden=\(self.diagnosticStrip.isHidden) text='\(self.diagnosticStrip.debugText)' frame=\(self.diagnosticStrip.frame)\n"
+                    try? report.write(toFile: NSHomeDirectory() + "/.local/state/atelier/probe.txt", atomically: true, encoding: .utf8)
+                }
+            }
+            return
+        }
         if query == "probe:keys" {
             // The real path: synthesized key events through NSApp.sendEvent —
             // the library's local monitor, then the menu's key equivalent.
@@ -402,6 +427,12 @@ final class EditorPane: NSView, WorkspacePane {
             controller.scrollView?.usesPredominantAxisScrolling = false
             installGutterMask(controller)
             controller.textView?.onCommandClick = { [weak self] _ in self?.onGoToDefinition?() }
+            contentHost.addSubview(diagnosticStrip, positioned: .above, relativeTo: controller.view)
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(caretMoved),
+                name: TextSelectionManager.selectionChangedNotification,
+                object: controller.textView?.selectionManager as Any?
+            )
             NSLayoutConstraint.activate([
                 controller.view.topAnchor.constraint(equalTo: fileHeader.bottomAnchor),
                 controller.view.leadingAnchor.constraint(equalTo: contentHost.leadingAnchor),
@@ -720,10 +751,42 @@ final class EditorPane: NSView, WorkspacePane {
             return Emphasis(range: range, style: .underline(color: color))
         }
         emphasisManager.addEmphases(emphases, for: Self.diagnosticsEmphasisID)
+        updateDiagnosticStrip()
     }
 
     private func clearDiagnostics() {
+        lastDiagnostics = []
         controller?.textView.emphasisManager?.removeEmphases(for: Self.diagnosticsEmphasisID)
+        updateDiagnosticStrip()
+    }
+
+    @objc private func caretMoved() { updateDiagnosticStrip() }
+
+    /// The message for the diagnostic under the caret, in a one-line strip
+    /// floating over the bottom of the buffer (so the text never reflows as
+    /// the caret moves). Under the caret means: on its line, the one whose
+    /// range contains the column winning; errors before warnings.
+    private func updateDiagnosticStrip() {
+        guard !isPreview, !lastDiagnostics.isEmpty,
+              let position = controller?.cursorPositions.first?.start, position.line > 0 else {
+            diagnosticStrip.isHidden = true
+            return
+        }
+        let line = position.line - 1
+        let column = max(0, position.column - 1)
+        let onLine = lastDiagnostics.filter { $0.startLine <= line && line <= $0.endLine }
+        guard !onLine.isEmpty else { diagnosticStrip.isHidden = true; return }
+        func contains(_ d: LSPDiagnostic) -> Bool {
+            let afterStart = line > d.startLine || column >= d.startCharacter
+            let beforeEnd = line < d.endLine || column <= d.endCharacter
+            return afterStart && beforeEnd
+        }
+        let pick = onLine.min { a, b in
+            if contains(a) != contains(b) { return contains(a) }
+            return a.severity.rawValue < b.severity.rawValue
+        }!
+        diagnosticStrip.show(pick)
+        diagnosticStrip.isHidden = false
     }
 
     private static let diagnosticsEmphasisID = "lsp.diagnostics"
@@ -756,6 +819,7 @@ final class EditorPane: NSView, WorkspacePane {
         out += "content=\(sv.contentSize) doc=\(controller.textView.frame.size) "
         out += "docVisible=\(sv.documentVisibleRect) estWidth=\(controller.textView.layoutManager.estimatedWidth())\n"
         out += "  hits: " + hits.joined(separator: " ") + "\n  " + minimapLine
+        out += "\n  strip hidden=\(diagnosticStrip.isHidden) '\(diagnosticStrip.debugText)'"
         return out
     }
 
@@ -888,5 +952,70 @@ final class EditorFileHeader: NSView {
 
     @objc private func modeChanged() {
         onModeChange?(mode.selectedSegment == 1)
+    }
+}
+
+/// One line over the bottom edge of the buffer: severity dot, message.
+/// Mantle over the base like the file header, so it reads as chrome, not
+/// text; disappears when the caret leaves the diagnostic.
+final class DiagnosticStrip: NSView {
+    static let height: CGFloat = 22
+    private let dot = NSView()
+    private let label = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+
+        let hairline = NSView()
+        hairline.wantsLayer = true
+        hairline.layer?.backgroundColor = Theme.Elevation.hairline.cgColor
+        hairline.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hairline)
+
+        dot.wantsLayer = true
+        dot.layer?.cornerRadius = 3
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(dot)
+
+        label.font = Theme.Typography.ui(Theme.Typography.small)
+        label.textColor = Theme.chromeText
+        label.lineBreakMode = .byTruncatingTail
+        label.maximumNumberOfLines = 1
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: Self.height),
+            hairline.topAnchor.constraint(equalTo: topAnchor),
+            hairline.leadingAnchor.constraint(equalTo: leadingAnchor),
+            hairline.trailingAnchor.constraint(equalTo: trailingAnchor),
+            hairline.heightAnchor.constraint(equalToConstant: 1),
+            dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            dot.centerYAnchor.constraint(equalTo: centerYAnchor),
+            dot.widthAnchor.constraint(equalToConstant: 6),
+            dot.heightAnchor.constraint(equalToConstant: 6),
+            label.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 8),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    var debugText: String { label.stringValue }
+
+    func show(_ diagnostic: LSPDiagnostic) {
+        let color: NSColor = switch diagnostic.severity {
+        case .error: Theme.accentRed
+        case .warning: Theme.accentPeach
+        case .information, .hint: Theme.chromeMutedText
+        }
+        dot.layer?.backgroundColor = color.cgColor
+        // Servers send multi-line messages (notes, fix-its); the first line is the verdict.
+        label.stringValue = diagnostic.message
+            .split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? diagnostic.message
+        toolTip = diagnostic.message
     }
 }
