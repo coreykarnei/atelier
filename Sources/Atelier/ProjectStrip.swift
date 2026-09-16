@@ -116,6 +116,8 @@ private final class ProjectTabView: NSView {
     private static let closeSlot: CGFloat = 6 + 16 + 6
     private static let markGap: CGFloat = 6
     private static let dot: CGFloat = 5
+    /// The blocked disc: a size up from a dot, so the `!` inside resolves.
+    private static let blockedDot: CGFloat = 9
     private static let dotGap: CGFloat = 3
 
     override var mouseDownCanMoveWindow: Bool { false }
@@ -147,7 +149,8 @@ private final class ProjectTabView: NSView {
     private var marksWidth: CGFloat {
         guard !markViews.isEmpty else { return 0 }
         let n = CGFloat(markViews.count)
-        return Self.markGap + n * Self.dot + (n - 1) * Self.dotGap
+        let blocked = CGFloat(markViews.filter { $0 is BlockedMarkView }.count)
+        return Self.markGap + (n - blocked) * Self.dot + blocked * Self.blockedDot + (n - 1) * Self.dotGap
     }
 
     func apply(_ info: ProjectTabInfo) {
@@ -179,13 +182,7 @@ private final class ProjectTabView: NSView {
     }
 
     private static func makeMark(_ attention: Session.Attention) -> NSView {
-        if attention == .needsInput {
-            let mark = NSTextField(labelWithString: "!")
-            mark.font = Theme.Typography.ui(9, weight: .heavy)
-            mark.textColor = Theme.accentPeach
-            mark.sizeToFit()
-            return mark
-        }
+        if attention == .needsInput { return BlockedMarkView(diameter: blockedDot) }
         let color: NSColor
         switch attention {
         case .working: color = Theme.accentBlue
@@ -211,11 +208,9 @@ private final class ProjectTabView: NSView {
         titleLabel.frame = CGRect(x: x, y: round((bounds.height - textHeight) / 2), width: textWidth, height: textHeight)
         x += textWidth + Self.markGap
         for view in markViews {
-            let size = view.fittingSize == .zero ? CGSize(width: Self.dot, height: Self.dot) : view.fittingSize
-            let w = view is NSTextField ? size.width : Self.dot
-            let h = view is NSTextField ? size.height : Self.dot
-            view.frame = CGRect(x: x, y: round((bounds.height - h) / 2), width: w, height: h)
-            x += Self.dot + Self.dotGap
+            let w = view is BlockedMarkView ? Self.blockedDot : Self.dot
+            view.frame = CGRect(x: x, y: round((bounds.height - w) / 2), width: w, height: w)
+            x += w + Self.dotGap
         }
         if !closeButton.isHidden {
             // Leading, where macOS puts a tab's close (owner call 2026-09-10).

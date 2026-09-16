@@ -920,7 +920,7 @@ final class BottomBar: NSView {
     }
 
     /// The tab badges, translated to menu-item images: the same 6 pt dot, the
-    /// same inanimate peach `!`. `none` gets a clear placeholder so titles
+    /// same inanimate peach `!` disc. `none` gets a clear placeholder so titles
     /// align whether or not a session has state.
     private static func menuBadgeImage(for attention: Session.Attention) -> NSImage {
         let size = NSSize(width: 10, height: 10)
@@ -929,12 +929,7 @@ final class BottomBar: NSView {
             case .none:
                 break
             case .needsInput:
-                let mark = NSAttributedString(string: "!", attributes: [
-                    .font: Theme.Typography.ui(Theme.Typography.small, weight: .heavy),
-                    .foregroundColor: Theme.accentPeach,
-                ])
-                let markSize = mark.size()
-                mark.draw(at: NSPoint(x: (rect.width - markSize.width) / 2, y: (rect.height - markSize.height) / 2))
+                BlockedMarkView.draw(in: rect)
             case .working, .waiting, .doneUnseen:
                 let color: NSColor
                 switch attention {
@@ -1126,8 +1121,10 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         }
         if let badge = badgeView {
             let size = badge.frame.size == .zero ? badge.fittingSize : badge.frame.size
+            // Centered on the 6 pt dot's spot, so the larger blocked disc
+            // grows both ways instead of shoving the title.
             badge.frame = CGRect(
-                x: leading,
+                x: leading + (6 - size.width) / 2,
                 y: (bounds.height - size.height) / 2,
                 width: size.width,
                 height: size.height
@@ -1285,13 +1282,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     }
 
     private static func makeBadge(for attention: Session.Attention) -> NSView {
-        if attention == .needsInput {
-            let mark = NSTextField(labelWithString: "!")
-            mark.font = Theme.Typography.ui(Theme.Typography.small, weight: .heavy)
-            mark.textColor = Theme.accentPeach
-            mark.sizeToFit()
-            return mark
-        }
+        if attention == .needsInput { return BlockedMarkView(diameter: 9) }
         let color: NSColor
         switch attention {
         case .working: color = Theme.accentBlue
