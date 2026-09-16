@@ -27,6 +27,10 @@ final class FileExplorerView: NSView {
     private let header = NSView()
     private let rootLabel = NSTextField(labelWithString: "")
     private let chevron = HoverPadButton(frame: .zero)
+    /// Collapsed: the entire rail answers a click; the chevron rides at its
+    /// top, centred in the rail's width.
+    private let rail = HoverPadButton(frame: .zero)
+    private let railChevron = NSImageView()
 
     private(set) var root: String?
     private var rootNode: FileNode?
@@ -69,9 +73,9 @@ final class FileExplorerView: NSView {
         guard collapsed != isCollapsed else { return }
         isCollapsed = collapsed
         scroll.isHidden = collapsed
-        rootLabel.isHidden = collapsed
-        chevron.image = Self.chevronImage(collapsed ? "chevron.right" : "chevron.left")
-        chevron.toolTip = collapsed ? "Show Explorer (⌘B)" : "Hide Explorer (⌘B)"
+        header.isHidden = collapsed
+        rail.isHidden = !collapsed
+        railChevron.isHidden = !collapsed
     }
 
     private static func chevronImage(_ name: String) -> NSImage? {
@@ -149,7 +153,30 @@ final class FileExplorerView: NSView {
         chevron.translatesAutoresizingMaskIntoConstraints = false
         header.addSubview(chevron)
 
+        // The rail: one tall button under a chevron glyph that lets clicks
+        // through to it. Hidden until the tree folds.
+        railChevron.image = Self.chevronImage("chevron.right")
+        railChevron.imageScaling = .scaleNone
+        railChevron.translatesAutoresizingMaskIntoConstraints = false
+        rail.toolTip = "Show Explorer (⌘B)"
+        rail.target = self
+        rail.action = #selector(chevronClicked)
+        rail.layer?.cornerRadius = 0
+        rail.translatesAutoresizingMaskIntoConstraints = false
+        rail.isHidden = true
+        railChevron.isHidden = true
+        addSubview(rail)
+        addSubview(railChevron)
+
         NSLayoutConstraint.activate([
+            rail.topAnchor.constraint(equalTo: topAnchor),
+            rail.leadingAnchor.constraint(equalTo: leadingAnchor),
+            rail.bottomAnchor.constraint(equalTo: bottomAnchor),
+            rail.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -1),
+            railChevron.centerXAnchor.constraint(equalTo: rail.centerXAnchor),
+            railChevron.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            railChevron.widthAnchor.constraint(equalToConstant: 14),
+            railChevron.heightAnchor.constraint(equalToConstant: 14),
             header.topAnchor.constraint(equalTo: topAnchor),
             header.leadingAnchor.constraint(equalTo: leadingAnchor),
             header.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -1),

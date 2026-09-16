@@ -131,6 +131,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// reconciling snapshot alpha probes with the live tree.
     var debugWashState: String {
         var lines = [activeSession.map { "\(title): \($0.shellPane.debugWashState)" } ?? "no session"]
+        if let editor = activeSession?.editorPane { lines.append("editor: \(editor.debugGeometry)") }
         func walk(_ view: NSView, depth: Int) {
             let bg = view.layer?.backgroundColor
             let alpha = bg?.alpha ?? 0

@@ -60,6 +60,33 @@ enum LayoutSlots {
 final class LayoutSplitView: NSSplitView {
     var slot: LayoutSlot!
 
+    /// Triptych only: the inner (editor/shell) split nested in this outer
+    /// split, and the handle that sits where their dividers cross. Set by
+    /// the session when it builds the tree; nil everywhere else.
+    weak var innerSplit: LayoutSplitView?
+    private var cornerHandle: SplitCornerHandle?
+
+    /// Install the crossing-point handle. Needs `arrangesAllSubviews` off so
+    /// the handle can be a plain subview floating over the arranged panes.
+    func installCornerHandle(inner: LayoutSplitView) {
+        innerSplit = inner
+        let handle = SplitCornerHandle(outer: self, inner: inner)
+        addSubview(handle, positioned: .above, relativeTo: nil)
+        cornerHandle = handle
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        guard let handle = cornerHandle, let inner = innerSplit,
+              arrangedSubviews.count == 2, inner.arrangedSubviews.count == 2 else { return }
+        let x = arrangedSubviews[0].frame.maxX + dividerThickness / 2
+        let innerY = inner.arrangedSubviews[0].frame.maxY + inner.dividerThickness / 2
+        let y = convert(NSPoint(x: 0, y: innerY), from: inner).y
+        let size = SplitCornerHandle.size
+        handle.frame = NSRect(x: x - size / 2, y: y - size / 2, width: size, height: size)
+    }
+
     /// Brackets a divider drag: `true` on mouse-down, `false` when the drag's
     /// tracking loop returns. The session freezes terminal PTY resizes between
     /// the two (§1.5: PTY resize is debounced to drag-end).
@@ -72,5 +99,49 @@ final class LayoutSplitView: NSSplitView {
         onDividerDrag?(true)
         super.mouseDown(with: event)
         onDividerDrag?(false)
+    }
+}
+
+/// The square where the triptych's two dividers cross. Invisible; the
+/// cursor says what it does. Dragging it moves both dividers together —
+/// the outer's x and the inner's y follow the pointer, each clamped to its
+/// slot's minimums. PTY resizes freeze for the drag like any divider drag.
+final class SplitCornerHandle: NSView {
+    static let size: CGFloat = 14
+    private unowned let outer: LayoutSplitView
+    private unowned let inner: LayoutSplitView
+
+    init(outer: LayoutSplitView, inner: LayoutSplitView) {
+        self.outer = outer
+        self.inner = inner
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .crosshair)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let window else { return }
+        outer.onDividerDrag?(true)
+        defer { outer.onDividerDrag?(false) }
+        var current = event
+        while current.type != .leftMouseUp {
+            guard let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) else { break }
+            current = next
+            if current.type == .leftMouseDragged { move(to: current.locationInWindow) }
+        }
+    }
+
+    private func move(to windowPoint: NSPoint) {
+        let px = outer.convert(windowPoint, from: nil).x
+        let py = inner.convert(windowPoint, from: nil).y
+        let outerMax = outer.bounds.width - outer.slot.minSecond
+        let innerMax = inner.bounds.height - inner.slot.minSecond
+        outer.setPosition(min(max(px, outer.slot.minFirst), outerMax), ofDividerAt: 0)
+        inner.setPosition(min(max(py, inner.slot.minFirst), innerMax), ofDividerAt: 0)
     }
 }

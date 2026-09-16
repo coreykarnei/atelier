@@ -354,6 +354,16 @@ final class EditorPane: NSView, WorkspacePane {
 
     private static let diagnosticsEmphasisID = "lsp.diagnostics"
 
+    /// Dev-only (snapshot): the buffer's scroll geometry, for chasing
+    /// horizontal-scroll complaints without a pointer.
+    var debugGeometry: String {
+        guard let controller else { return "no buffer" }
+        guard let sv = controller.scrollView else { return "no scroll view" }
+        return "preview=\(isPreview) wrap=\(controller.wrapLines) hScroller=\(sv.hasHorizontalScroller) "
+            + "content=\(sv.contentSize) doc=\(controller.textView.frame.size) "
+            + "docVisible=\(sv.documentVisibleRect) estWidth=\(controller.textView.layoutManager.estimatedWidth())"
+    }
+
     // MARK: Configuration
 
     /// One Mocha (§2.9): syntax from `Theme.Editor`, background `base` at

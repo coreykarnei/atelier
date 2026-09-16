@@ -98,6 +98,10 @@ feel-check. **M2.6 landed 2026-09-15** — the file explorer
 hidden, gitignored dimmed, FSEvents-refreshed) down the editor pane's left
 edge; single click previews (soft-wrapped, read-only), double-click/`↩`
 commits and folds the tree to a 26pt rail with a chevron; `⌘B` toggles.
+`Vendor/CodeEditTextView` is a second local override (same identity trick
+as CodeEditSymbols) carrying the horizontal-scroll fix — `ATELIER.md` there
+lists patches. The triptych's two dividers can be dragged together from
+where they cross (`SplitCornerHandle` in `Layout.swift`).
 
 Also landed 2026-07-14: **remote sessions** — the native successor of the
 dotfiles' `ide-pi` (see `docs/devlog/2026-07-14-remote-sessions.md`). A

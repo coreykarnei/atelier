@@ -17,6 +17,9 @@ let package = Package(
         // Local override (by package identity) of CodeEditSourceEditor's
         // CodeEditSymbols dependency — see Vendor/CodeEditSymbols/Package.swift.
         .package(path: "Vendor/CodeEditSymbols"),
+        // Local override of CodeEditTextView 0.12.1 carrying Atelier's
+        // horizontal-scroll fix — see Vendor/CodeEditTextView/ATELIER.md.
+        .package(path: "Vendor/CodeEditTextView"),
     ],
     targets: [
         // Shared IPC contract: socket path + the message both ends encode/decode.

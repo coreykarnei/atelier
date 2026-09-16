@@ -595,7 +595,9 @@ final class Session: NSObject, NSSplitViewDelegate {
             switch layoutMode {
             case .triptych:
                 let leftColumn = makeSplit(slot: LayoutSlots.triptychInner, vertical: false, first: editorPane, second: shellPane)
-                root = makeSplit(slot: LayoutSlots.triptychOuter, vertical: true, first: leftColumn, second: agentPane)
+                let outer = makeSplit(slot: LayoutSlots.triptychOuter, vertical: true, first: leftColumn, second: agentPane)
+                outer.installCornerHandle(inner: leftColumn)
+                root = outer
             case .split:
                 root = makeSplit(slot: LayoutSlots.splitVertical, vertical: false, first: agentPane, second: shellPane)
             case .splitSide:
@@ -631,6 +633,7 @@ final class Session: NSObject, NSSplitViewDelegate {
 
     private func makeSplit(slot: LayoutSlot, vertical: Bool, first: NSView, second: NSView) -> LayoutSplitView {
         let split = LayoutSplitView()
+        split.arrangesAllSubviews = false // the corner handle floats, unarranged
         split.slot = slot
         split.isVertical = vertical
         split.dividerStyle = .thin
@@ -674,6 +677,8 @@ final class Session: NSObject, NSSplitViewDelegate {
     }
 
     @objc private func splitViewDidResize(_ note: Notification) {
+        // The inner divider moved: the outer's corner handle must follow.
+        ((note.object as? NSView)?.superview as? LayoutSplitView)?.needsLayout = true
         guard !isRestoringLayout, let split = note.object as? LayoutSplitView,
               split.arrangedSubviews.count == 2 else { return }
         let total = split.isVertical ? split.bounds.width : split.bounds.height
