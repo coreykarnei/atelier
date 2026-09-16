@@ -15,8 +15,8 @@ struct ProjectTabInfo {
 /// dividing it equally, shown once there are two), our material. The
 /// active tab is a rounded chip in the panes' base, flush with the content;
 /// the others sit darker in crust. Every tab carries its
-/// sessions' attention marks after the title (blue working, peach waiting,
-/// peach `!` blocked, green unseen completion), so a project you're not
+/// sessions' attention marks after the title (blue working, green done,
+/// pulsing green unseen completion, peach `!` blocked), so a project you're not
 /// looking at still says where its agents stand. `+` opens a new project
 /// tab; the active tab's leading `×` closes it. Gaps pass clicks through to the
 /// wash (drag to move, double-click to zoom).
@@ -108,6 +108,7 @@ private final class ProjectTabView: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
     private let closeButton = HoverPadButton()
     private var markViews: [NSView] = []
+    private var marks: [Session.Attention] = []
     private var isActive = false
     private var hovered = false
     private var tracking: NSTrackingArea?
@@ -117,7 +118,7 @@ private final class ProjectTabView: NSView {
     private static let markGap: CGFloat = 6
     private static let dot: CGFloat = 5
     /// The blocked disc: a size up from a dot, so the `!` inside resolves.
-    private static let blockedDot: CGFloat = 9
+    private static let blockedDot: CGFloat = 7
     private static let dotGap: CGFloat = 3
 
     override var mouseDownCanMoveWindow: Bool { false }
@@ -158,11 +159,16 @@ private final class ProjectTabView: NSView {
         isActive = info.isActive
         closeButton.isHidden = !isActive
         toolTip = info.title
-        for view in markViews { view.removeFromSuperview() }
-        markViews = info.marks.map { mark in
-            let view = Self.makeMark(mark)
-            addSubview(view)
-            return view
+        if info.marks != marks {
+            // Rebuild only on change — the bar refreshes often, and a
+            // rebuilt dot restarts its pulse.
+            marks = info.marks
+            for view in markViews { view.removeFromSuperview() }
+            markViews = info.marks.map { mark in
+                let view = Self.makeMark(mark)
+                addSubview(view)
+                return view
+            }
         }
         restyle()
         needsLayout = true
@@ -182,18 +188,9 @@ private final class ProjectTabView: NSView {
     }
 
     private static func makeMark(_ attention: Session.Attention) -> NSView {
-        if attention == .needsInput { return BlockedMarkView(diameter: blockedDot) }
-        let color: NSColor
-        switch attention {
-        case .working: color = Theme.accentBlue
-        case .doneUnseen: color = Theme.accentGreen
-        default: color = Theme.accentPeach
-        }
-        let view = NSView(frame: CGRect(x: 0, y: 0, width: dot, height: dot))
-        view.wantsLayer = true
-        view.layer?.backgroundColor = color.cgColor
-        view.layer?.cornerRadius = dot / 2
-        return view
+        attention == .needsInput
+            ? BlockedMarkView(diameter: blockedDot)
+            : AttentionDotView(attention: attention, diameter: dot)
     }
 
     override func layout() {

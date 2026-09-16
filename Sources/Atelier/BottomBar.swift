@@ -931,13 +931,7 @@ final class BottomBar: NSView {
             case .needsInput:
                 BlockedMarkView.draw(in: rect)
             case .working, .waiting, .doneUnseen:
-                let color: NSColor
-                switch attention {
-                case .working: color = Theme.accentBlue
-                case .doneUnseen: color = Theme.accentGreen
-                default: color = Theme.accentPeach
-                }
-                color.setFill()
+                Theme.attentionColor(attention).setFill()
                 NSBezierPath(ovalIn: NSRect(x: 2, y: 2, width: 6, height: 6)).fill()
             }
             return true
@@ -1216,9 +1210,10 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     // MARK: Attention badge (MILESTONE_1 §7.1 + POLISH_PLAN §3)
 
     /// No escalation (§1.3, rule standing): states swap by ~250 ms cross-fade;
-    /// the only other motions are the green arrival's single scale-in and the
-    /// working blue's subliminal pulse. Nothing here ever raises its voice
-    /// with age, and the peach `!` is deliberately inanimate.
+    /// the other motions live in `AttentionDotView` (working's subliminal
+    /// pulse, unseen-done's clear one) plus the green arrival's single
+    /// scale-in here. Nothing raises its voice with age; the peach `!` is
+    /// deliberately inanimate.
     private func setAttention(_ newAttention: Session.Attention, animated: Bool) {
         guard newAttention != attention || !applied else { return }
         attention = newAttention
@@ -1253,43 +1248,22 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         }
         guard !reduceMotion else { return }
 
-        switch newAttention {
-        case .doneUnseen:
-            // One soft scale-in (1.0 → 1.3 → 1.0), then stillness.
-            if let dot = (badge as? BadgeDotView)?.dotLayer {
-                let arrival = CAKeyframeAnimation(keyPath: "transform.scale")
-                arrival.values = [1.0, 1.3, 1.0]
-                arrival.keyTimes = [0, 0.5, 1]
-                arrival.duration = 0.3
-                arrival.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                dot.add(arrival, forKey: "arrival")
-            }
-        case .working:
-            // The ~4 s subliminal pulse (§1.1 item 4): ±10% opacity, forever.
-            if let dot = (badge as? BadgeDotView)?.dotLayer {
-                let pulse = CABasicAnimation(keyPath: "opacity")
-                pulse.fromValue = 1.0
-                pulse.toValue = 0.8
-                pulse.duration = 2.0
-                pulse.autoreverses = true
-                pulse.repeatCount = .infinity
-                pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                dot.add(pulse, forKey: "workingPulse")
-            }
-        case .waiting, .needsInput, .none:
-            break // still — the peach states never animate (§1.3)
+        if newAttention == .doneUnseen, let dot = (badge as? AttentionDotView)?.dotLayer {
+            // One soft scale-in (1.0 → 1.3 → 1.0) on arrival; the clear
+            // pulse the dot installs itself carries on from there.
+            let arrival = CAKeyframeAnimation(keyPath: "transform.scale")
+            arrival.values = [1.0, 1.3, 1.0]
+            arrival.keyTimes = [0, 0.5, 1]
+            arrival.duration = 0.3
+            arrival.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            dot.add(arrival, forKey: "arrival")
         }
     }
 
     private static func makeBadge(for attention: Session.Attention) -> NSView {
-        if attention == .needsInput { return BlockedMarkView(diameter: 9) }
-        let color: NSColor
-        switch attention {
-        case .working: color = Theme.accentBlue
-        case .doneUnseen: color = Theme.accentGreen
-        default: color = Theme.accentPeach
-        }
-        return BadgeDotView(color: color)
+        attention == .needsInput
+            ? BlockedMarkView(diameter: 8)
+            : AttentionDotView(attention: attention, diameter: 6)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -1672,27 +1646,6 @@ private final class FolderView: NSView {
     }
 
     @objc private func removeTapped() { onRemove?() }
-}
-
-/// A 6 pt attention dot drawn as a centered sublayer, so scale animations
-/// (the green arrival) grow from the dot's middle rather than a view corner.
-private final class BadgeDotView: NSView {
-    let dotLayer = CALayer()
-
-    init(color: NSColor) {
-        super.init(frame: CGRect(x: 0, y: 0, width: 6, height: 6))
-        wantsLayer = true
-        dotLayer.backgroundColor = color.cgColor
-        dotLayer.cornerRadius = 3
-        dotLayer.bounds = CGRect(x: 0, y: 0, width: 6, height: 6)
-        dotLayer.position = CGPoint(x: 3, y: 3)
-        layer?.addSublayer(dotLayer)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override var fittingSize: NSSize { NSSize(width: 6, height: 6) }
 }
 
 /// The clock colon's sine breath (§1.1 motion inventory item 3): ~1 Hz opacity
