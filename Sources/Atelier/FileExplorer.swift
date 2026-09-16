@@ -7,7 +7,7 @@ import CoreServices
 ///
 /// Reads the filesystem lazily (children on first expand), hides `.git`,
 /// and dims what `.gitignore` excludes the way VSCode does. Single click on
-/// a file *previews* it (soft-wrapped, read-only, focus stays here); double
+/// a file *previews* it (soft-wrapped, focus stays here); double
 /// click or `↩` *commits* — the buffer opens for real and the tree folds to
 /// a thin rail whose chevron brings it back. Folders toggle on click. An
 /// FSEvents stream on the root keeps the tree honest while the agent and

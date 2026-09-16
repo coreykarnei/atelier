@@ -34,9 +34,13 @@ final class EditorPane: NSView, WorkspacePane {
     private var explorerWidth: NSLayoutConstraint!
     /// Wide (browsing) or folded to the rail (a file is open for real).
     private var explorerExpanded = true
-    /// The buffer is a click-preview: soft-wrapped, read-only, not the
-    /// session's file — persistence and the language server ignore it.
+    /// The buffer is a click-preview: soft-wrapped, not yet the session's
+    /// file — persistence and the language server ignore it. Editable all
+    /// the same: the first keystroke quietly makes it the real buffer (wrap
+    /// and tree left as they are, so nothing shifts under the caret).
     private(set) var isPreview = false
+    /// Soft-wrap follows the preview in, and leaves on a gesture commit only.
+    private var isWrapped = false
     /// What the session persists: the committed file only.
     var committedFilePath: String? { isPreview ? nil : filePath }
 
@@ -103,7 +107,7 @@ final class EditorPane: NSView, WorkspacePane {
 
     /// ⌘+/⌘−/⌘0 — the buffer rides the same content scale as the terminals.
     @objc private func typeScaleChanged() {
-        controller?.configuration = Self.configuration(preview: isPreview)
+        controller?.configuration = Self.configuration(wrap: isWrapped)
     }
 
     override func updateLayer() {
@@ -195,19 +199,23 @@ final class EditorPane: NSView, WorkspacePane {
     /// builds the editor; later opens reuse it. Any unsaved edits in the
     /// previous file are the caller's problem to guard.
     ///
-    /// `preview` (a tree click): soft-wrapped and read-only, tree stays wide,
-    /// nothing told to the server or to persistence. Committing the same path
-    /// afterwards just flips the configuration — the text doesn't reload.
+    /// `preview` (a tree click): soft-wrapped, tree stays wide, nothing told
+    /// to the server or to persistence until you either commit by gesture
+    /// (double-click/↩: unwrap, fold the tree) or simply start typing.
+    /// Committing the same path afterwards flips configuration only — the
+    /// text doesn't reload.
     func open(path: String, preview: Bool = false) throws {
         // Clicking the file that's already here changes nothing — a committed
         // buffer must not fall back to a read-only preview of itself.
         if preview, filePath == path { return }
-        if !preview, isPreview, filePath == path, let controller {
-            // Preview → real: same text, editable, unwrapped, the server
+        if !preview, filePath == path, let controller, isPreview || isWrapped {
+            // Preview → real by gesture: same text, unwrapped, the server
             // learns of it, the tree folds away.
+            let wasPreview = isPreview
             isPreview = false
-            controller.configuration = Self.configuration(preview: false)
-            announceOpen(path: path, text: controller.text)
+            isWrapped = false
+            controller.configuration = Self.configuration(wrap: false)
+            if wasPreview { announceOpen(path: path, text: controller.text) }
             setExplorerExpanded(false)
             return
         }
@@ -223,25 +231,26 @@ final class EditorPane: NSView, WorkspacePane {
             clearDiagnostics()
         }
         isPreview = preview
+        isWrapped = preview
 
         if let controller {
-            controller.configuration = Self.configuration(preview: preview)
+            controller.configuration = Self.configuration(wrap: preview)
             controller.language = language
             controller.text = text
         } else {
             let controller = TextViewController(
                 string: text,
                 language: language,
-                configuration: Self.configuration(preview: preview),
+                configuration: Self.configuration(wrap: preview),
                 cursorPositions: [CursorPosition(line: 1, column: 1)],
                 coordinators: [changeCoordinator]
             )
             changeCoordinator.onTextChange = { [weak self] in self?.bufferChanged() }
+            controller.view.translatesAutoresizingMaskIntoConstraints = false
+            contentHost.addSubview(controller.view) // loads the view; the scroll view exists from here
             // Free two-axis scrolling: with wrapping off a code view is a plane,
             // and AppKit's axis lock makes diagonal trackpad gestures stutter.
             controller.scrollView?.usesPredominantAxisScrolling = false
-            controller.view.translatesAutoresizingMaskIntoConstraints = false
-            contentHost.addSubview(controller.view)
             NSLayoutConstraint.activate([
                 controller.view.topAnchor.constraint(equalTo: contentHost.topAnchor),
                 controller.view.leadingAnchor.constraint(equalTo: contentHost.leadingAnchor),
@@ -277,6 +286,12 @@ final class EditorPane: NSView, WorkspacePane {
     /// (full-document sync — the buffer is small and the protocol allows it).
     private func bufferChanged() {
         isDirty = true
+        if isPreview, let filePath, let controller {
+            // Typing into a preview makes it the buffer — quietly. Wrap and
+            // the tree stay put; the server is told; persistence now sees it.
+            isPreview = false
+            announceOpen(path: filePath, text: controller.text)
+        }
         if Settings.autosave, !isPreview {
             autosaveDebounce?.invalidate()
             autosaveDebounce = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
@@ -402,8 +417,8 @@ final class EditorPane: NSView, WorkspacePane {
     /// fieldAlpha so the behind-window blur reads through, JetBrains Mono at
     /// terminal size. Minimap off — not this app's furniture. Bracket
     /// emphasis nil: the default flash is a motion the inventory doesn't own.
-    /// A preview wraps to the pane and refuses edits — reading, not writing.
-    private static func configuration(preview: Bool) -> SourceEditorConfiguration {
+    /// A preview wraps to the pane; everything else is identical.
+    private static func configuration(wrap: Bool) -> SourceEditorConfiguration {
         SourceEditorConfiguration(
             appearance: .init(
                 theme: EditorTheme(
@@ -425,11 +440,11 @@ final class EditorPane: NSView, WorkspacePane {
                     comments: .init(color: Theme.Editor.comment, italic: true)
                 ),
                 font: Theme.Typography.mono(Theme.TypeScale.current),
-                wrapLines: preview,
+                wrapLines: wrap,
                 tabWidth: 4,
                 bracketPairEmphasis: nil
             ),
-            behavior: .init(isEditable: !preview, indentOption: .spaces(count: 4)),
+            behavior: .init(indentOption: .spaces(count: 4)),
             layout: .init(),
             peripherals: .init(showGutter: true, showMinimap: false)
         )
