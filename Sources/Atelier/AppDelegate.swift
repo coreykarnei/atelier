@@ -227,6 +227,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             keyController?.debugSeedAttention()
         case .toggleExplorer:
             keyController?.toggleExplorer()
+        case .explorerSearch:
+            keyController?.debugExplorerSearch(debug.path)
         case .lspProbe:
             let path = debug.path
             let controller = keyController ?? projects.first

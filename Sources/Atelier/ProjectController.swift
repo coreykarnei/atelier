@@ -131,7 +131,10 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// reconciling snapshot alpha probes with the live tree.
     var debugWashState: String {
         var lines = [activeSession.map { "\(title): \($0.shellPane.debugWashState)" } ?? "no session"]
-        if let editor = activeSession?.editorPane { lines.append("editor: \(editor.debugGeometry)") }
+        if let editor = activeSession?.editorPane {
+            lines.append("editor: \(editor.debugGeometry)")
+            lines.append("  \(editor.explorer.debugGeometry)")
+        }
         func walk(_ view: NSView, depth: Int) {
             let bg = view.layer?.backgroundColor
             let alpha = bg?.alpha ?? 0
@@ -508,6 +511,11 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// session's cwd; Split mode flips back to the Triptych so the buffer is
     /// actually on screen. (`⌘P`'s summon picker replaces this as the fast
     /// path in M2.2; the panel stays as the native fallback.)
+    /// Dev-only: drive the explorer's search bar from the socket.
+    func debugExplorerSearch(_ query: String) {
+        activeSession?.editorPane.explorer.debugSetQuery(query)
+    }
+
     /// ⌘B — the editor's file tree, shown or hidden for every session.
     func toggleExplorer() {
         guard let session = activeSession, session.state == .ide, !session.isRemote else { return }

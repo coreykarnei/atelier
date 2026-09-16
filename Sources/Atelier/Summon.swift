@@ -212,6 +212,14 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
         refilter(preserving: keep)
     }
 
+    /// Host-driven query (dev snapshots): as if typed.
+    func setQuery(_ text: String) {
+        field.stringValue = text
+        query = text
+        refilter()
+        onQueryChange?(text)
+    }
+
     /// Host-driven reset (the explorer's search after an open): empty field,
     /// full offer, listeners told.
     func clearQuery() {

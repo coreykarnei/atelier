@@ -181,7 +181,7 @@ final class FileExplorerView: NSView {
             guard searching != self.isSearching else { return }
             self.isSearching = searching
             self.scroll.isHidden = searching || self.isCollapsed
-            self.needsLayout = true
+            self.sizeSearchList()
         }
         search.onActivate = { [weak self] item in
             guard let self, let root = self.root else { return }
@@ -288,13 +288,34 @@ final class FileExplorerView: NSView {
     /// Search bar's field — the place ⌃⌘H-then-type wants to land.
     var searchField: NSView { search.focusField }
 
+    /// Dev-only (snapshots): geometry of the sidebar's parts.
+    var debugGeometry: String {
+        "explorer bounds=\(bounds.size) collapsed=\(isCollapsed) searching=\(isSearching) "
+            + "header=\(header.frame) search=\(search.frame) listH=\(searchListHeight.constant) "
+            + "tree=\(scroll.frame) treeHidden=\(scroll.isHidden) searchHidden=\(search.isHidden) "
+            + "hasAmbiguous=\(search.hasAmbiguousLayout)"
+    }
+
+    /// Dev-only (snapshots): put a query in the bar as if typed.
+    func debugSetQuery(_ query: String) {
+        window?.makeFirstResponder(search.focusField)
+        search.setQuery(query)
+    }
+
     /// The list under the search bar sizes to the pane while a query is
     /// live, and to nothing otherwise (the field stays; the tree follows).
+    /// The field block's height is measured, not guessed.
+    private func sizeSearchList() {
+        let fieldBlock = search.frame.height - searchListHeight.constant
+        let target = isSearching ? max(0, bounds.height - header.frame.height - fieldBlock) : 0
+        guard searchListHeight.constant != target else { return }
+        searchListHeight.constant = target
+        layoutSubtreeIfNeeded()
+    }
+
     override func layout() {
         super.layout()
-        let fieldBlock: CGFloat = 46 // field padding + divider + list bottom pad
-        let target = isSearching ? max(0, bounds.height - 26 - fieldBlock) : 0
-        if searchListHeight.constant != target { searchListHeight.constant = target }
+        if isSearching { sizeSearchList() }
     }
 
     /// Refill the search offer from `git ls-files` — on root change and on
