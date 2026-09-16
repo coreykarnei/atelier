@@ -33,3 +33,12 @@ local override by package identity, the same way `Vendor/CodeEditSymbols` is.
    `TextView/TextView.swift`). Upstream binds add-caret to ⌃⇧-click only;
    ⌥-click now does the same (VSCode). `onCommandClick` lets the host treat
    ⌘-click as go-to-definition.
+
+4. **Recycled fragment views are detached, not hidden**
+   (`Utils/ViewReuseQueue.swift`). `enqueueView` set `isHidden = true` on a
+   subview of the first-responder text view; when that ran inside a key
+   event (⇧⌥↓ → layout), AppKit's `_setHidden:` moved first responder to
+   the window, so the following ⌘Z had no target. Layout re-adds every
+   fragment view it lays out, so `removeFromSuperviewWithoutNeedingDisplay`
+   is equivalent and side-effect free. Also adds `TextView.debugTrace` /
+   `TextViewController.debugTrace` dev hooks (nil in production).

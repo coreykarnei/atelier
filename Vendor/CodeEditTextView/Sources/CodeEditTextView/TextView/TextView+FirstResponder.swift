@@ -16,6 +16,7 @@ extension TextView {
     }
 
     open override func resignFirstResponder() -> Bool {
+        trace("resignFirstResponder")
         isFirstResponder = false
         selectionManager.removeCursors()
         needsDisplay = true

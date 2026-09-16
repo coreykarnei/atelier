@@ -229,6 +229,70 @@ final class EditorPane: NSView, WorkspacePane {
     /// `probe:dupundo` instead exercises ⇧⌥↓ then ⌘Z on the buffer and
     /// writes what happened to ~/.local/state/atelier/probe.txt.
     func debugExplorer(_ query: String) {
+        if query == "probe:keys" {
+            // The real path: synthesized key events through NSApp.sendEvent —
+            // the library's local monitor, then the menu's key equivalent.
+            if controller == nil {
+                let scratch = NSTemporaryDirectory() + "atelier-probe.md"
+                try? "alpha\nbeta\ngamma\n".write(toFile: scratch, atomically: true, encoding: .utf8)
+                try? open(path: scratch)
+                reveal(line: 2, column: 1)
+            }
+            guard let controller, let window, let textView = controller.textView else { return }
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            window.makeFirstResponder(textView)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self, weak controller, weak window, weak textView] in
+            guard let self, let controller, let window, let textView else { return }
+            _ = self
+            window.makeFirstResponder(textView)
+            var log: [String] = []
+            func fr() -> String { window.firstResponder.map { String(describing: type(of: $0)) } ?? "nil" }
+            func key(_ chars: String, _ code: UInt16, _ mods: NSEvent.ModifierFlags) {
+                for type in [NSEvent.EventType.keyDown, .keyUp] {
+                    if let event = NSEvent.keyEvent(
+                        with: type, location: .zero, modifierFlags: mods, timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil, characters: chars, charactersIgnoringModifiers: chars,
+                        isARepeat: false, keyCode: code
+                    ) { NSApp.sendEvent(event) }
+                    log.append("\(type == .keyDown ? "down" : "up")(\(code)) fr=\(fr()) len=\(controller.text.count)")
+                }
+            }
+            log.append("start fr=\(fr())")
+            TextViewController.debugTrace = { line in log.append("  lib: " + line) }
+            TextView.debugTrace = { line in log.append("  lib: " + line) }
+            defer { TextViewController.debugTrace = nil; TextView.debugTrace = nil }
+            let before = controller.text
+            key(String(UnicodeScalar(UInt16(NSDownArrowFunctionKey))!), 125, [.shift, .option, .function, .numericPad])
+            let after = controller.text
+            key("z", 6, [.command])
+            let undone = controller.text
+            let report = "keys: before=\(before.count) after=\(after.count) undone=\(undone.count) restored=\(undone == before) "
+                + "key=\(window.isKeyWindow) canUndo=\(textView.undoManager?.canUndo ?? false)\n" + log.joined(separator: "\n") + "\n"
+            try? report.write(toFile: NSHomeDirectory() + "/.local/state/atelier/probe.txt", atomically: true, encoding: .utf8)
+            }
+            return
+        }
+        if query == "probe:steps" {
+            guard let controller, let window, let textView = controller.textView else { return }
+            window.makeFirstResponder(textView)
+            var log: [String] = []
+            func fr() -> String { window.firstResponder.map { String(describing: type(of: $0)) } ?? "nil" }
+            log.append("start fr=\(fr())")
+            textView.undoManager?.beginUndoGrouping()
+            log.append("begin fr=\(fr())")
+            let len = (controller.text as NSString).length
+            textView.replaceCharacters(in: [NSRange(location: len, length: 0)], with: "delta\n")
+            log.append("replace fr=\(fr())")
+            controller.setCursorPositions([CursorPosition(range: NSRange(location: len, length: 5))], scrollToVisible: true)
+            log.append("setCursor fr=\(fr())")
+            textView.undoManager?.endUndoGrouping()
+            log.append("end fr=\(fr())")
+            controller.duplicateLines(above: false)
+            log.append("dupDirect fr=\(fr())")
+            try? (log.joined(separator: "\n") + "\n").write(toFile: NSHomeDirectory() + "/.local/state/atelier/probe.txt", atomically: true, encoding: .utf8)
+            return
+        }
         if query == "probe:dupundo" {
             if controller == nil {
                 let scratch = NSTemporaryDirectory() + "atelier-probe.md"

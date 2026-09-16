@@ -49,12 +49,14 @@ public class ViewReuseQueue<View: NSView, Key: Hashable> {
     /// - Parameter key: The key for the view to reuse.
     public func enqueueView(forKey key: Key) {
         guard let view = usedViews[key] else { return }
+        // Atelier patch: detach rather than hide. Hiding a subview of the
+        // first responder mid-key-event made AppKit's `_setHidden:` move
+        // first responder to the window — ⇧⌥↓ then ⌘Z went nowhere. Layout
+        // re-adds every fragment view it uses, so detaching costs nothing.
+        view.removeFromSuperviewWithoutNeedingDisplay()
         if queuedViews.count < usedViews.count {
             queuedViews.append(view)
             view.frame = .zero
-            view.isHidden = true
-        } else {
-            view.removeFromSuperviewWithoutNeedingDisplay()
         }
         usedViews.removeValue(forKey: key)
     }

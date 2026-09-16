@@ -204,7 +204,12 @@ extension TextViewController {
         }
     }
 
+    /// Atelier dev hook: trace the key path (first responder before/after).
+    public static var debugTrace: ((String) -> Void)?
+
     func handleEvent(event: NSEvent) -> NSEvent? {
+        Self.debugTrace?("handleEvent \(event.type.rawValue) fr=\(view.window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil")")
+        defer { Self.debugTrace?("handleEvent done fr=\(view.window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil")") }
         let modifierFlags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         switch event.type {
         case .keyDown:

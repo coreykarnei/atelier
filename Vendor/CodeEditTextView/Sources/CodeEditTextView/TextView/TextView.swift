@@ -150,6 +150,11 @@ open class TextView: NSView, NSTextContent {
     /// Atelier: ⌘-click lands here with the clicked offset — the host jumps
     /// to the definition. Nil = a plain click.
     public var onCommandClick: ((Int) -> Void)?
+    /// Atelier dev hook.
+    public static var debugTrace: ((String) -> Void)?
+    func trace(_ what: String) {
+        Self.debugTrace?("tv: \(what) fr=\(window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil")")
+    }
 
     public var isSelectable: Bool = true {
         didSet {
