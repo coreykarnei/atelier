@@ -58,7 +58,7 @@ extension TextView {
         // Atelier patch: judge visibility by the caret, not the selection's
         // bounding box (see `scrollSelectionToVisible`).
         if let selection = selectionManager.textSelections.first,
-           let caret = caretRect(for: selection), !visibleRect.contains(caret) {
+           let caret = caretRect(for: selection, padded: false), !visibleRect.contains(caret) {
             scrollSelectionToVisible()
         }
     }

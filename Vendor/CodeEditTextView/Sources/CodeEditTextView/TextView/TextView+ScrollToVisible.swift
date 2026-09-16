@@ -30,7 +30,7 @@ extension TextView {
         // pass and scroll to that rect.
 
         var lastFrame: CGRect = .zero
-        while let caretRect = getSelection().flatMap(caretRect(for:)), lastFrame != caretRect {
+        while let caretRect = getSelection().flatMap({ caretRect(for: $0, padded: true) }), lastFrame != caretRect {
             lastFrame = caretRect
             layoutManager.layoutLines()
             selectionManager.updateSelectionViews()
@@ -115,14 +115,23 @@ extension TextView {
             .first
     }
 
-    /// The rect to keep on screen for a selection: the caret's line-height
-    /// slice at its moving end, padded a little so the caret isn't flush
-    /// against the edge. Nil until that offset has a laid-out rect.
-    func caretRect(for selection: TextSelectionManager.TextSelection) -> CGRect? {
+    /// The caret's rect at the selection's moving end. Nil until that offset
+    /// has a laid-out rect.
+    ///
+    /// `padded` is the rect to *reveal*: the caret plus a margin — a quarter
+    /// of the viewport sideways (capped), one line up and down — so a caret
+    /// that was off screen lands with room around it instead of flush
+    /// against the edge it came in from (the VSCode/Sublime manner). The
+    /// unpadded rect is the one to *test* visibility with, so a caret that
+    /// is already on screen never moves the view.
+    func caretRect(for selection: TextSelectionManager.TextSelection, padded: Bool = false) -> CGRect? {
         guard var rect = layoutManager.rectForOffset(offsetNotPivot(selection)) else { return nil }
-        rect.origin.x -= 8
-        rect.size.width = 16
-        return rect
+        rect.size.width = max(rect.width, 1)
+        guard padded else { return rect }
+        let viewport = scrollView?.contentSize ?? visibleRect.size
+        let sidePad = min(max(viewport.width * 0.25, 24), 160)
+        let linePad = rect.height
+        return rect.insetBy(dx: -sidePad, dy: -linePad)
     }
 
     /// Returns the offset that isn't the pivot of the selection.

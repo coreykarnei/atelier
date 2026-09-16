@@ -237,6 +237,9 @@ final class EditorPane: NSView, WorkspacePane {
                 coordinators: [changeCoordinator]
             )
             changeCoordinator.onTextChange = { [weak self] in self?.bufferChanged() }
+            // Free two-axis scrolling: with wrapping off a code view is a plane,
+            // and AppKit's axis lock makes diagonal trackpad gestures stutter.
+            controller.scrollView?.usesPredominantAxisScrolling = false
             controller.view.translatesAutoresizingMaskIntoConstraints = false
             contentHost.addSubview(controller.view)
             NSLayoutConstraint.activate([
