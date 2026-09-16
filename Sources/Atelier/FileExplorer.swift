@@ -22,6 +22,15 @@ final class FileExplorerView: NSView {
     /// The chevron — rail wants to expand, header wants to fold.
     var onToggle: (() -> Void)?
 
+    /// Where a top-level row's disclosure chevron is centred, in the outline's
+    /// x — the indent guides and sticky rows key off it.
+    static let chevronCenterX: CGFloat = 8
+
+    /// Sticky folder headers (VSCode's sticky scroll): the ancestor chain of
+    /// the row scrolled under the top edge stays pinned there, so you always
+    /// know which folder you're inside. Click one to jump back to it.
+    private let sticky = StickyFolderStack()
+
     /// Folded to the rail: only the chevron shows.
     private(set) var isCollapsed = false
     private let header = NSView()
@@ -179,7 +188,23 @@ final class FileExplorerView: NSView {
         scroll.scrollerStyle = .overlay
         scroll.contentInsets = NSEdgeInsets(top: 2, left: 0, bottom: 6, right: 0)
         scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(treeScrolled), name: NSView.boundsDidChangeNotification, object: scroll.contentView
+        )
+        sticky.translatesAutoresizingMaskIntoConstraints = false
+        sticky.isHidden = true
+        sticky.onJump = { [weak self] node in
+            guard let self else { return }
+            let row = self.outline.row(forItem: node)
+            guard row >= 0 else { return }
+            let rect = self.outline.rect(ofRow: row)
+            self.scroll.contentView.scroll(to: NSPoint(x: 0, y: rect.minY - self.scroll.contentInsets.top))
+            self.scroll.reflectScrolledClipView(self.scroll.contentView)
+        }
         addSubview(scroll)
+
+        addSubview(sticky)
 
         // The hairline that seats the tree beside the buffer.
         let edge = NSView()
@@ -299,6 +324,9 @@ final class FileExplorerView: NSView {
             searchHostHeight,
             modeControl.topAnchor.constraint(equalTo: searchHost.topAnchor, constant: 4),
             modeControl.leadingAnchor.constraint(equalTo: searchHost.leadingAnchor, constant: 10),
+            sticky.topAnchor.constraint(equalTo: searchHost.bottomAnchor),
+            sticky.leadingAnchor.constraint(equalTo: leadingAnchor),
+            sticky.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -1),
             scroll.topAnchor.constraint(equalTo: searchHost.bottomAnchor),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -355,13 +383,37 @@ final class FileExplorerView: NSView {
     var debugGeometry: String {
         "explorer bounds=\(bounds.size) collapsed=\(isCollapsed) searchOpen=\(isSearchOpen) files=\(filesOn) text=\(textOn) "
             + "header=\(header.frame) host=\(searchHost.frame) search=\(search.frame) rows=\(fileRows.count)+\(textRows.count) "
-            + "tree=\(scroll.frame) treeHidden=\(scroll.isHidden)"
+            + "tree=\(scroll.frame) treeHidden=\(scroll.isHidden) sticky=\(sticky.frame) stickyHidden=\(sticky.isHidden) "
+            + "clipY=\(scroll.contentView.bounds.minY) topRow=\(outline.row(at: NSPoint(x: 1, y: scroll.contentView.bounds.minY + 1)))"
     }
 
     /// Dev-only (snapshots): open the panel and type `query`; trailing `↓`
     /// characters are arrow presses (they arrive after the text search
     /// lands, so the row set is the real one).
     func debugSetQuery(_ query: String) {
+        // `tree:expand=a,b/c;scroll=300` — drive the tree instead.
+        if query.hasPrefix("tree:") {
+            closeSearch(focusTree: false)
+            for part in query.dropFirst(5).split(separator: ";") {
+                let kv = part.split(separator: "=", maxSplits: 1).map(String.init)
+                guard kv.count == 2, let root else { continue }
+                if kv[0] == "expand" {
+                    for rel in kv[1].split(separator: ",") {
+                        var node = rootNode
+                        var walked = root
+                        for component in rel.split(separator: "/") {
+                            walked += "/" + component
+                            node = node?.children(hidingIgnored: false).first { $0.path == walked }
+                            if let node { outline.expandItem(node) }
+                        }
+                    }
+                } else if kv[0] == "scroll", let y = Double(kv[1]) {
+                    scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+                    scroll.reflectScrolledClipView(scroll.contentView)
+                }
+            }
+            return
+        }
         openSearch()
         let downs = query.reversed().prefix { $0 == "↓" }.count
         search.setQuery(String(query.dropLast(downs)))
@@ -387,6 +439,9 @@ final class FileExplorerView: NSView {
     /// field takes focus; the offer is what the toggles say.
     func openSearch() {
         guard root != nil else { return }
+        // The button now means "back to the tree".
+        magnifier.image = Self.symbol("list.bullet.indent", size: 11)
+        magnifier.toolTip = "Back to files (Esc)"
         modeControl.setSelected(filesOn, forSegment: 0)
         modeControl.setSelected(textOn, forSegment: 1)
         isSearchOpen = true
@@ -399,6 +454,8 @@ final class FileExplorerView: NSView {
 
     /// Close the panel: query cleared, tree back, focus to it if asked.
     func closeSearch(focusTree: Bool) {
+        magnifier.image = Self.symbol("magnifyingglass", size: 11)
+        magnifier.toolTip = "Search files and text (⌘⇧E)"
         search.clearQuery()
         textRows = []
         guard isSearchOpen else { return }
@@ -464,6 +521,41 @@ final class FileExplorerView: NSView {
             self.fileOffer = items
             if self.isSearchOpen { self.runSearch(self.liveQuery) }
         }
+    }
+
+    // MARK: Sticky folders
+
+    @objc private func treeScrolled() { updateSticky() }
+
+    /// The ancestors of the row under the sticky stack, root-most first.
+    /// Two passes: the stack's own height changes which row is "under" it.
+    private func updateSticky() {
+        guard !scroll.isHidden, rootNode != nil else { sticky.isHidden = true; return }
+        let rowHeight = outline.rowHeight
+        func ancestors(under stackHeight: CGFloat) -> [FileNode] {
+            let y = scroll.contentView.bounds.minY + stackHeight + 1
+            let row = outline.row(at: NSPoint(x: 1, y: y))
+            guard row >= 0, let item = outline.item(atRow: row) else { return [] }
+            var chain: [FileNode] = []
+            var node: Any? = outline.parent(forItem: item)
+            while let parent = node as? FileNode {
+                chain.insert(parent, at: 0)
+                node = outline.parent(forItem: parent)
+            }
+            // A folder whose own row is still visible below the stack doesn't
+            // need pinning yet.
+            return chain.filter { outline.rect(ofRow: outline.row(forItem: $0)).minY < y }
+        }
+        var chain = ancestors(under: 0)
+        chain = ancestors(under: CGFloat(chain.count) * rowHeight)
+        guard !chain.isEmpty, scroll.contentView.bounds.minY > -scroll.contentInsets.top + 1 else {
+            sticky.isHidden = true
+            return
+        }
+        sticky.isHidden = false
+        sticky.show(chain.map { node in
+            (node, outline.level(forItem: node), isIgnored(node.path))
+        }, rowHeight: rowHeight, step: outline.indentationPerLevel)
     }
 
     // MARK: Actions
@@ -595,6 +687,7 @@ final class FileExplorerView: NSView {
     private func reload() {
         rootNode?.invalidateDeep()
         outline.reloadData()
+        updateSticky()
         if let revealedPath { reveal(path: revealedPath, scroll: false) }
         refreshIgnored()
         refreshOffer()
@@ -621,8 +714,14 @@ extension FileExplorerView: NSOutlineViewDataSource, NSOutlineViewDelegate {
     }
 
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
-        ExplorerRowView()
+        let row = ExplorerRowView()
+        row.depth = outlineView.level(forItem: item)
+        row.guideStep = outlineView.indentationPerLevel
+        return row
     }
+
+    func outlineViewItemDidExpand(_ notification: Notification) { updateSticky() }
+    func outlineViewItemDidCollapse(_ notification: Notification) { updateSticky() }
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         guard let node = item as? FileNode else { return nil }
@@ -690,7 +789,24 @@ final class FileNode: NSObject {
 /// Selection as a soft surface0 pad, inset like the tab chips — never the
 /// system accent.
 private final class ExplorerRowView: NSTableRowView {
-    override func drawBackground(in dirtyRect: NSRect) {} // the pane's crust shows through
+    /// Nesting level; one indent guide per ancestor.
+    var depth = 0
+    var guideStep: CGFloat = 12
+
+    /// The pane's crust shows through; the only paint is the indent guides —
+    /// a hairline under each ancestor's chevron, so a folder's extent reads
+    /// as a vertical line down its children (owner ask 2026-09-15).
+    override func drawBackground(in dirtyRect: NSRect) {} // AppKit skips this on a clear table anyway
+    override func draw(_ dirtyRect: NSRect) {
+        if depth > 0 {
+            Theme.Elevation.hairline.setFill()
+            for level in 0..<depth {
+                let x = FileExplorerView.chevronCenterX + guideStep * CGFloat(level)
+                NSRect(x: x - 0.5, y: 0, width: 1, height: bounds.height).fill()
+            }
+        }
+        super.draw(dirtyRect)
+    }
     override func drawSelection(in dirtyRect: NSRect) {
         guard selectionHighlightStyle != .none else { return }
         let rect = bounds.insetBy(dx: 6, dy: 1)
@@ -742,5 +858,124 @@ private final class ExplorerCellView: NSTableCellView {
             .applying(.init(paletteColors: [Theme.chromeMutedText]))
         icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(config)
         icon.alphaValue = dimmed ? 0.6 : 1
+    }
+}
+
+
+// MARK: - Sticky folder stack
+
+/// The pinned ancestor rows over the tree. Each row mirrors the tree's own
+/// cell — chevron (open), folder glyph, name — at the same indentation, on
+/// the pane's crust with a hairline beneath, so it reads as the tree
+/// having stuck rather than a separate toolbar.
+private final class StickyFolderStack: NSView {
+    var onJump: ((FileNode) -> Void)?
+    private var rows: [StickyRow] = []
+    private let hairline = NSView()
+    private var heightConstraint: NSLayoutConstraint!
+
+    /// Opaque crust: the rows scroll on underneath, and a translucent strip
+    /// would show their text through the pinned names. The one place the
+    /// sidebar gives up its blur, on purpose.
+    private static var fill: CGColor { Theme.Elevation.crust.withAlphaComponent(1).cgColor }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = Self.fill
+        hairline.wantsLayer = true
+        hairline.layer?.backgroundColor = Theme.Elevation.hairline.cgColor
+        hairline.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hairline)
+        heightConstraint = heightAnchor.constraint(equalToConstant: 0)
+        NSLayoutConstraint.activate([
+            heightConstraint,
+            hairline.leadingAnchor.constraint(equalTo: leadingAnchor),
+            hairline.trailingAnchor.constraint(equalTo: trailingAnchor),
+            hairline.bottomAnchor.constraint(equalTo: bottomAnchor),
+            hairline.heightAnchor.constraint(equalToConstant: 1),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func updateLayer() {
+        layer?.backgroundColor = Self.fill
+    }
+
+    func show(_ chain: [(node: FileNode, level: Int, dimmed: Bool)], rowHeight: CGFloat, step: CGFloat) {
+        while rows.count < chain.count {
+            let row = StickyRow(frame: .zero)
+            row.onClick = { [weak self] node in self?.onJump?(node) }
+            addSubview(row, positioned: .below, relativeTo: hairline)
+            rows.append(row)
+        }
+        for (index, row) in rows.enumerated() {
+            guard index < chain.count else { row.isHidden = true; continue }
+            row.isHidden = false
+            let entry = chain[index]
+            row.frame = NSRect(x: 0, y: bounds.height - rowHeight * CGFloat(index + 1), width: bounds.width, height: rowHeight)
+            row.autoresizingMask = [.width, .minYMargin]
+            row.configure(node: entry.node, level: entry.level, step: step, dimmed: entry.dimmed)
+        }
+        heightConstraint.constant = rowHeight * CGFloat(chain.count) + 1
+        // Re-seat rows after the height change lands.
+        layoutSubtreeIfNeeded()
+        for (index, row) in rows.enumerated() where index < chain.count {
+            row.frame = NSRect(x: 0, y: bounds.height - 1 - rowHeight * CGFloat(index + 1), width: bounds.width, height: rowHeight)
+        }
+    }
+}
+
+private final class StickyRow: NSView {
+    var onClick: ((FileNode) -> Void)?
+    private var node: FileNode?
+    private let chevron = NSImageView()
+    private let icon = NSImageView()
+    private let label = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        chevron.imageScaling = .scaleNone
+        icon.imageScaling = .scaleProportionallyDown
+        label.font = Theme.Typography.ui(Theme.Typography.body)
+        label.lineBreakMode = .byTruncatingMiddle
+        for view in [chevron, icon, label] { addSubview(view) }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(node: FileNode, level: Int, step: CGFloat, dimmed: Bool) {
+        self.node = node
+        let muted = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
+            .applying(.init(paletteColors: [Theme.chromeMutedText]))
+        chevron.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?.withSymbolConfiguration(muted)
+        let folder = NSImage.SymbolConfiguration(pointSize: 11, weight: .regular)
+            .applying(.init(paletteColors: [Theme.chromeMutedText]))
+        icon.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)?.withSymbolConfiguration(folder)
+        label.stringValue = node.name
+        label.font = Theme.Typography.ui(Theme.Typography.body)
+        label.textColor = dimmed ? Theme.chromeMutedText : Theme.chromeText
+        let indent = step * CGFloat(level)
+        let midY = bounds.midY
+        chevron.frame = NSRect(x: indent + FileExplorerView.chevronCenterX - 7, y: midY - 7, width: 14, height: 14)
+        // Mirrors ExplorerCellView: icon 2pt in from the cell's leading edge,
+        // label 5pt after it. The cell begins after the chevron column (16pt).
+        let cellX = indent + 16
+        icon.frame = NSRect(x: cellX + 2, y: midY - 7, width: 14, height: 14)
+        label.sizeToFit()
+        label.frame = NSRect(x: cellX + 21, y: midY - label.frame.height / 2,
+                             width: max(0, bounds.width - cellX - 27), height: label.frame.height)
+    }
+
+    override func layout() {
+        super.layout()
+        if let node { configure(node: node, level: Int((chevron.frame.midX - FileExplorerView.chevronCenterX) / 12), step: 12, dimmed: label.textColor == Theme.chromeMutedText) }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if let node { onClick?(node) }
     }
 }
