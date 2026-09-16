@@ -5,7 +5,9 @@ spec for *what* Atelier is and what it deliberately is not; this document record
 *how* it gets built — the load-bearing technical decisions, the components, and the
 order in which they ship.
 
-**Status: Milestones 0 and 1 built; Milestone 2 (the editor) is next.** M0 proved
+**Status: v1.0.0 (2026-09-16) — Milestones 0, 1 and 2 built, the polish pass
+(docs/POLISH_PLAN.md) through all phases; Milestone 3's items landed along
+the way.** M0 proved
 the bet (see the [M0 devlog](docs/devlog/2026-06-01-milestone-0.md)); M1 built the
 workspace around it (designed in [docs/MILESTONE_1.md](docs/MILESTONE_1.md), built
 per the [M1 devlog](docs/devlog/2026-06-10-milestone-1.md)). Decisions marked
@@ -261,19 +263,20 @@ as tabs, the Landing/promote flow, the `atelier` CLI, per-tab agent state, and
 the M3 click-to-focus affordance pulled forward. `docs/MILESTONE_1.md` is the
 as-built record.
 
-### Milestone 2 — The editor, incrementally
+### Milestone 2 — The editor, incrementally ✅ (built 2026-07-13 → 2026-09-16)
 Each step is independently useful and shippable in order:
-1. Open / edit / save a buffer with tree-sitter highlighting.
-2. Fuzzy file picker on one chord (§3.4).
-3. Repo-wide search + results panel (§3.5).
-4. Multi-cursor + drag-select + find/replace.
-5. LSP client: go-to-definition, diagnostics (§3.3).
+1. Open / edit / save a buffer with tree-sitter highlighting. ✅ (M2.1; highlighting actually on 2026-09-16)
+2. Fuzzy file picker on one chord (§3.4). ✅ (M2.2, `⌘P`)
+3. Repo-wide search + results panel (§3.5). ✅ (M2.3, `⌘⇧F`; merged into the explorer's search panel 2026-09-15)
+4. Multi-cursor + drag-select + find/replace. ✅ (M2.4, library-native, VSCode chords 2026-09-15)
+5. LSP client: go-to-definition, diagnostics (§3.3). ✅ (M2.5; server registry + Python venv 2026-09-16)
+6. File explorer (added): tree of the session root with a search panel. ✅ (M2.6, 2026-09-15)
 
-### Milestone 3 — Polish to spec
-1. Catppuccin Mocha across editor theme, terminal palettes, and chrome.
-2. Transparency + native blur.
-3. Command palette completeness; full home-row keymap.
-4. Notification affordances (click-to-focus the relevant pane).
+### Milestone 3 — Polish to spec ✅ (landed across M1–M2 and the polish pass)
+1. Catppuccin Mocha across editor theme, terminal palettes, and chrome. ✅
+2. Transparency + native blur. ✅ (the transparency pipeline, 2026-07-14)
+3. Command palette completeness; full home-row keymap. ✅
+4. Notification affordances (click-to-focus the relevant pane). ✅ (banners focus the exact session)
 
 **Definition of done (from VISION.md):** a four-hour morning on a fresh worktree
 without once thinking about the tool — no escape-sequence hack, no double-copy

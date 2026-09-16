@@ -4,9 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-**Milestones 0 and 1 built (M1.1–M1.6 landed); polish pass
-(docs/POLISH_PLAN.md) built through all phases — 0 (foundation tokens),
-1 (cockpit), 2 (distances), 3 (arrivals), 4 (overlay physiology).** Read `VISION.md` (the
+**v1.0.0 tagged 2026-09-16. Milestones 0, 1 and 2 built (M1.1–M1.6,
+M2.1–M2.6 landed); polish pass (docs/POLISH_PLAN.md) built through all
+phases — 0 (foundation tokens), 1 (cockpit), 2 (distances), 3 (arrivals),
+4 (overlay physiology).** Read `VISION.md` (the
 authoritative *what*), `TECHNICAL_PLAN.md` (the *how* and the milestone
 sequence), and `docs/MILESTONE_1.md` (the workspace/layout/keymap/worktree/
 persistence design, as built) before proposing anything. The polish pass is
@@ -63,8 +64,9 @@ Milestone 1 (built; see `docs/MILESTONE_1.md`):
 - **Command palette** (`⌘⇧P`).
 
 Also built: per-tab attention state (§7.1 — the agent's exact state, always
-visible: blue dot working, peach dot waiting-on-you, peach `!` explicitly
-blocked, green dot unseen-completion → waiting on focus; fed by hooks carrying
+visible, every mark a plain dot since 2026-09-15: blue working, green your
+move — waiting, or an unseen completion that pulses until you look — and
+peach for the one blocked state; fed by hooks carrying
 `session_id`, banner clicks focus the exact session), **worktree folders** in
 the tab strip (2026-09-03: each root's tabs sit in a folder-shaped cell whose
 label tab names the worktree — `main` / `⎇ dir` / `@host` — stepped lighter/
@@ -88,7 +90,7 @@ a percentage); project/session items live in the File menu and "Find in
 Repo" reads "Find in Project"; bar and header buttons carry tooltips and
 accessibility labels. The pass is written up in `docs/devlog/2026-09-16-overlay-polish.md`.
 
-Milestone 2 (in progress): **M2.1 landed 2026-07-13** — the editor pane hosts a
+Milestone 2 (complete as of v1.0.0): **M2.1 landed 2026-07-13** — the editor pane hosts a
 real buffer (CodeEditSourceEditor / TextKit 2, incremental tree-sitter
 highlighting, `Theme.Editor` Mocha syntax palette, background `base` at
 fieldAlpha). `⌘O` open / `⌘S` save / dirty-close guard / per-session open-file
