@@ -13,15 +13,21 @@ import CodeEditTextView
 
 extension TextViewController {
     /// A caret on the neighbouring line at the same x for every selection.
+    /// Probes at the caret's own x (its rect's leading edge, nudged a hair
+    /// in) — probing mid-glyph rounded to the nearer boundary and drifted
+    /// left a column per press. Carets that land where one already is are
+    /// not added twice, so stepping past an existing caret merges (VSCode).
     func addCursor(above: Bool) {
         let layoutManager = textView.layoutManager!
+        let existing = Set(textView.selectionManager.textSelections.map(\.range.location))
         var added: [NSRange] = []
         for selection in textView.selectionManager.textSelections {
             let offset = above ? selection.range.location : selection.range.max
             guard let rect = layoutManager.rectForOffset(offset) else { continue }
             let y = above ? rect.minY - rect.height / 2 : rect.maxY + rect.height / 2
             guard y >= 0, y <= layoutManager.estimatedHeight(),
-                  let target = layoutManager.textOffsetAtPoint(CGPoint(x: rect.midX, y: y)) else { continue }
+                  let target = layoutManager.textOffsetAtPoint(CGPoint(x: rect.minX + 0.5, y: y)),
+                  !existing.contains(target), !added.contains(where: { $0.location == target }) else { continue }
             added.append(NSRange(location: target, length: 0))
         }
         for range in added { textView.selectionManager.addSelectedRange(range) }

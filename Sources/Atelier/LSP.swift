@@ -11,9 +11,158 @@ struct LSPDiagnostic {
     let message: String
 }
 
+import CodeEditLanguages
+
+/// Which language server to run for which buffer (M2.6). No extensions,
+/// no marketplace: a language server is a binary that speaks one protocol,
+/// so supporting a language is knowing its binary. Each entry lists
+/// candidates in preference order; the first one installed wins. The PATH
+/// is the owner's login-shell PATH (probed once), so whatever `npm i -g`,
+/// `uv tool install`, cargo or brew put on it is found — plus the usual
+/// tool bins for good measure. Nothing installed → the editor stays plain
+/// for that language, silently.
+enum LSPServers {
+    struct Spec {
+        let key: String
+        let languageId: String
+        let candidates: [[String]]
+    }
+
+    static func spec(for language: CodeLanguage) -> Spec? {
+        switch language.id {
+        case .swift:
+            return Spec(key: "swift", languageId: "swift", candidates: [["/usr/bin/xcrun", "sourcekit-lsp"]])
+        case .python:
+            return Spec(key: "python", languageId: "python", candidates: [
+                ["pyright-langserver", "--stdio"], ["basedpyright-langserver", "--stdio"],
+                ["pylsp"], ["jedi-language-server"],
+            ])
+        case .typescript, .tsx:
+            return Spec(key: "typescript", languageId: language.id == .tsx ? "typescriptreact" : "typescript",
+                        candidates: [["typescript-language-server", "--stdio"], ["deno", "lsp"]])
+        case .javascript, .jsx:
+            return Spec(key: "typescript", languageId: language.id == .jsx ? "javascriptreact" : "javascript",
+                        candidates: [["typescript-language-server", "--stdio"], ["deno", "lsp"]])
+        case .rust:
+            return Spec(key: "rust", languageId: "rust", candidates: [["rust-analyzer"]])
+        case .go, .goMod:
+            return Spec(key: "go", languageId: language.id == .goMod ? "go.mod" : "go", candidates: [["gopls"]])
+        case .c:
+            return Spec(key: "clangd", languageId: "c", candidates: [["clangd"]])
+        case .cpp:
+            return Spec(key: "clangd", languageId: "cpp", candidates: [["clangd"]])
+        case .objc:
+            return Spec(key: "clangd", languageId: "objective-c", candidates: [["clangd"]])
+        case .lua:
+            return Spec(key: "lua", languageId: "lua", candidates: [["lua-language-server"]])
+        case .bash:
+            return Spec(key: "bash", languageId: "shellscript", candidates: [["bash-language-server", "start"]])
+        case .json:
+            return Spec(key: "json", languageId: "json", candidates: [["vscode-json-language-server", "--stdio"]])
+        case .yaml:
+            return Spec(key: "yaml", languageId: "yaml", candidates: [["yaml-language-server", "--stdio"]])
+        case .html:
+            return Spec(key: "html", languageId: "html", candidates: [["vscode-html-language-server", "--stdio"]])
+        case .css:
+            return Spec(key: "css", languageId: "css", candidates: [["vscode-css-language-server", "--stdio"]])
+        case .ruby:
+            return Spec(key: "ruby", languageId: "ruby", candidates: [["ruby-lsp"], ["solargraph", "stdio"]])
+        case .zig:
+            return Spec(key: "zig", languageId: "zig", candidates: [["zls"]])
+        case .kotlin:
+            return Spec(key: "kotlin", languageId: "kotlin", candidates: [["kotlin-language-server"]])
+        case .markdown:
+            return Spec(key: "markdown", languageId: "markdown", candidates: [["marksman", "server"]])
+        case .toml:
+            return Spec(key: "toml", languageId: "toml", candidates: [["taplo", "lsp", "stdio"]])
+        case .dockerfile:
+            return Spec(key: "dockerfile", languageId: "dockerfile", candidates: [["docker-langserver", "--stdio"]])
+        case .elixir:
+            return Spec(key: "elixir", languageId: "elixir", candidates: [["elixir-ls"], ["expert", "--stdio"]])
+        case .haskell:
+            return Spec(key: "haskell", languageId: "haskell", candidates: [["haskell-language-server-wrapper", "--lsp"]])
+        case .ocaml, .ocamlInterface:
+            return Spec(key: "ocaml", languageId: "ocaml", candidates: [["ocamllsp"]])
+        case .dart:
+            return Spec(key: "dart", languageId: "dart", candidates: [["dart", "language-server", "--protocol=lsp"]])
+        case .php:
+            return Spec(key: "php", languageId: "php", candidates: [["intelephense", "--stdio"], ["phpactor", "language-server"]])
+        case .cSharp:
+            return Spec(key: "csharp", languageId: "csharp", candidates: [["csharp-ls"], ["OmniSharp", "-lsp"]])
+        case .java:
+            return Spec(key: "java", languageId: "java", candidates: [["jdtls"]])
+        case .scala:
+            return Spec(key: "scala", languageId: "scala", candidates: [["metals"]])
+        case .julia:
+            return Spec(key: "julia", languageId: "julia", candidates: [])
+        case .perl:
+            return Spec(key: "perl", languageId: "perl", candidates: [["perlnavigator"]])
+        case .sql:
+            return Spec(key: "sql", languageId: "sql", candidates: [["sqls"], ["sql-language-server", "up", "--method", "stdio"]])
+        default:
+            return nil
+        }
+    }
+
+    /// The argv to launch, executable made absolute — or nil when no
+    /// candidate is installed. Results are cached per spec key.
+    static func resolve(_ spec: Spec) -> [String]? {
+        if let cached = resolved[spec.key] { return cached }
+        var found: [String]?
+        for candidate in spec.candidates {
+            guard let name = candidate.first else { continue }
+            if let path = executable(named: name) {
+                found = [path] + candidate.dropFirst()
+                break
+            }
+        }
+        resolved[spec.key] = found
+        return found
+    }
+    private static var resolved: [String: [String]?] = [:]
+
+    private static func executable(named name: String) -> String? {
+        if name.hasPrefix("/") {
+            return FileManager.default.isExecutableFile(atPath: name) ? name : nil
+        }
+        for dir in searchPath where FileManager.default.isExecutableFile(atPath: dir + "/" + name) {
+            return dir + "/" + name
+        }
+        return nil
+    }
+
+    /// The login shell's PATH (once), then the app's own, then the usual
+    /// tool bins in case the shell probe failed. Order preserved, deduped.
+    private static let searchPath: [String] = {
+        var dirs: [String] = []
+        let probe = Process()
+        probe.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        probe.arguments = ["-lic", "echo $PATH"]
+        let pipe = Pipe()
+        probe.standardOutput = pipe
+        probe.standardError = FileHandle.nullDevice
+        if (try? probe.run()) != nil {
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            probe.waitUntilExit()
+            if let out = String(data: data, encoding: .utf8) {
+                dirs += out.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ":").map(String.init)
+            }
+        }
+        dirs += (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map(String.init)
+        let home = NSHomeDirectory()
+        dirs += [
+            "/opt/homebrew/bin", "/usr/local/bin", "\(home)/.local/bin", "\(home)/.cargo/bin",
+            "\(home)/go/bin", "\(home)/.bun/bin", "\(home)/.deno/bin", "\(home)/.volta/bin",
+            "\(home)/.npm-global/bin", "/usr/bin",
+        ]
+        var seen = Set<String>()
+        return dirs.filter { !$0.isEmpty && seen.insert($0).inserted }
+    }()
+}
+
 /// One language server for one repo root (M2.5, TECHNICAL_PLAN §3.3 —
 /// go-to-definition and diagnostics, nothing else). JSON-RPC over stdio;
-/// v1 speaks only to sourcekit-lsp. The client is deliberately dynamic
+/// the binary comes from `LSPServers`. The client is deliberately dynamic
 /// (JSONSerialization, not a Codable mirror of the whole protocol): we use
 /// four notifications and one request.
 final class LSPClient {
@@ -32,15 +181,16 @@ final class LSPClient {
     private var documentVersions: [String: Int] = [:]
 
     let root: String
+    let languageId: String
     /// Fired on the main queue whenever the server publishes diagnostics.
     var onDiagnostics: ((_ path: String, _ diagnostics: [LSPDiagnostic]) -> Void)?
 
-    init?(root: String) {
+    init?(root: String, command: [String], languageId: String) {
         self.root = root
-        // sourcekit-lsp rides the active toolchain; xcrun finds it without
-        // hardcoding an Xcode path.
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
-        process.arguments = ["sourcekit-lsp"]
+        self.languageId = languageId
+        guard let executable = command.first else { return nil }
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = Array(command.dropFirst())
         process.currentDirectoryURL = URL(fileURLWithPath: root, isDirectory: true)
         process.standardInput = stdin
         process.standardOutput = stdout
@@ -98,7 +248,7 @@ final class LSPClient {
             self.documentVersions[path] = 1
             self.notifyWhenReady("textDocument/didOpen", params: [
                 "textDocument": [
-                    "uri": Self.uri(path), "languageId": "swift", "version": 1, "text": text,
+                    "uri": Self.uri(path), "languageId": self.languageId, "version": 1, "text": text,
                 ] as [String: Any],
             ])
         }
@@ -269,16 +419,19 @@ final class LSPClient {
     }
 }
 
-/// One server per repo root, spawned on first use, reused across sessions,
-/// torn down at quit. Swift-only in v1 (the plan's sourcekit-lsp scope);
-/// other languages simply get no client and the editor stays plain.
+/// One server per (repo root, language), spawned on first use, reused
+/// across sessions, torn down at quit. A language with no installed server
+/// simply gets no client and the editor stays plain.
 enum LSPRegistry {
     private static var clients: [String: LSPClient] = [:]
 
-    static func client(for root: String) -> LSPClient? {
-        if let existing = clients[root] { return existing }
-        guard let client = LSPClient(root: root) else { return nil }
-        clients[root] = client
+    static func client(for root: String, language: CodeLanguage) -> LSPClient? {
+        guard let spec = LSPServers.spec(for: language) else { return nil }
+        let key = "\(root)|\(spec.key)"
+        if let existing = clients[key] { return existing }
+        guard let command = LSPServers.resolve(spec),
+              let client = LSPClient(root: root, command: command, languageId: spec.languageId) else { return nil }
+        clients[key] = client
         return client
     }
 

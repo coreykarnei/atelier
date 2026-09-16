@@ -7,6 +7,14 @@ import AppKit
 /// and `↩` opens the hit in the buffer at its line and column. Keyboard-
 /// navigable end to end; the fixed pane shape stays fixed — results live on
 /// the card, not a fourth panel.
+/// Where a text search matched: 1-based line and column, and how many
+/// characters — enough to land the caret and mark the match.
+struct SearchHit {
+    let line: Int
+    let column: Int
+    let length: Int
+}
+
 /// The repo text search engine, shared by ⌘⇧F and the explorer's search bar:
 /// debounced (~150 ms) ripgrep — fixed-string, smart-case; `git grep` when rg
 /// isn't installed — one process in flight, matches as summon rows, a capped
@@ -43,12 +51,13 @@ final class RepoTextSearch {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
-    /// A row's coordinates, or nil for the tail row.
-    static func location(of item: SummonItem, root: String) -> (url: URL, line: Int, column: Int)? {
+    /// A row's hit, or nil for the tail row.
+    static func location(of item: SummonItem, root: String) -> (url: URL, hit: SearchHit)? {
         guard item.id != moreRowId else { return nil }
         let parts = item.id.split(separator: "\u{0}").map(String.init)
-        guard parts.count == 3, let line = Int(parts[1]), let column = Int(parts[2]) else { return nil }
-        return (URL(fileURLWithPath: "\(root)/\(parts[0])"), line, column)
+        guard parts.count == 4, let line = Int(parts[1]), let column = Int(parts[2]), let length = Int(parts[3])
+        else { return nil }
+        return (URL(fileURLWithPath: "\(root)/\(parts[0])"), SearchHit(line: line, column: column, length: length))
     }
 
     private func run(_ query: String, compact: Bool, completion: @escaping ([SummonItem]) -> Void) {
@@ -89,7 +98,8 @@ final class RepoTextSearch {
                 let parts = raw.split(separator: ":", maxSplits: 3, omittingEmptySubsequences: false)
                 guard parts.count == 4, let line = Int(parts[1]), let column = Int(parts[2]) else { continue }
                 items.append(Self.item(
-                    rel: String(parts[0]), line: line, column: column, snippet: String(parts[3]), compact: compact
+                    rel: String(parts[0]), line: line, column: column, snippet: String(parts[3]),
+                    query: query, compact: compact
                 ))
             }
             if lines.count > Self.cap {
@@ -110,7 +120,9 @@ final class RepoTextSearch {
         }
     }
 
-    private static func item(rel: String, line: Int, column: Int, snippet: String, compact: Bool) -> SummonItem {
+    private static func item(
+        rel: String, line: Int, column: Int, snippet: String, query: String, compact: Bool
+    ) -> SummonItem {
         let name = (rel as NSString).lastPathComponent
         let text = NSMutableAttributedString()
         // File coordinates and code are terminal-pasteable: mono (§1.4).
@@ -118,16 +130,27 @@ final class RepoTextSearch {
             .font: Theme.Typography.mono(Theme.Typography.small, weight: .medium),
             .foregroundColor: Theme.chromeText,
         ]))
-        let snippetText = NSAttributedString(
-            string: "\(compact ? "" : "  ")\(snippet.trimmingCharacters(in: .whitespaces))",
+        // The snippet is muted except the match itself, which reads in the
+        // chrome text colour — you can see *what* was found, not just where.
+        let trimmed = snippet.trimmingCharacters(in: .whitespaces)
+        let snippetText = NSMutableAttributedString(
+            string: "\(compact ? "" : "  ")\(trimmed)",
             attributes: [
                 .font: Theme.Typography.mono(Theme.Typography.small),
                 .foregroundColor: Theme.chromeMutedText,
             ]
         )
+        let hay = snippetText.string as NSString
+        let match = hay.range(of: query, options: [.caseInsensitive])
+        if match.location != NSNotFound {
+            snippetText.addAttributes([
+                .font: Theme.Typography.mono(Theme.Typography.small, weight: .semibold),
+                .foregroundColor: Theme.chromeSelectedText,
+            ], range: match)
+        }
         if !compact { text.append(snippetText) }
         return SummonItem(
-            id: "\(rel)\u{0}\(line)\u{0}\(column)",
+            id: "\(rel)\u{0}\(line)\u{0}\(column)\u{0}\((query as NSString).length)",
             text: text,
             matchText: rel.lowercased(),
             chord: nil,
@@ -156,9 +179,9 @@ final class RepoTextSearch {
 
 final class RepoSearchOverlay: SummonCardOverlay {
     private let engine: RepoTextSearch
-    private let onOpen: (URL, Int, Int) -> Void
+    private let onOpen: (URL, SearchHit) -> Void
 
-    init(root: String, onDismiss: @escaping () -> Void, onOpen: @escaping (URL, Int, Int) -> Void) {
+    init(root: String, onDismiss: @escaping () -> Void, onOpen: @escaping (URL, SearchHit) -> Void) {
         self.engine = RepoTextSearch(root: root)
         self.onOpen = onOpen
         super.init(
@@ -183,9 +206,9 @@ final class RepoSearchOverlay: SummonCardOverlay {
             self.engine.search(query) { [weak self] items in self?.summon.setItems(items) }
         }
         summon.onActivate = { [weak self] item in
-            guard let self, let hit = RepoTextSearch.location(of: item, root: self.engine.root) else { return }
+            guard let self, let found = RepoTextSearch.location(of: item, root: self.engine.root) else { return }
             self.dismiss()
-            self.onOpen(hit.url, hit.line, hit.column)
+            self.onOpen(found.url, found.hit)
         }
     }
 }

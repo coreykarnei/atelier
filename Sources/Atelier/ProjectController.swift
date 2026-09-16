@@ -242,16 +242,16 @@ final class ProjectController: NSObject, BottomBarDelegate {
             guard let self, let session else { return }
             self.openInEditor(url: url, session: session, preview: !commit)
         }
-        session.editorPane.onOpenAtRequest = { [weak self, weak session] url, line, column in
+        session.editorPane.onOpenAtRequest = { [weak self, weak session] url, hit in
             guard let self, let session else { return }
-            self.openInEditor(url: url, session: session, cursor: (line, column))
+            self.openInEditor(url: url, session: session, hit: hit)
         }
-        session.editorPane.onPreviewRequest = { [weak self, weak session] url, at in
+        session.editorPane.onPreviewRequest = { [weak self, weak session] url, hit in
             guard let self, let session else { return }
             // Arrowing must never raise the save dialog; with unsaved edits and
             // no autosave the preview simply doesn't happen.
             if session.editorPane.isDirty, !Settings.autosave { return }
-            self.openInEditor(url: url, session: session, cursor: at, preview: true)
+            self.openInEditor(url: url, session: session, hit: hit, preview: true)
         }
         session.editorPane.onGoToDefinition = { [weak self] in self?.goToDefinition() }
         session.onRemoteRequested = { [weak self, weak session] host, dir in
@@ -557,7 +557,8 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// The one buffer is precious (M2.1): opening over unsaved edits gets the
     /// same refusal closing does. `cursor` lands a search hit (M2.3).
     private func openInEditor(
-        url: URL, session: Session, cursor: (line: Int, column: Int)? = nil, preview: Bool = false
+        url: URL, session: Session, cursor: (line: Int, column: Int)? = nil, hit: SearchHit? = nil,
+        preview: Bool = false
     ) {
         guardDirtyBuffer(
             in: session,
@@ -568,7 +569,9 @@ final class ProjectController: NSObject, BottomBarDelegate {
             do {
                 session.editorPane.lspRoot = session.cwd
                 try session.editorPane.open(path: url.path, preview: preview)
-                if let cursor {
+                if let hit {
+                    session.editorPane.reveal(line: hit.line, column: hit.column, highlightLength: hit.length)
+                } else if let cursor {
                     session.editorPane.reveal(line: cursor.line, column: cursor.column)
                 }
                 if session === self.activeSession {
@@ -628,8 +631,8 @@ final class ProjectController: NSObject, BottomBarDelegate {
         let overlay = RepoSearchOverlay(
             root: session.cwd,
             onDismiss: { [weak self] in self?.dismissRepoSearch() },
-            onOpen: { [weak self] url, line, column in
-                self?.openInEditor(url: url, session: session, cursor: (line, column))
+            onOpen: { [weak self] url, hit in
+                self?.openInEditor(url: url, session: session, hit: hit)
             }
         )
         overlay.translatesAutoresizingMaskIntoConstraints = false
@@ -668,7 +671,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
     func lspProbe(line: Int, column: Int, completion: @escaping (String) -> Void) {
         guard let session = activeSession, session.state == .ide,
               let path = session.editorPane.filePath,
-              let client = LSPRegistry.client(for: session.cwd) else {
+              let client = session.editorPane.bufferLSPClient else {
             completion("lspProbe: no active editor buffer or no language server")
             return
         }
@@ -694,7 +697,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
         guard let session = activeSession, session.state == .ide,
               let path = session.editorPane.filePath,
               let cursor = session.editorPane.cursorPosition,
-              let client = LSPRegistry.client(for: session.cwd)
+              let client = session.editorPane.bufferLSPClient
         else { return }
         client.definition(path: path, line: cursor.line - 1, character: cursor.column - 1) { [weak self] targets in
             guard let self, let target = targets.first else { return }

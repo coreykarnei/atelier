@@ -221,6 +221,11 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
         refilter(preserving: keep)
     }
 
+    /// Dev snapshots: one `↓` press.
+    func debugMoveDown() {
+        _ = control(field, textView: NSTextView(), doCommandBy: #selector(NSResponder.moveDown(_:)))
+    }
+
     /// Host-driven query (dev snapshots): as if typed.
     func setQuery(_ text: String) {
         field.stringValue = text

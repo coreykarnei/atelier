@@ -32,11 +32,11 @@ final class FileExplorerView: NSView {
     private let rail = HoverPadButton(frame: .zero)
     private let railChevron = NSImageView()
 
-    /// A text hit was chosen (search bar, Text mode): open at line:column.
-    var onOpenAt: ((URL, Int, Int) -> Void)?
+    /// A text hit was chosen (search bar, Text mode): open at the hit.
+    var onOpenAt: ((URL, SearchHit) -> Void)?
     /// Arrowing through search results: preview this one (file, or file at
-    /// line:column for a text hit) without leaving the field.
-    var onPreview: ((URL, (line: Int, column: Int)?) -> Void)?
+    /// a text hit) without leaving the field.
+    var onPreview: ((URL, SearchHit?) -> Void)?
 
     /// The search panel (VSCode's Go to File and Find in Files, given a home
     /// in the sidebar). Opened by the header's magnifier or ⌘⇧E, it takes
@@ -228,17 +228,17 @@ final class FileExplorerView: NSView {
         search.onQueryChange = { [weak self] query in self?.runSearch(query) }
         search.onArrowSelect = { [weak self] item in
             guard let self, let root = self.root else { return }
-            if let hit = RepoTextSearch.location(of: item, root: root) {
-                self.onPreview?(hit.url, (hit.line, hit.column))
+            if let found = RepoTextSearch.location(of: item, root: root) {
+                self.onPreview?(found.url, found.hit)
             } else if item.id != RepoTextSearch.moreRowId {
                 self.onPreview?(URL(fileURLWithPath: item.id), nil)
             }
         }
         search.onActivate = { [weak self] item in
             guard let self, let root = self.root else { return }
-            if let hit = RepoTextSearch.location(of: item, root: root) {
+            if let found = RepoTextSearch.location(of: item, root: root) {
                 self.closeSearch(focusTree: false)
-                self.onOpenAt?(hit.url, hit.line, hit.column)
+                self.onOpenAt?(found.url, found.hit)
             } else if item.id != RepoTextSearch.moreRowId {
                 RecentFilesStore.record(item.id, root: root)
                 self.closeSearch(focusTree: false)
@@ -358,10 +358,16 @@ final class FileExplorerView: NSView {
             + "tree=\(scroll.frame) treeHidden=\(scroll.isHidden)"
     }
 
-    /// Dev-only (snapshots): open the panel and type `query`.
+    /// Dev-only (snapshots): open the panel and type `query`; trailing `↓`
+    /// characters are arrow presses (they arrive after the text search
+    /// lands, so the row set is the real one).
     func debugSetQuery(_ query: String) {
         openSearch()
-        search.setQuery(query)
+        let downs = query.reversed().prefix { $0 == "↓" }.count
+        search.setQuery(String(query.dropLast(downs)))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            for _ in 0..<downs { self?.search.debugMoveDown() }
+        }
     }
 
     // MARK: Search panel

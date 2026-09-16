@@ -28,10 +28,10 @@ final class EditorPane: NSView, WorkspacePane {
     /// (open for real) from a single click (preview).
     let explorer = FileExplorerView(frame: .zero)
     var onOpenRequest: ((URL, _ commit: Bool) -> Void)?
-    /// A text-search hit from the sidebar: open for real at line:column.
-    var onOpenAtRequest: ((URL, Int, Int) -> Void)?
-    /// Arrowing through sidebar search results: preview, optionally at a line.
-    var onPreviewRequest: ((URL, (line: Int, column: Int)?) -> Void)?
+    /// A text-search hit from the sidebar: open for real at the hit.
+    var onOpenAtRequest: ((URL, SearchHit) -> Void)?
+    /// Arrowing through sidebar search results: preview, optionally at a hit.
+    var onPreviewRequest: ((URL, SearchHit?) -> Void)?
     /// ⌘-click in the buffer: go to definition at the caret.
     var onGoToDefinition: (() -> Void)?
     /// Everything right of the tree: the empty-state line, then the buffer.
@@ -67,10 +67,12 @@ final class EditorPane: NSView, WorkspacePane {
     /// didSave and diagnostics underlines, other languages stay plain.
     var lspRoot: String?
     private var lspClient: LSPClient? {
-        guard let lspRoot, isSwiftBuffer, !isPreview else { return nil }
-        return LSPRegistry.client(for: lspRoot)
+        guard let lspRoot, let language = bufferLanguage, !isPreview else { return nil }
+        return LSPRegistry.client(for: lspRoot, language: language)
     }
-    private var isSwiftBuffer = false
+    /// The committed buffer's server, for the host's definition requests.
+    var bufferLSPClient: LSPClient? { lspClient }
+    private var bufferLanguage: CodeLanguage?
     private var lspChangeDebounce: Timer?
     private var autosaveDebounce: Timer?
     /// The open file's on-disk watcher (M2.6): stash, agent, formatter — any
@@ -91,8 +93,8 @@ final class EditorPane: NSView, WorkspacePane {
         buildEmptyState()
         explorer.onOpen = { [weak self] url, commit in self?.onOpenRequest?(url, commit) }
         explorer.onToggle = { [weak self] in self?.toggleExplorer() }
-        explorer.onOpenAt = { [weak self] url, line, column in self?.onOpenAtRequest?(url, line, column) }
-        explorer.onPreview = { [weak self] url, at in self?.onPreviewRequest?(url, at) }
+        explorer.onOpenAt = { [weak self] url, hit in self?.onOpenAtRequest?(url, hit) }
+        explorer.onPreview = { [weak self] url, hit in self?.onPreviewRequest?(url, hit) }
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
             selector: #selector(accessibilityDisplayChanged),
@@ -283,7 +285,7 @@ final class EditorPane: NSView, WorkspacePane {
         isDirty = false // the coordinator saw the programmatic setText; undo it
         emptyLabel.isHidden = true
         explorer.reveal(path: path)
-        isSwiftBuffer = language == .swift
+        bufferLanguage = language
         watchFile(path)
 
         if !preview {
@@ -429,6 +431,7 @@ final class EditorPane: NSView, WorkspacePane {
     /// (full-document sync — the buffer is small and the protocol allows it).
     private func bufferChanged() {
         isDirty = true
+        clearHitMark()
         if isPreview {
             // Typing into a preview is entering the file: unwrap, fold the
             // tree, tell the server — same as double-click/↩ (owner call).
@@ -451,9 +454,41 @@ final class EditorPane: NSView, WorkspacePane {
     }
 
     /// Put the caret at `line:column` (1-indexed) and scroll it into view —
-    /// how a search hit lands (M2.3).
-    func reveal(line: Int, column: Int) {
-        controller?.setCursorPositions([CursorPosition(line: line, column: column)], scrollToVisible: true)
+    /// how a search hit lands (M2.3). `highlightLength` marks that many
+    /// characters from the caret the way ⌘F marks a match, so a hit reads
+    /// even while the buffer isn't focused; the mark clears on the next edit
+    /// or reveal.
+    func reveal(line: Int, column: Int, highlightLength: Int? = nil) {
+        guard let controller else { return }
+        controller.setCursorPositions([CursorPosition(line: line, column: column)], scrollToVisible: true)
+        clearHitMark()
+        guard let highlightLength, highlightLength > 0,
+              let start = offset(line: line, column: column),
+              let emphasisManager = controller.textView?.emphasisManager else { return }
+        let text = controller.text as NSString
+        let range = NSRange(location: start, length: min(highlightLength, text.length - start))
+        emphasisManager.addEmphases([Emphasis(range: range, style: .standard)], for: Self.hitEmphasisID)
+    }
+
+    private static let hitEmphasisID = "search.hit"
+
+    private func clearHitMark() {
+        controller?.textView?.emphasisManager?.removeEmphases(for: Self.hitEmphasisID)
+    }
+
+    /// 1-based line:column → UTF-16 offset in the buffer, nil when out of range.
+    private func offset(line: Int, column: Int) -> Int? {
+        guard let controller, line >= 1, column >= 1 else { return nil }
+        let text = controller.text as NSString
+        var index = 0
+        var current = 1
+        while current < line, index < text.length {
+            index = NSMaxRange(text.lineRange(for: NSRange(location: index, length: 0)))
+            current += 1
+        }
+        guard current == line else { return nil }
+        let lineRange = text.lineRange(for: NSRange(location: min(index, text.length), length: 0))
+        return min(index + column - 1, NSMaxRange(lineRange))
     }
 
     /// Write the buffer back to its file. A preview has nothing to write.
@@ -546,7 +581,7 @@ final class EditorPane: NSView, WorkspacePane {
         let minimap = find(controller.view)
         let minimapLine = "minimap hidden=\(minimap?.isHidden ?? true) frame=\(minimap?.frame ?? .zero) "
             + "superHidden=\(minimap?.isHiddenOrHasHiddenAncestor ?? true)"
-        var out = "preview=\(isPreview) wrap=\(controller.wrapLines) hScroller=\(sv.hasHorizontalScroller) mask=\(gutterMask.frame) "
+        var out = "preview=\(isPreview) lang=\(bufferLanguage?.id.rawValue ?? "-") lsp=\(bufferLSPClient != nil) wrap=\(controller.wrapLines) hScroller=\(sv.hasHorizontalScroller) mask=\(gutterMask.frame) "
         out += "content=\(sv.contentSize) doc=\(controller.textView.frame.size) "
         out += "docVisible=\(sv.documentVisibleRect) estWidth=\(controller.textView.layoutManager.estimatedWidth())\n"
         out += "  hits: " + hits.joined(separator: " ") + "\n  " + minimapLine
