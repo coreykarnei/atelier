@@ -1524,37 +1524,29 @@ private final class FolderView: NSView {
         label.hasPrefix(treeMarker) ? (true, String(label.dropFirst(treeMarker.count))) : (false, label)
     }
 
-    /// The tree, drawn: a conifer — three stacked tiers on a short trunk (the
-    /// owner's pick 2026-09-08; reads at 10 pt where a canopy turns to a
-    /// lollipop). One opaque fill; the trunk runs up into the lowest tier so
-    /// there is never a seam between them. `rect` is the glyph box.
+    /// The tree, drawn: a conifer — two stepped tiers on a short trunk, 10×12
+    /// (a conifer was the owner's pick 2026-09-08; a canopy turned to a
+    /// lollipop at this size). One opaque fill. `rect` is the glyph box.
     private static func treePath(in rect: CGRect) -> NSBezierPath {
-        let path = NSBezierPath()
+        // Stepped sides (owner pick 2026-09-15, variant H): one outline, two
+        // tiers as horizontal steps rather than overlapped triangles, so the
+        // notch is a hard edge that survives 2x — and one winding, so there
+        // is no seam for the non-zero rule to open between tier and trunk.
         let w = rect.width, h = rect.height
         func pt(_ x: CGFloat, _ y: CGFloat) -> NSPoint { NSPoint(x: rect.minX + x * w, y: rect.minY + y * h) }
-        func tier(top: CGFloat, bottom: CGFloat, half: CGFloat) {
-            let t = NSBezierPath()
-            t.move(to: pt(0.5, top))
-            t.line(to: pt(0.5 + half, bottom))
-            t.line(to: pt(0.5 - half, bottom))
-            t.close()
-            path.append(t)
-        }
-        // Two tiers, not three: at 10 pt three collapsed into one blob (owner
-        // call 2026-09-08). Narrow-ish top over a wide skirt, deep notch —
-        // the step is the whole silhouette at this size.
-        tier(top: 1.00, bottom: 0.50, half: 0.40)
-        tier(top: 0.62, bottom: 0.20, half: 0.50)
-        // The trunk winds the same way as the tiers (clockwise): under the
-        // non-zero rule an opposite-wound overlap cancels to a hole — which
-        // was the "gap between the log and the triangles".
-        let trunk = NSBezierPath()
-        trunk.move(to: pt(0.42, 0.32))
-        trunk.line(to: pt(0.58, 0.32))
-        trunk.line(to: pt(0.58, 0.0))
-        trunk.line(to: pt(0.42, 0.0))
-        trunk.close()
-        path.append(trunk)
+        let path = NSBezierPath()
+        path.move(to: pt(0.5, 1.0))
+        path.line(to: pt(0.82, 0.58))
+        path.line(to: pt(0.68, 0.58))
+        path.line(to: pt(1.0, 0.26))
+        path.line(to: pt(0.6, 0.26))
+        path.line(to: pt(0.6, 0.0))
+        path.line(to: pt(0.4, 0.0))
+        path.line(to: pt(0.4, 0.26))
+        path.line(to: pt(0.0, 0.26))
+        path.line(to: pt(0.32, 0.58))
+        path.line(to: pt(0.18, 0.58))
+        path.close()
         return path
     }
 
@@ -1611,7 +1603,7 @@ private final class FolderView: NSView {
             tabPath.fill()
             var textX: CGFloat = 7
             if tree {
-                let glyph = NSRect(x: 6.5, y: cellTop + (Self.tabHeight - 10) / 2, width: 10, height: 10)
+                let glyph = NSRect(x: 6.5, y: cellTop + (Self.tabHeight - 12) / 2, width: 10, height: 12)
                 Theme.Folder.labelText.setFill()
                 Self.treePath(in: glyph).fill()
                 textX += Self.treeGlyphWidth
