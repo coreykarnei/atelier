@@ -48,9 +48,15 @@ extension TextView {
             return
         }
         let eventFlags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if eventFlags == [.control, .shift] {
+        // Atelier patch: ⌥-click adds a caret (VSCode) alongside upstream's
+        // ⌃⇧-click; ⌘-click sets the caret and hands the offset to the host.
+        if eventFlags == [.control, .shift] || eventFlags == [.option] {
             unmarkText()
             selectionManager.addSelectedRange(NSRange(location: offset, length: 0))
+        } else if eventFlags == [.command], let onCommandClick {
+            selectionManager.setSelectedRange(NSRange(location: offset, length: 0))
+            unmarkTextIfNeeded()
+            onCommandClick(offset)
         } else if eventFlags.contains(.shift) {
             unmarkText()
             shiftClickExtendSelection(to: offset)

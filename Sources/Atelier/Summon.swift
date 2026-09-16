@@ -71,6 +71,9 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
 
     var onActivate: ((SummonItem) -> Void)?
     var onEscape: (() -> Void)?
+    /// The arrows moved the selection (not hover — that's too noisy to
+    /// preview on). Hosts that preview the selected row listen here.
+    var onArrowSelect: ((SummonItem) -> Void)?
     /// Fired whenever the filtered row set changes — hosts that size themselves
     /// to the content (the palette card) track it; embedded hosts ignore it.
     var onContentChange: (() -> Void)?
@@ -321,12 +324,14 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
             table.selectRowIndexes([min(table.selectedRow + 1, filtered.count - 1)], byExtendingSelection: false)
             table.scrollRowToVisible(table.selectedRow)
             highlight.update(for: table, animated: true)
+            if filtered.indices.contains(table.selectedRow) { onArrowSelect?(filtered[table.selectedRow]) }
             return true
         case #selector(NSResponder.moveUp(_:)):
             guard !filtered.isEmpty else { return true }
             table.selectRowIndexes([max(table.selectedRow - 1, 0)], byExtendingSelection: false)
             table.scrollRowToVisible(table.selectedRow)
             highlight.update(for: table, animated: true)
+            if filtered.indices.contains(table.selectedRow) { onArrowSelect?(filtered[table.selectedRow]) }
             return true
         default:
             return false

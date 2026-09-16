@@ -247,6 +247,33 @@ extension TextViewController {
         let commandKey = NSEvent.ModifierFlags.command
         let controlKey = NSEvent.ModifierFlags.control
 
+        // Atelier patch: the VSCode multi-cursor / line chords. Arrow keys
+        // carry .function/.numericPad; strip them before matching.
+        let chordMods = modifierFlags.subtracting([.function, .numericPad])
+        let chars = event.charactersIgnoringModifiers ?? ""
+        let upKey = String(UnicodeScalar(UInt16(NSUpArrowFunctionKey))!)
+        let downKey = String(UnicodeScalar(UInt16(NSDownArrowFunctionKey))!)
+        if chars == upKey || chars == downKey {
+            let isUp = chars == upKey
+            switch chordMods {
+            case [.option, .command]:
+                addCursor(above: isUp)
+                return nil
+            case [.option, .shift]:
+                duplicateLines(above: isUp)
+                return nil
+            case [.option]:
+                if isUp { moveLinesUp() } else { moveLinesDown() }
+                return nil
+            default:
+                break
+            }
+        }
+        if chordMods == [.command], chars == "d" {
+            selectNextOccurrence()
+            return nil
+        }
+
         switch (modifierFlags, event.charactersIgnoringModifiers) {
         case (commandKey, "/"):
             handleCommandSlash()

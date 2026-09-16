@@ -30,6 +30,10 @@ final class EditorPane: NSView, WorkspacePane {
     var onOpenRequest: ((URL, _ commit: Bool) -> Void)?
     /// A text-search hit from the sidebar: open for real at line:column.
     var onOpenAtRequest: ((URL, Int, Int) -> Void)?
+    /// Arrowing through sidebar search results: preview, optionally at a line.
+    var onPreviewRequest: ((URL, (line: Int, column: Int)?) -> Void)?
+    /// ⌘-click in the buffer: go to definition at the caret.
+    var onGoToDefinition: (() -> Void)?
     /// Everything right of the tree: the empty-state line, then the buffer.
     private let contentHost = NSView()
     private var contentLeading: NSLayoutConstraint!
@@ -88,6 +92,7 @@ final class EditorPane: NSView, WorkspacePane {
         explorer.onOpen = { [weak self] url, commit in self?.onOpenRequest?(url, commit) }
         explorer.onToggle = { [weak self] in self?.toggleExplorer() }
         explorer.onOpenAt = { [weak self] url, line, column in self?.onOpenAtRequest?(url, line, column) }
+        explorer.onPreview = { [weak self] url, at in self?.onPreviewRequest?(url, at) }
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
             selector: #selector(accessibilityDisplayChanged),
@@ -265,6 +270,7 @@ final class EditorPane: NSView, WorkspacePane {
             // and AppKit's axis lock makes diagonal trackpad gestures stutter.
             controller.scrollView?.usesPredominantAxisScrolling = false
             installGutterMask(controller)
+            controller.textView?.onCommandClick = { [weak self] _ in self?.onGoToDefinition?() }
             NSLayoutConstraint.activate([
                 controller.view.topAnchor.constraint(equalTo: contentHost.topAnchor),
                 controller.view.leadingAnchor.constraint(equalTo: contentHost.leadingAnchor),

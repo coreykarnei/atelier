@@ -34,6 +34,9 @@ final class FileExplorerView: NSView {
 
     /// A text hit was chosen (search bar, Text mode): open at line:column.
     var onOpenAt: ((URL, Int, Int) -> Void)?
+    /// Arrowing through search results: preview this one (file, or file at
+    /// line:column for a text hit) without leaving the field.
+    var onPreview: ((URL, (line: Int, column: Int)?) -> Void)?
 
     /// The search panel (VSCode's Go to File and Find in Files, given a home
     /// in the sidebar). Opened by the header's magnifier or ⌘⇧E, it takes
@@ -223,6 +226,14 @@ final class FileExplorerView: NSView {
         search.translatesAutoresizingMaskIntoConstraints = false
         search.onEscape = { [weak self] in self?.closeSearch(focusTree: true) }
         search.onQueryChange = { [weak self] query in self?.runSearch(query) }
+        search.onArrowSelect = { [weak self] item in
+            guard let self, let root = self.root else { return }
+            if let hit = RepoTextSearch.location(of: item, root: root) {
+                self.onPreview?(hit.url, (hit.line, hit.column))
+            } else if item.id != RepoTextSearch.moreRowId {
+                self.onPreview?(URL(fileURLWithPath: item.id), nil)
+            }
+        }
         search.onActivate = { [weak self] item in
             guard let self, let root = self.root else { return }
             if let hit = RepoTextSearch.location(of: item, root: root) {

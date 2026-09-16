@@ -246,6 +246,14 @@ final class ProjectController: NSObject, BottomBarDelegate {
             guard let self, let session else { return }
             self.openInEditor(url: url, session: session, cursor: (line, column))
         }
+        session.editorPane.onPreviewRequest = { [weak self, weak session] url, at in
+            guard let self, let session else { return }
+            // Arrowing must never raise the save dialog; with unsaved edits and
+            // no autosave the preview simply doesn't happen.
+            if session.editorPane.isDirty, !Settings.autosave { return }
+            self.openInEditor(url: url, session: session, cursor: at, preview: true)
+        }
+        session.editorPane.onGoToDefinition = { [weak self] in self?.goToDefinition() }
         session.onRemoteRequested = { [weak self, weak session] host, dir in
             guard let self, let session else { return }
             self.replaceLanding(session, withRemote: host, dir: dir)

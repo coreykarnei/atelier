@@ -24,13 +24,14 @@ struct FindSearchField: View {
     @Binding var findModePickerWidth: CGFloat
     var condensed: Bool
 
+    // Atelier patch: where you are, not just how many — "3/10".
     private var helperText: String? {
         if viewModel.findText.isEmpty {
             nil
-        } else if condensed {
-            "\(viewModel.matchCount)"
+        } else if viewModel.matchCount == 0 {
+            condensed ? "0" : "No matches"
         } else {
-            "\(viewModel.matchCount) \(viewModel.matchCount == 1 ? "match" : "matches")"
+            "\((viewModel.currentFindMatchIndex ?? 0) + 1)/\(viewModel.matchCount)"
         }
     }
 

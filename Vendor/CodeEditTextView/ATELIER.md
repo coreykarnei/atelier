@@ -28,3 +28,8 @@ local override by package identity, the same way `Vendor/CodeEditSymbols` is.
    one — a quarter of the viewport sideways (24…160pt), one line up and
    down — so a caret that was off screen lands with room around it rather
    than flush against the edge, the VSCode/Sublime manner.
+
+3. **⌥-click adds a caret; ⌘-click hook** (`TextView/TextView+Mouse.swift`,
+   `TextView/TextView.swift`). Upstream binds add-caret to ⌃⇧-click only;
+   ⌥-click now does the same (VSCode). `onCommandClick` lets the host treat
+   ⌘-click as go-to-definition.

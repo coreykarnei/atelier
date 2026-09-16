@@ -17,3 +17,10 @@ root overrides by identity with `Vendor/` copies.
 2. **Gutter insets 10/12 instead of 20/12** (`Gutter/GutterView.swift`).
    Taste, not a bug — Atelier's call; not for upstream. With the fold ribbon
    off (config) the gutter is ~47pt for files under 1000 lines.
+
+3. **Find bar shows position** (`Find/PanelView/FindSearchField.swift`):
+   "3/10" instead of "10 matches".
+4. **VSCode chords** (`Controller/TextViewController+Lifecycle.swift`,
+   `Controller/TextViewController+AtelierChords.swift`): ⌥⌘↑/↓ add caret
+   above/below, ⇧⌥↑/↓ duplicate lines, ⌥↑/↓ move lines (upstream had the
+   methods, no binding), ⌘D select next occurrence.
