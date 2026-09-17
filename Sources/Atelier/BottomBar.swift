@@ -436,9 +436,15 @@ final class BottomBar: NSView {
             }
         }
 
-        // Folder chrome earns its place by separating groups: one group draws
-        // bare tabs (owner call 2026-09-08).
-        foldersVisible = chunks.count > 1
+        // Folder chrome earns its place by saying where you are: the main
+        // checkout alone draws bare tabs (owner call 2026-09-08), but a
+        // worktree or a remote host is somewhere else and always wears its
+        // name — even once it's the only group left (owner report
+        // 2026-09-16: closing the main session stripped the ⎇ tag).
+        foldersVisible = chunks.count > 1 || chunks.contains { chunk in
+            guard let key = chunk.first?.groupKey else { return false }
+            return key.hasPrefix(WorktreeManager.base + "/") || key.hasPrefix("ssh://")
+        }
         refreshTintIndex()
 
         // Pack, reserving room on the last row for the `+` — and, if anything
