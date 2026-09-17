@@ -169,6 +169,26 @@ wash exactly once) and the **content type scale** (`Theme.TypeScale`,
 ⌘+/⌘−/⌘0, terminals + editor across all windows, JetBrains Mono at Ghostty's
 14pt default; chrome never scales).
 
+**Post-release tweaks (2026-09-16, `feat/post-release-tweaks`):** the
+editor is a single-wash field like the terminals — `EditorPane` paints no
+pane colour; `contentWash` (crust while empty, base with a file) is the one
+coat and the library's scroll view/gutter background is transparent
+(alpha-probed at 0.749 everywhere, where the buffer used to compound to
+~0.94). The click-preview is **read-only** (`isEditable = false`): scroll,
+select, copy — never mutate. Entering the file happens by exactly these:
+tree double-click/↩, double-click in the buffer, or an editing keystroke
+into the buffer (typing, ⌫, ⌘X/⌘V, the line chords), which enters first
+and then replays the key (`EditorPane.enterPreview`; two vendored patches
+carry it — CodeEditTextView #5, CodeEditSourceEditor #9). The project row
+no longer folds tabs into an `…` menu: tabs floor at 180pt and the row
+scrolls sideways (swipe, or a plain wheel), the clipped edge fades, and
+selecting a tab glides it into view. A worktree or remote folder always
+wears its label tab, even as the only group left. Dev: `ATELIER_STATE_DIR`
+relocates the socket + session file so a test build can run beside the
+live app (unix socket paths cap at ~100 chars — keep it short), and
+`explorerSearch` gained `probe:preview=`, `probe:enter=<gesture>` and
+`probe:key=`.
+
 ## Commands
 
 - `make build` — compile all targets via SwiftPM.
