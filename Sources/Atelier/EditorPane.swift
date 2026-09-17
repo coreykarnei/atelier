@@ -1,4 +1,5 @@
 import AppKit
+import AtelierIPC
 import CodeEditSourceEditor
 import CodeEditTextView
 import CodeEditLanguages
@@ -37,6 +38,17 @@ final class EditorPane: NSView, WorkspacePane {
     private let contentHost = NSView()
     private let fileHeader = EditorFileHeader()
     private let diagnosticStrip = DiagnosticStrip()
+    /// The one wash under the buffer (2026-09-16). Translucent fields paint
+    /// their alpha exactly once (the transparency devlog): this view is the
+    /// single owner of the content region's colour — crust while the well is
+    /// empty, base once a file is open — and everything above it (the
+    /// library's scroll view and gutter, the markdown rendering) paints clear.
+    /// Before this the pane's own crust layer sat under the buffer's base and
+    /// the gutter's base again: two or three 0.75 coats compounding to ~0.94,
+    /// which is why the editor read denser than the terminals beside it.
+    private let contentWash = NSView()
+    private var washTopFull: NSLayoutConstraint!
+    private var washTopBelowHeader: NSLayoutConstraint!
 
     // MARK: File history (2026-09-16)
     // Where you've been, in order — committed opens only (previews are
@@ -104,12 +116,22 @@ final class EditorPane: NSView, WorkspacePane {
     }
     private var contentLeading: NSLayoutConstraint!
     private var explorerWidth: NSLayoutConstraint!
+    /// The grab strip on the tree's edge — a few points straddling the
+    /// hairline, cursor says ↔. Drags resize the tree live; release
+    /// remembers the width for every pane (`FileExplorerView.width`).
+    private let explorerHandle = ExplorerResizeHandle()
+    private var explorerDragging = false
     /// Wide (browsing) or folded to the rail (a file is open for real).
     private var explorerExpanded = true
-    /// The buffer is a click-preview: soft-wrapped, not yet the session's
-    /// file — persistence and the language server ignore it. Editable all
-    /// the same: the first keystroke enters the file for real (unwrap, fold
-    /// the tree), exactly like double-click/↩.
+    /// The buffer is a click-preview: soft-wrapped, tree wide, not yet the
+    /// session's file — persistence and the language server ignore it, and
+    /// the buffer is **read-only** (hardened 2026-09-16, owner report: ⌘X
+    /// cut text out of a preview without the file ever being entered). A
+    /// glance lets you scroll, select and copy; nothing can mutate it. You
+    /// *enter* the file — unwrap, fold the tree, tell the server — by one of
+    /// exactly these: double-click/↩ in the tree, double-click in the buffer,
+    /// or an editing keystroke into the buffer (typing, ⌫, ⌘X/⌘V, the
+    /// chords), which enters first and then applies. See `enterPreview`.
     private(set) var isPreview = false
     /// Soft-wrap follows the preview in, and leaves on a gesture commit only.
     private var isWrapped = false
@@ -159,7 +181,8 @@ final class EditorPane: NSView, WorkspacePane {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.backgroundColor = Theme.Elevation.crust.cgColor
+        // Clear: the tree washes its own strip, `contentWash` the rest.
+        layer?.backgroundColor = NSColor.clear.cgColor
         buildChrome()
         buildEmptyState()
         explorer.onOpen = { [weak self] url, commit in self?.onOpenRequest?(url, commit) }
@@ -185,6 +208,18 @@ final class EditorPane: NSView, WorkspacePane {
             name: Theme.TypeScale.didChange,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(explorerWidthChanged),
+            name: FileExplorerView.widthDidChange,
+            object: nil
+        )
+    }
+
+    /// Another pane's drag (or a reset) settled on a new tree width.
+    @objc private func explorerWidthChanged() {
+        guard !explorerDragging else { return }
+        layoutExplorer()
     }
 
     @available(*, unavailable)
@@ -204,12 +239,28 @@ final class EditorPane: NSView, WorkspacePane {
     }
 
     override func updateLayer() {
-        layer?.backgroundColor = Theme.Elevation.crust.cgColor
+        applyWash()
     }
 
     @objc private func accessibilityDisplayChanged() {
-        layer?.backgroundColor = Theme.Elevation.crust.cgColor
+        applyWash()
         layoutExplorer()
+    }
+
+    /// The content region's one coat: the recessed well (crust) until a file
+    /// is open, then the field (base). Re-read on every fieldAlpha change.
+    private func applyWash() {
+        let color = fileHeader.isHidden ? Theme.Elevation.crust : Theme.Elevation.base
+        contentWash.layer?.backgroundColor = color.cgColor
+    }
+
+    /// The header strip paints its own mantle, so the wash starts under it
+    /// when it's shown — one coat per pixel, never two.
+    private func setFileHeaderVisible(_ visible: Bool) {
+        fileHeader.isHidden = !visible
+        washTopFull.isActive = !visible
+        washTopBelowHeader.isActive = visible
+        applyWash()
     }
 
     /// Tree on the left, content host filling the rest. The tree is wide
@@ -222,6 +273,9 @@ final class EditorPane: NSView, WorkspacePane {
         addSubview(contentHost)
         contentLeading = contentHost.leadingAnchor.constraint(equalTo: leadingAnchor)
         explorerWidth = explorer.widthAnchor.constraint(equalToConstant: FileExplorerView.width)
+        contentWash.wantsLayer = true
+        contentWash.translatesAutoresizingMaskIntoConstraints = false
+        contentHost.addSubview(contentWash) // first in, so it sits under everything
         fileHeader.translatesAutoresizingMaskIntoConstraints = false
         fileHeader.isHidden = true
         fileHeader.onBack = { [weak self] in self?.goBack() }
@@ -238,7 +292,13 @@ final class EditorPane: NSView, WorkspacePane {
         diagnosticStrip.translatesAutoresizingMaskIntoConstraints = false
         diagnosticStrip.isHidden = true
         contentHost.addSubview(diagnosticStrip)
+        washTopFull = contentWash.topAnchor.constraint(equalTo: contentHost.topAnchor)
+        washTopBelowHeader = contentWash.topAnchor.constraint(equalTo: fileHeader.bottomAnchor)
         NSLayoutConstraint.activate([
+            contentWash.leadingAnchor.constraint(equalTo: contentHost.leadingAnchor),
+            contentWash.trailingAnchor.constraint(equalTo: contentHost.trailingAnchor),
+            contentWash.bottomAnchor.constraint(equalTo: contentHost.bottomAnchor),
+            washTopFull,
             fileHeader.topAnchor.constraint(equalTo: contentHost.topAnchor),
             fileHeader.leadingAnchor.constraint(equalTo: contentHost.leadingAnchor),
             fileHeader.trailingAnchor.constraint(equalTo: contentHost.trailingAnchor),
@@ -261,7 +321,14 @@ final class EditorPane: NSView, WorkspacePane {
             contentHost.bottomAnchor.constraint(equalTo: bottomAnchor),
             contentLeading,
         ])
+        // Frontmost, so the strip wins the hit over the tree's edge and the
+        // buffer's first columns alike. Framed by hand in `layout()`.
+        explorerHandle.onDrag = { [weak self] x in self?.dragExplorerEdge(to: x) }
+        explorerHandle.onDragEnd = { [weak self] in self?.endExplorerDrag() }
+        explorerHandle.onReset = { FileExplorerView.width = FileExplorerView.defaultWidth }
+        addSubview(explorerHandle, positioned: .above, relativeTo: nil)
         layoutExplorer()
+        applyWash()
     }
 
     private func layoutExplorer() {
@@ -269,8 +336,49 @@ final class EditorPane: NSView, WorkspacePane {
         explorer.isHidden = !hasRoot
         explorer.setCollapsed(!explorerExpanded)
         let width = !hasRoot ? 0 : (explorerExpanded ? FileExplorerView.width : FileExplorerView.railWidth)
+        setExplorerWidth(width)
+        explorerHandle.isHidden = !(hasRoot && explorerExpanded)
+    }
+
+    private func setExplorerWidth(_ width: CGFloat) {
         explorerWidth.constant = width
         contentLeading.constant = width
+        needsLayout = true
+    }
+
+    /// The widest the tree may be here: the buffer keeps at least a readable
+    /// column, whatever the pane's width. Below the tree's own floor the
+    /// floor wins — a very narrow pane simply can't be resized further.
+    private var explorerWidthCeiling: CGFloat {
+        max(FileExplorerView.minWidth, min(FileExplorerView.maxWidth, bounds.width - 220))
+    }
+
+    private func dragExplorerEdge(to x: CGFloat) {
+        guard explorerExpanded else { return }
+        explorerDragging = true
+        let width = min(max(x.rounded(), FileExplorerView.minWidth), explorerWidthCeiling)
+        guard width != explorerWidth.constant else { return }
+        setExplorerWidth(width)
+        layoutSubtreeIfNeeded()
+    }
+
+    private func endExplorerDrag() {
+        guard explorerDragging else { return }
+        explorerDragging = false
+        FileExplorerView.width = explorerWidth.constant
+        // Another pane may have moved the stored width meanwhile; make sure
+        // this one shows the width it settled on.
+        layoutExplorer()
+    }
+
+    override func layout() {
+        super.layout()
+        let w = ExplorerResizeHandle.width
+        let frame = NSRect(x: explorerWidth.constant - (w - 1) / 2 - 1, y: 0, width: w, height: bounds.height)
+        if explorerHandle.frame != frame {
+            explorerHandle.frame = frame
+            window?.invalidateCursorRects(for: explorerHandle)
+        }
     }
 
     /// The session's directory: what the tree shows and what the language
@@ -331,6 +439,207 @@ final class EditorPane: NSView, WorkspacePane {
             frame.origin.y = frame.maxY - parts[1]
             frame.size = NSSize(width: parts[0], height: parts[1])
             window.setFrame(frame, display: true, animate: false)
+            return
+        }
+        if query.hasPrefix("probe:preview=") {
+            // `probe:preview=/path` — a tree-click preview, without a pointer.
+            try? open(path: String(query.dropFirst("probe:preview=".count)), preview: true)
+            return
+        }
+        if query.hasPrefix("probe:enter=") {
+            // `probe:enter=<gesture>` — aim a gesture at the preview buffer
+            // and report the boundary's state ~0.5s later. Gestures: `cut`
+            // (select 3 chars, ⌘X), `type` (a plain "q"), `paste` (⌘V),
+            // `arrow` (↓ — must not enter), `copy` (⌘C — must not enter),
+            // `dblclick` (a two-click mouseDown in the buffer's centre).
+            let gesture = String(query.dropFirst("probe:enter=".count))
+            guard let controller, let window, let textView = controller.textView else { return }
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            window.makeFirstResponder(textView)
+            let before = controller.text
+            func key(_ chars: String, _ code: UInt16, _ mods: NSEvent.ModifierFlags) {
+                for type in [NSEvent.EventType.keyDown, .keyUp] {
+                    if let event = NSEvent.keyEvent(
+                        with: type, location: .zero, modifierFlags: mods, timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil, characters: chars, charactersIgnoringModifiers: chars,
+                        isARepeat: false, keyCode: code
+                    ) { NSApp.sendEvent(event) }
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self else { return }
+                switch gesture {
+                case "cut":
+                    controller.setCursorPositions([CursorPosition(range: NSRange(location: 0, length: 3))])
+                    key("x", 7, [.command])
+                case "type": key("q", 12, [])
+                case "paste": key("v", 9, [.command])
+                case "copy":
+                    controller.setCursorPositions([CursorPosition(range: NSRange(location: 0, length: 3))])
+                    key("c", 8, [.command])
+                case "arrow":
+                    key(String(UnicodeScalar(UInt16(NSDownArrowFunctionKey))!), 125, [.function, .numericPad])
+                case "dblclick":
+                    // Posted, not sent: only an event pulled from the queue
+                    // becomes `NSApp.currentEvent`, which the real detection
+                    // reads. Aimed at the first line, past the gutter.
+                    let point = textView.convert(NSPoint(x: 80, y: textView.visibleRect.minY + 8), to: nil)
+                    for count in 1...2 {
+                        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                            if let event = NSEvent.mouseEvent(
+                                with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: count, pressure: 1
+                            ) { NSApp.postEvent(event, atStart: false) }
+                        }
+                    }
+                default: break
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    let report = "gesture=\(gesture) preview=\(self.isPreview) wrapped=\(self.isWrapped) "
+                        + "editable=\(textView.isEditable) explorerExpanded=\(self.explorerExpanded) "
+                        + "textChanged=\(controller.text != before) len=\(before.count)->\(controller.text.count) "
+                        + "selection=\(controller.cursorPositions.first.map { "\($0.range)" } ?? "none") "
+                        + "fr=\(window.firstResponder.map { String(describing: type(of: $0)) } ?? "nil") "
+                        + "pasteboard='\(NSPasteboard.general.string(forType: .string)?.prefix(12) ?? "")'\n"
+                    try? report.write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
+                }
+            }
+            return
+        }
+        if query.hasPrefix("probe:key=") {
+            // `probe:key=<char>[,cmd][,shift][,opt][,ctrl]` — one keystroke
+            // posted to the queue (menus and modal alerts included). `\r`
+            // for ↩, `\e` for esc.
+            let parts = query.dropFirst("probe:key=".count).split(separator: ",").map(String.init)
+            guard let first = parts.first, let window else { return }
+            var mods: NSEvent.ModifierFlags = []
+            if parts.contains("cmd") { mods.insert(.command) }
+            if parts.contains("shift") { mods.insert(.shift) }
+            if parts.contains("opt") { mods.insert(.option) }
+            if parts.contains("ctrl") { mods.insert(.control) }
+            let chars = first == "\\r" ? "\r" : first == "\\e" ? "\u{1b}" : first
+            let code: UInt16 = chars == "\r" ? 36 : chars == "\u{1b}" ? 53 : 0
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            for type in [NSEvent.EventType.keyDown, .keyUp] {
+                if let event = NSEvent.keyEvent(
+                    with: type, location: .zero, modifierFlags: mods, timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, characters: chars, charactersIgnoringModifiers: chars,
+                    isARepeat: false, keyCode: code
+                ) { NSApp.postEvent(event, atStart: false) }
+            }
+            return
+        }
+        if query.hasPrefix("probe:drag=") {
+            // `probe:drag=x1,y1,x2,y2[,steps]` — a pointer drag in window
+            // points (origin bottom-left), posted to the queue so split-view
+            // tracking loops see it like a real one. ~60Hz.
+            let parts = query.dropFirst("probe:drag=".count).split(separator: ",").compactMap { Double($0) }
+            guard parts.count >= 4, let window else { return }
+            let steps = parts.count > 4 ? Int(parts[4]) : 30
+            let from = NSPoint(x: parts[0], y: parts[1]), to = NSPoint(x: parts[2], y: parts[3])
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            func post(_ type: NSEvent.EventType, _ point: NSPoint, after delay: Double) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    if let event = NSEvent.mouseEvent(
+                        with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+                    ) { NSApp.postEvent(event, atStart: false) }
+                }
+            }
+            post(.leftMouseDown, from, after: 0)
+            for step in 1...steps {
+                let t = Double(step) / Double(steps)
+                post(.leftMouseDragged, NSPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t), after: 0.016 * Double(step))
+            }
+            post(.leftMouseUp, to, after: 0.016 * Double(steps + 1))
+            return
+        }
+        if query.hasPrefix("probe:click=") {
+            // `probe:click=x,y[,count]` — a click (or double-click) at window
+            // points, posted like `probe:drag`.
+            let parts = query.dropFirst("probe:click=".count).split(separator: ",").compactMap { Double($0) }
+            guard parts.count >= 2, let window else { return }
+            let point = NSPoint(x: parts[0], y: parts[1])
+            let clicks = parts.count > 2 ? Int(parts[2]) : 1
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            for count in 1...max(1, clicks) {
+                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                    if let event = NSEvent.mouseEvent(
+                        with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: count, pressure: 1
+                    ) { NSApp.postEvent(event, atStart: false) }
+                }
+            }
+            return
+        }
+        if query.hasPrefix("probe:move=") {
+            // `probe:move=x,y` — a pointer move at window points, posted so
+            // tracking areas see it.
+            let parts = query.dropFirst("probe:move=".count).split(separator: ",").compactMap { Double($0) }
+            guard parts.count >= 2, let window else { return }
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            if let event = NSEvent.mouseEvent(
+                with: .mouseMoved, location: NSPoint(x: parts[0], y: parts[1]), modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 0, pressure: 0
+            ) { NSApp.postEvent(event, atStart: false) }
+            return
+        }
+        if query == "probe:bar" {
+            // Dump the bottom bar's tab area: every subview's class, frame in
+            // window points, alpha, hidden — the per-folder `+` included.
+            guard let window, let root = window.contentView else { return }
+            func find(_ view: NSView) -> NSView? {
+                if String(describing: type(of: view)) == "TabsAreaView", !view.isHiddenOrHasHiddenAncestor { return view }
+                for sub in view.subviews { if let hit = find(sub) { return hit } }
+                return nil
+            }
+            var lines: [String] = []
+            if let area = find(root) {
+                for sub in area.subviews {
+                    let f = sub.convert(sub.bounds, to: nil)
+                    let extra = (sub as? NSButton).map { " tip='\($0.toolTip ?? "")'" } ?? ""
+                    lines.append("\(type(of: sub)) x=\(Int(f.minX)) y=\(Int(f.minY)) w=\(Int(f.width)) h=\(Int(f.height)) alpha=\(String(format: "%.2f", sub.alphaValue)) hidden=\(sub.isHidden)\(extra)")
+                }
+            } else {
+                lines.append("no TabsAreaView")
+            }
+            try? (lines.joined(separator: "\n") + "\n").write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
+            return
+        }
+        if query == "probe:hit" {
+            // The search-hit mark as placed: its range and the text under it.
+            guard let controller, let manager = controller.textView?.emphasisManager else { return }
+            let text = controller.text as NSString
+            let textView = controller.textView!
+            let report = manager.getEmphases(for: Self.hitEmphasisID).map { e -> String in
+                let range = NSIntersectionRange(e.range, NSRange(location: 0, length: text.length))
+                let rects = textView.layoutManager.rectsFor(range: range).map { "\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))x\(Int($0.height))" }
+                let layers = (textView.layer?.sublayers ?? []).compactMap { $0 as? CAShapeLayer }.filter { $0.fillColor != nil }
+                    .map { "\(Int($0.frame.minX)),\(Int($0.frame.minY)) \(Int($0.frame.width))x\(Int($0.frame.height))" }
+                return "range=\(e.range) text='\(text.substring(with: range))' rectsNow=[\(rects.joined(separator: "; "))] shapeLayers=[\(layers.joined(separator: "; "))] visible=\(textView.visibleRect) wrapped=\(isWrapped)"
+            }.joined(separator: " | ")
+            try? ((report.isEmpty ? "no hit mark" : report) + " caret=\(cursorPosition.map { "\($0.line):\($0.column)" } ?? "nil")\n")
+                .write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
+            return
+        }
+        if query == "probe:explorer" {
+            // The tree's width: live constraint, stored preference, and the
+            // grab strip's frame in window points (for `probe:drag`), plus
+            // which view a hit at the strip's centre lands on.
+            guard let window else { return }
+            let frame = explorerHandle.convert(explorerHandle.bounds, to: nil)
+            let centre = NSPoint(x: frame.midX, y: frame.midY)
+            let hit = window.contentView?.hitTest(window.contentView!.convert(centre, from: nil))
+            let report = "width=\(explorerWidth.constant) stored=\(FileExplorerView.width) expanded=\(explorerExpanded) "
+                + "handle=\(explorerHandle.isHidden ? "hidden" : "shown") handleFrame=\(frame) pane=\(convert(bounds, to: nil)) "
+                + "hit=\(hit.map { String(describing: type(of: $0)) } ?? "nil")\n"
+            try? report.write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
             return
         }
         if query == "probe:back" { goBack(); return }
@@ -528,6 +837,10 @@ final class EditorPane: NSView, WorkspacePane {
             // Free two-axis scrolling: with wrapping off a code view is a plane,
             // and AppKit's axis lock makes diagonal trackpad gestures stutter.
             controller.scrollView?.usesPredominantAxisScrolling = false
+            // The library gives the scroll view the theme background (alpha 0
+            // here) but leaves it *drawing* one — AppKit then composites the
+            // clip opaque. Off, so the pane's `contentWash` shows through.
+            controller.scrollView?.drawsBackground = false
             // macOS 14 stopped clipping subviews by default; the gutter is a
             // floating subview sized to the whole document, so its line
             // numbers were painting up over the file header.
@@ -550,13 +863,16 @@ final class EditorPane: NSView, WorkspacePane {
             ])
             self.controller = controller
         }
+        // The boundary: a preview cannot be mutated by any path — key, menu,
+        // drag-drop, chord — until it's entered (`enterPreview`).
+        controller?.textView?.isEditable = !preview
         filePath = path
         isDirty = false // the coordinator saw the programmatic setText; undo it
         emptyLabel.isHidden = true
         explorer.reveal(path: path)
         bufferLanguage = language
         watchFile(path)
-        fileHeader.isHidden = false
+        setFileHeaderVisible(true)
         fileHeader.configure(name: displayName(for: path), markdown: isMarkdown, previewOn: isMarkdown && previewMode)
         applyViewMode()
 
@@ -688,18 +1004,98 @@ final class EditorPane: NSView, WorkspacePane {
         }
     }
 
-    /// Preview → real: same text, unwrapped, the server learns of it, the
-    /// tree folds away. Reached by double-click/↩ in the tree, the search
-    /// bar, or the first keystroke into a preview.
+    /// Preview → real: same text, unwrapped, editable, the server learns of
+    /// it, the tree folds away. Reached by double-click/↩ in the tree, the
+    /// search bar, or one of the buffer gestures in `enterPreview`.
     private func commitPreview() {
         guard let controller, let filePath else { return }
         let wasPreview = isPreview
         isPreview = false
         isWrapped = false
         controller.configuration = Self.configuration(wrap: false)
+        controller.textView?.isEditable = true
         if wasPreview { announceOpen(path: filePath, text: controller.text) }
         recordVisit(filePath)
         setExplorerExpanded(false)
+    }
+
+    // MARK: Entering a preview from the buffer
+
+    /// An editing keystroke into a read-only preview enters the file and
+    /// then applies: the buffer is committed, and the very same event is
+    /// re-sent through `NSApp` on the next turn so it takes the ordinary
+    /// path — the library's key monitor, the menu's key equivalents, the
+    /// (now editable) text view — as if you had typed it into the file.
+    private func enterPreview(replaying event: NSEvent) {
+        commitPreview()
+        // Give the window a chance to settle the reconfigured view; a
+        // synchronous re-send would nest inside the dispatch we're in.
+        DispatchQueue.main.async { NSApp.sendEvent(event) }
+    }
+
+    /// Only the preview's own text view counts: keys aimed at the tree, the
+    /// search field or a terminal never enter anything.
+    private var previewBufferIsFirstResponder: Bool {
+        guard isPreview, let textView = controller?.textView, let window else { return false }
+        return window.firstResponder === textView
+    }
+
+    /// A key that would insert or delete text: printable characters, ⌫ ⌦ ↩
+    /// ⇥, no ⌘/⌃. Navigation (arrows, page, home/end, esc) is not editing
+    /// and moves nothing in a preview — it doesn't enter the file.
+    private static func isEditingKey(_ event: NSEvent) -> Bool {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard !mods.contains(.command), !mods.contains(.control),
+              let scalar = event.charactersIgnoringModifiers?.unicodeScalars.first else { return false }
+        if scalar.value == UInt32(NSDeleteFunctionKey) { return true } // ⌦
+        // The function-key plane (arrows, F-keys, page/home/end) is navigation.
+        return !(0xF700...0xF8FF).contains(scalar.value)
+    }
+
+    /// The ⌘/⌥ chords that edit: cut, paste, comment, indent, move and
+    /// duplicate lines. Copy, select-all, find, add-caret are not edits.
+    private static func isEditingChord(_ event: NSEvent) -> Bool {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            .subtracting([.function, .numericPad])
+        let chars = event.charactersIgnoringModifiers ?? ""
+        if mods == [.command] { return ["x", "v", "/", "[", "]"].contains(chars) }
+        let vertical = [String(UnicodeScalar(UInt16(NSUpArrowFunctionKey))!),
+                        String(UnicodeScalar(UInt16(NSDownArrowFunctionKey))!)]
+        if vertical.contains(chars) { return mods == [.option] || mods == [.option, .shift] }
+        return false
+    }
+
+    /// Typing reaches here because the read-only text view passed the key
+    /// up the responder chain (its `keyDown` only interprets when editable).
+    override func keyDown(with event: NSEvent) {
+        if previewBufferIsFirstResponder, Self.isEditingKey(event) {
+            enterPreview(replaying: event)
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    /// Key equivalents are offered to the view tree before the menu bar, so
+    /// ⌘X/⌘V into a preview are caught here — before Edit → Cut would reach
+    /// the read-only text view and do nothing.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if previewBufferIsFirstResponder, Self.isEditingChord(event) {
+            enterPreview(replaying: event)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    /// Double-click in the buffer enters the file (owner ask 2026-09-16),
+    /// the word it selected staying selected. Detected off the selection
+    /// change the library's word-select makes synchronously inside the
+    /// click's `mouseDown`, so the current event is that click.
+    private func enterPreviewIfDoubleClicked() {
+        guard isPreview, let textView = controller?.textView,
+              let event = NSApp.currentEvent, event.type == .leftMouseDown, event.clickCount == 2,
+              let window, event.windowNumber == window.windowNumber,
+              textView.bounds.contains(textView.convert(event.locationInWindow, from: nil)) else { return }
+        commitPreview()
     }
 
     // MARK: Header + markdown preview
@@ -746,8 +1142,10 @@ final class EditorPane: NSView, WorkspacePane {
         clearHitMark()
         schedulePreviewRender()
         if isPreview {
-            // Typing into a preview is entering the file: unwrap, fold the
-            // tree, tell the server — same as double-click/↩ (owner call).
+            // A preview is read-only, so no edit should reach here; if one
+            // ever does (a library path that skips `isEditable`), entering
+            // the file is the only honest response — the text has changed.
+            NSLog("Atelier: a preview buffer was mutated; entering the file")
             commitPreview()
         }
         if Settings.autosave, !isPreview {
@@ -773,14 +1171,82 @@ final class EditorPane: NSView, WorkspacePane {
     /// or reveal.
     func reveal(line: Int, column: Int, highlightLength: Int? = nil) {
         guard let controller else { return }
-        controller.setCursorPositions([CursorPosition(line: line, column: column)], scrollToVisible: true)
+        controller.setCursorPositions([CursorPosition(line: line, column: column)], scrollToVisible: false)
         clearHitMark()
-        guard let highlightLength, highlightLength > 0,
+        revealGeneration &+= 1
+        let generation = revealGeneration
+        // Centre now, off whatever geometry exists; then again after the
+        // window has run a layout pass, when the lines the first scroll made
+        // visible have their real heights (owner report 2026-09-16: hits
+        // landed off-centre or off-screen, and the mark sometimes missing).
+        centerLine(line)
+        placeHitMark(line: line, column: column, length: highlightLength)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.revealGeneration == generation else { return }
+            self.centerLine(line)
+            self.placeHitMark(line: line, column: column, length: highlightLength)
+        }
+    }
+
+    private var revealGeneration = 0
+
+    /// A search hit lands: the tools report a byte column, the buffer wants
+    /// characters, so convert against the line's own UTF-8 first.
+    func reveal(hit: SearchHit) {
+        reveal(line: hit.line, column: characterColumn(line: hit.line, byteColumn: hit.byteColumn), highlightLength: hit.length)
+    }
+
+    /// 1-based byte column on `line` → 1-based UTF-16 column. Past the line's
+    /// end (or mid-sequence, which a real match start never is) it clamps.
+    private func characterColumn(line: Int, byteColumn: Int) -> Int {
+        guard let controller, let start = offset(line: line, column: 1) else { return byteColumn }
+        let text = controller.text as NSString
+        let lineRange = text.lineRange(for: NSRange(location: start, length: 0))
+        let bytes = Array(text.substring(with: lineRange).utf8)
+        let prefix = bytes.prefix(max(0, byteColumn - 1))
+        return String(decoding: prefix, as: UTF8.self).utf16.count + 1
+    }
+
+    /// Scroll so `line` (1-based) sits at the viewport's vertical centre.
+    /// The layout manager only knows real heights for lines it has laid out
+    /// — a wrapped preview estimates the rest at one row each — so each
+    /// scroll is followed by a forced layout and a re-measure, until the
+    /// line stops moving (a few passes at most). Horizontal: a wrapped
+    /// buffer never scrolls sideways; an unwrapped one keeps the library's
+    /// own caret-follow, so the column is on screen without cutting the
+    /// line start when it doesn't have to.
+    private func centerLine(_ line: Int) {
+        guard let controller, let textView = controller.textView,
+              let scrollView = controller.scrollView else { return }
+        let clip = scrollView.contentView
+        for _ in 0..<4 {
+            guard let position = textView.layoutManager.textLineForIndex(line - 1) else { return }
+            let lineMid = position.yPos + position.height / 2
+            let docHeight = max(textView.frame.height, textView.layoutManager.estimatedHeight())
+            let target = min(max(0, lineMid - clip.bounds.height / 2), max(0, docHeight - clip.bounds.height))
+            let before = clip.bounds.origin
+            if abs(before.y - target) < 0.5 { break }
+            clip.scroll(to: NSPoint(x: isWrapped ? 0 : before.x, y: target))
+            scrollView.reflectScrolledClipView(clip)
+            textView.needsLayout = true
+            textView.layoutSubtreeIfNeeded()
+        }
+        if !isWrapped {
+            // Column on screen too — the library's padded caret-follow.
+            textView.scrollSelectionToVisible()
+        }
+    }
+
+    /// The search-hit mark, drawn from the layout the line has *now* — the
+    /// emphasis manager builds its shape once at add time, so a mark placed
+    /// before the line was laid out had no shape to draw.
+    private func placeHitMark(line: Int, column: Int, length: Int?) {
+        guard let controller, let length, length > 0,
               let start = offset(line: line, column: column),
               let emphasisManager = controller.textView?.emphasisManager else { return }
         let text = controller.text as NSString
-        let range = NSRange(location: start, length: min(highlightLength, text.length - start))
-        emphasisManager.addEmphases([Emphasis(range: range, style: .standard)], for: Self.hitEmphasisID)
+        let range = NSRange(location: start, length: min(length, text.length - start))
+        emphasisManager.replaceEmphases([Emphasis(range: range, style: .standard)], for: Self.hitEmphasisID)
     }
 
     private static let hitEmphasisID = "search.hit"
@@ -871,7 +1337,10 @@ final class EditorPane: NSView, WorkspacePane {
         updateDiagnosticStrip()
     }
 
-    @objc private func caretMoved() { updateDiagnosticStrip() }
+    @objc private func caretMoved() {
+        enterPreviewIfDoubleClicked()
+        updateDiagnosticStrip()
+    }
 
     /// The message for the diagnostic under the caret, in a one-line strip
     /// floating over the bottom of the buffer (so the text never reflows as
@@ -970,9 +1439,9 @@ final class EditorPane: NSView, WorkspacePane {
 
     // MARK: Configuration
 
-    /// One Mocha (§2.9): syntax from `Theme.Editor`, background `base` at
-    /// fieldAlpha so the behind-window blur reads through, JetBrains Mono at
-    /// terminal size. Minimap off — not this app's furniture. Bracket
+    /// One Mocha (§2.9): syntax from `Theme.Editor`, background clear — the
+    /// pane's `contentWash` paints base at fieldAlpha exactly once so the
+    /// behind-window blur reads through — JetBrains Mono at terminal size. Minimap off — not this app's furniture. Bracket
     /// emphasis nil: the default flash is a motion the inventory doesn't own.
     /// A preview wraps to the pane; everything else is identical.
     /// The fine map (§2.9 continued, 2026-09-16): one Catppuccin colour per
@@ -1036,7 +1505,13 @@ final class EditorPane: NSView, WorkspacePane {
                     text: .init(color: Theme.Editor.text),
                     insertionPoint: Theme.Editor.cursor,
                     invisibles: .init(color: Theme.Editor.invisibles),
-                    background: Theme.Elevation.base,
+                    // Fully transparent: the library would paint this on the
+                    // scroll view *and* the gutter, over the pane's own coat;
+                    // the pane's `contentWash` is the one owner of the field
+                    // colour. Base at alpha 0 rather than `.clear` — the
+                    // library reads the colour's brightness for its light/dark
+                    // choices, and `.clear` is generic gray, which throws.
+                    background: Theme.Elevation.base.withAlphaComponent(0),
                     lineHighlight: Theme.Editor.lineHighlight,
                     selection: Theme.Editor.selection,
                     keywords: .init(color: Theme.Editor.keyword),
@@ -1307,5 +1782,48 @@ extension EditorPane: JumpToDefinitionDelegate {
     func openLink(link: JumpToDefinitionLink) {
         guard let url = link.url else { return }
         onNavigateRequest?(url.path, link.targetRange.start.line, link.targetRange.start.column)
+    }
+}
+
+/// The grab strip on the file tree's edge: invisible, a few points wide,
+/// centred on the tree's hairline so it reads as the hairline being
+/// draggable. The pointer says ↔ over it; a drag resizes the tree live and
+/// the release remembers the width; a double-click restores the default.
+/// Small on purpose (owner call 2026-09-16: "smallish grab area") — the
+/// tree's rows and the buffer's first column stay clickable right beside it.
+private final class ExplorerResizeHandle: NSView {
+    static let width: CGFloat = 5
+    /// Pointer x in the superview's coordinates, each drag step.
+    var onDrag: ((CGFloat) -> Void)?
+    var onDragEnd: (() -> Void)?
+    var onReset: (() -> Void)?
+
+    init() {
+        super.init(frame: .zero)
+        let area = NSTrackingArea(rect: .zero, options: [.cursorUpdate, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
+    override func cursorUpdate(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let window, let superview else { return }
+        if event.clickCount == 2 {
+            onReset?()
+            return
+        }
+        var current = event
+        while current.type != .leftMouseUp {
+            guard let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) else { break }
+            current = next
+            if current.type == .leftMouseDragged {
+                onDrag?(superview.convert(current.locationInWindow, from: nil).x)
+            }
+        }
+        onDragEnd?()
     }
 }

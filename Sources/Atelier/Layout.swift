@@ -99,8 +99,9 @@ final class LayoutSplitView: NSSplitView {
     }
 
     /// Brackets a divider drag: `true` on mouse-down, `false` when the drag's
-    /// tracking loop returns. The session freezes terminal PTY resizes between
-    /// the two (§1.5: PTY resize is debounced to drag-end).
+    /// tracking loop returns. The session throttles terminal PTY resizes
+    /// between the two (§1.5 revised 2026-09-16: the grid follows live, the
+    /// process hears one SIGWINCH per beat, the final size lands on release).
     var onDividerDrag: ((Bool) -> Void)?
 
     override func mouseDown(with event: NSEvent) {

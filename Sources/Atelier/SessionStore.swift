@@ -1,3 +1,4 @@
+import AtelierIPC
 import Foundation
 
 /// On-disk snapshot of the workspace (MILESTONE_1 §9): the window → session tree,
@@ -33,8 +34,7 @@ struct PersistedState: Codable {
 
 enum SessionStore {
     static var path: String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return "\(home)/.local/state/atelier/session.json"
+        "\(AtelierIPC.stateDirectory())/session.json"
     }
 
     static func load() -> PersistedState? {

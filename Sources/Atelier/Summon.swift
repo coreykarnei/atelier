@@ -71,9 +71,22 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
 
     var onActivate: ((SummonItem) -> Void)?
     var onEscape: (() -> Void)?
-    /// The arrows moved the selection (not hover — that's too noisy to
-    /// preview on). Hosts that preview the selected row listen here.
-    var onArrowSelect: ((SummonItem) -> Void)?
+    /// The selection landed on a different row — by arrow, by hover, or
+    /// because a fresh result set put row 0 under the highlight. Hosts that
+    /// preview the selected row listen here (the explorer's search: what the
+    /// highlight sits on is what the buffer shows — owner call 2026-09-16,
+    /// eager on arrival and following the pointer). Fired once per distinct
+    /// row; a host that finds it noisy debounces on its side.
+    var onSelectionMove: ((SummonItem) -> Void)?
+    private var lastMovedToId: String?
+
+    private func reportSelectionMove() {
+        guard filtered.indices.contains(table.selectedRow) else { return }
+        let item = filtered[table.selectedRow]
+        guard item.id != lastMovedToId else { return }
+        lastMovedToId = item.id
+        onSelectionMove?(item)
+    }
     /// Fired whenever the filtered row set changes — hosts that size themselves
     /// to the content (the palette card) track it; embedded hosts ignore it.
     var onContentChange: (() -> Void)?
@@ -163,6 +176,7 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
             guard let self, row != table.selectedRow, filtered.indices.contains(row) else { return }
             table.selectRowIndexes([row], byExtendingSelection: false)
             highlight.update(for: table, animated: false)
+            reportSelectionMove()
         }
         table.addTableColumn(NSTableColumn(identifier: .init("summon")))
 
@@ -278,6 +292,9 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
         table.layoutSubtreeIfNeeded()
         highlight.update(for: table, animated: false)
         onContentChange?()
+        // Eager: the row the highlight landed on is already "selected" —
+        // hosts that preview the selection hear about it without a keystroke.
+        reportSelectionMove()
     }
 
     private func activateSelected() {
@@ -333,14 +350,14 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
             table.selectRowIndexes([min(table.selectedRow + 1, filtered.count - 1)], byExtendingSelection: false)
             table.scrollRowToVisible(table.selectedRow)
             highlight.update(for: table, animated: true)
-            if filtered.indices.contains(table.selectedRow) { onArrowSelect?(filtered[table.selectedRow]) }
+            reportSelectionMove()
             return true
         case #selector(NSResponder.moveUp(_:)):
             guard !filtered.isEmpty else { return true }
             table.selectRowIndexes([max(table.selectedRow - 1, 0)], byExtendingSelection: false)
             table.scrollRowToVisible(table.selectedRow)
             highlight.update(for: table, animated: true)
-            if filtered.indices.contains(table.selectedRow) { onArrowSelect?(filtered[table.selectedRow]) }
+            reportSelectionMove()
             return true
         default:
             return false

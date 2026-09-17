@@ -7,11 +7,15 @@ import AppKit
 /// and `↩` opens the hit in the buffer at its line and column. Keyboard-
 /// navigable end to end; the fixed pane shape stays fixed — results live on
 /// the card, not a fourth panel.
-/// Where a text search matched: 1-based line and column, and how many
-/// characters — enough to land the caret and mark the match.
+/// Where a text search matched: 1-based line, 1-based **byte** column (what
+/// `rg --column` and `git grep --column` both report — the buffer converts
+/// it to a character column against the line's UTF-8; before 2026-09-17 it
+/// was read as characters, so every `—` or `⌘` ahead of a match on the
+/// line pushed the mark two places right, often clean off the line), and
+/// how many UTF-16 units to mark.
 struct SearchHit {
     let line: Int
-    let column: Int
+    let byteColumn: Int
     let length: Int
 }
 
@@ -57,7 +61,7 @@ final class RepoTextSearch {
         let parts = item.id.split(separator: "\u{0}").map(String.init)
         guard parts.count == 4, let line = Int(parts[1]), let column = Int(parts[2]), let length = Int(parts[3])
         else { return nil }
-        return (URL(fileURLWithPath: "\(root)/\(parts[0])"), SearchHit(line: line, column: column, length: length))
+        return (URL(fileURLWithPath: "\(root)/\(parts[0])"), SearchHit(line: line, byteColumn: column, length: length))
     }
 
     private func run(_ query: String, compact: Bool, completion: @escaping ([SummonItem]) -> Void) {

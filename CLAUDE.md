@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-**v1.0.0 tagged 2026-09-16. Milestones 0, 1 and 2 built (M1.1–M1.6,
+**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17. Milestones 0, 1 and 2 built (M1.1–M1.6,
 M2.1–M2.6 landed); polish pass (docs/POLISH_PLAN.md) built through all
 phases — 0 (foundation tokens), 1 (cockpit), 2 (distances), 3 (arrivals),
 4 (overlay physiology).** Read `VISION.md` (the
@@ -168,6 +168,74 @@ in `WindowBlur.swift`, fieldAlpha 0.75 = Ghostty parity, terminals paint the
 wash exactly once) and the **content type scale** (`Theme.TypeScale`,
 ⌘+/⌘−/⌘0, terminals + editor across all windows, JetBrains Mono at Ghostty's
 14pt default; chrome never scales).
+
+**Post-release tweaks (2026-09-16, `feat/post-release-tweaks`):** the
+editor is a single-wash field like the terminals — `EditorPane` paints no
+pane colour; `contentWash` (crust while empty, base with a file) is the one
+coat and the library's scroll view/gutter background is transparent
+(alpha-probed at 0.749 everywhere, where the buffer used to compound to
+~0.94). The click-preview is **read-only** (`isEditable = false`): scroll,
+select, copy — never mutate. Entering the file happens by exactly these:
+tree double-click/↩, double-click in the buffer, or an editing keystroke
+into the buffer (typing, ⌫, ⌘X/⌘V, the line chords), which enters first
+and then replays the key (`EditorPane.enterPreview`; two vendored patches
+carry it — CodeEditTextView #5, CodeEditSourceEditor #9). The project row
+no longer folds tabs into an `…` menu: tabs floor at 180pt and the row
+scrolls sideways (swipe, or a plain wheel), the clipped edge fades, and
+selecting a tab glides it into view. A worktree or remote folder always
+wears its label tab, even as the only group left. Dev: `ATELIER_STATE_DIR`
+relocates the socket + session file so a test build can run beside the
+live app (unix socket paths cap at ~100 chars — keep it short), and
+`explorerSearch` gained `probe:preview=`, `probe:enter=<gesture>`,
+`probe:key=` and `probe:drag=`. **Divider drags resize live**: the terminal
+grid follows the pointer and the PTY hears one resize per 50ms beat
+(`FreezableTerminalView.resizeThrottled`; a dispatch beat, not a `Timer`,
+because the split view's tracking mode never fires default-mode timers);
+`resizeFrozen` remains the hard freeze layout rebuilds use. **Search panel**:
+the highlighted row is what the buffer shows — eagerly when results land,
+and following arrows and the pointer (`SummonList.onSelectionMove`, coalesced
+120ms in the explorer); a revealed hit is centred by measuring the line after
+a forced layout pass (wrapped previews estimate unlaid lines at one row) and
+the hit mark is placed from that layout, twice (`EditorPane.reveal`); text
+hits stay on screen until the engine answers, and the FSEvents `.git` filter
+compares Foundation-resolved paths on both sides — before, `/private/tmp`
+roots let the explorer's own `git status` reload the tree in a loop, and
+every reload blanked the results (`ATELIER_FS_TRACE=1` logs the events). **The tree's edge drags** (`ExplorerResizeHandle`, a 5pt strip on the
+hairline, ↔ cursor): the width is one preference for every pane
+(`FileExplorerView.width`, 160–560, clamped so the buffer keeps a column),
+remembered across launches; double-click the edge restores 220. **Each folder carries its own `+`** (2026-09-16, owner design): an 18pt
+slot is reserved at every folder cell's trailing end, always, so hovering
+never reflows the strip; the glyph is always drawn — a whisper at rest
+(subtext0 at α 0.22, the luminance of overlay0 at 0.35), full subtext0 in
+the active session's folder and in the folder under the pointer (cell,
+label or any of its tabs — `FolderView.onHoverChange`, a second geometric
+tracking area). It hugs the last tab by 2pt with a 3pt cell pad after it
+(the ink lands ~7pt off the closed edge, a hair more than a tab's 6),
+folders sit 14pt apart, and the 12pt glyph wears a 16pt pad — the
+2026-09-17 feel-check found a 10pt mark floating in the inter-folder gap.
+The active tab's close `×` likewise rests at α 0.35 and rises to 0.85 over
+its tab, instead of hiding until hover. Clicking a folder's `+` asks for a session *there*:
+the worktree chooser opens with that worktree preselected (New… stays one
+step away from any folder), worktrees off starts straight on that root, a
+remote folder gets another session on the host. The trailing `+` survives
+only in bare-tabs mode (main alone, no folder chrome); ⌥⌘T is unchanged
+(sibling of the active session). Dev probes: `probe:bar` dumps the tab
+area, `probe:move=x,y` posts a pointer move — note posted moves do **not**
+drive tracking areas; to exercise hover, warp the real pointer
+(`CGWarpMouseCursorPosition` + a posted `CGEvent`, as the 2026-09-17
+feel-check did) with the app frontmost (`.activeInKeyWindow`). **Search
+hits mark the right characters** (2026-09-17, owner report: many text hits
+showed no highlight): `rg --column` and `git grep --column` both report a
+1-based *byte* column, and the buffer read it as characters, so every `—`,
+`⌘` or `⌃` ahead of the match on its line pushed the mark two places
+right — often clean off the line, where it clamped onto the newline and
+drew nothing. `SearchHit.byteColumn` is converted against the line's own
+UTF-8 in `EditorPane.reveal(hit:)`. The second half was the library:
+`rectsFor(range:in:)` fed *line*-relative offsets to a fragment whose
+x-lookup is fragment-relative, so on any soft-wrapped row after the first
+the mark collapsed to a sliver at the wrap point — every find/search mark
+on a wrapped preview past row one (CodeEditTextView patch #6). `probe:hit`
+reads the placed mark's range, text, layout rects and layer frames back.
 
 ## Commands
 

@@ -581,7 +581,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
                 session.editorPane.lspRoot = session.cwd
                 try session.editorPane.open(path: url.path, preview: preview)
                 if let hit {
-                    session.editorPane.reveal(line: hit.line, column: hit.column, highlightLength: hit.length)
+                    session.editorPane.reveal(hit: hit)
                 } else if let cursor {
                     session.editorPane.reveal(line: cursor.line, column: cursor.column)
                 }
@@ -983,22 +983,48 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// remote host, not under the local `~/.claude/projects/`. (Reading the
     /// ai-title over the shared ssh link is a possible follow-up.)
     private func refreshTitles() {
-        var changed = false
-        for session in sessions where !session.isRemote {
-            let seed = (session.cwd as NSString).lastPathComponent
-            let resolved = TranscriptTitle.title(sessionId: session.claudeSessionId, cwd: session.cwd) ?? seed
-            if session.title != resolved {
-                session.title = resolved
-                changed = true
+        // Off the main thread and incremental (TranscriptTitle): a day's
+        // transcripts run to 50 MB, and reading them whole every 2 s here
+        // was the ¼–½ s judder the owner saw scrolling the Claude pane.
+        let targets = sessions.filter { !$0.isRemote }.map { (id: $0.claudeSessionId, cwd: $0.cwd) }
+        TranscriptTitle.titles(for: targets) { [weak self] titles in
+            guard let self else { return }
+            var changed = false
+            for session in self.sessions where !session.isRemote {
+                let seed = (session.cwd as NSString).lastPathComponent
+                let resolved = titles[session.claudeSessionId] ?? seed
+                if session.title != resolved {
+                    session.title = resolved
+                    changed = true
+                }
             }
+            if changed { self.updateBottomBar() }
         }
-        if changed { updateBottomBar() }
     }
 
     // MARK: BottomBarDelegate
 
     func bottomBarDidSelectSession(at index: Int) { showSession(at: index) }
     func bottomBarDidRequestNewSession() { requestNewSession() }
+
+    /// A folder's `+`: a sibling *there*. Remote folders get another session
+    /// on the host (the active session's dir when it lives there, else the
+    /// folder's first); a local folder opens the chooser with its worktree
+    /// preselected — one path to New… from any folder — or, worktrees off,
+    /// starts straight on that root.
+    func bottomBarDidRequestNewSession(inGroup groupKey: String) {
+        if groupKey.hasPrefix("ssh://") {
+            let host = String(groupKey.dropFirst("ssh://".count))
+            let sibling = (activeSession?.location.host == host ? activeSession : nil)
+                ?? sessions.first { $0.location.host == host }
+            guard let sibling else { return }
+            adopt(Session(remoteHost: host, remoteDir: sibling.cwd))
+        } else if projectRepoRoot != nil, Settings.worktreesEnabled {
+            showWorktreeChooser(initialPath: groupKey)
+        } else {
+            adopt(Session(ideRoot: groupKey))
+        }
+    }
     /// The tab's `×`: confirm first (Settings → "Ask before closing a
     /// session"; the alert's own "Don't ask again" turns it off). `↩`
     /// confirms. `⌘W` stays immediate — a chord is already a decision.
@@ -1101,7 +1127,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
         }
     }
 
-    func showWorktreeChooser(prefill: String? = nil) {
+    func showWorktreeChooser(prefill: String? = nil, initialPath: String? = nil) {
         guard chooserOverlay == nil, palette == nil, filePicker == nil, repoSearch == nil else { return }
         let container = view
         guard let repoRoot = projectRepoRoot
@@ -1118,8 +1144,9 @@ final class ProjectController: NSObject, BottomBarDelegate {
             mainBranchName = primary.branch == "(detached)" ? (mainBranchName ?? "main") : primary.branch
         }
 
-        // The suggestion is where you already are (owner call 2026-09-08).
-        let initial = worktrees.first { $0.path == activeSession?.cwd }
+        // The suggestion is where you already are (owner call 2026-09-08) —
+        // or the folder whose `+` asked.
+        let initial = worktrees.first { $0.path == (initialPath ?? activeSession?.cwd) }
         let overlay = WorktreeChooserOverlay(worktrees: worktrees, initial: initial, prefill: prefill) { [weak self] in
             self?.dismissChooser()
         }
