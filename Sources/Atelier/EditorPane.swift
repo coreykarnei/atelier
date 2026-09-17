@@ -116,6 +116,11 @@ final class EditorPane: NSView, WorkspacePane {
     }
     private var contentLeading: NSLayoutConstraint!
     private var explorerWidth: NSLayoutConstraint!
+    /// The grab strip on the tree's edge — a few points straddling the
+    /// hairline, cursor says ↔. Drags resize the tree live; release
+    /// remembers the width for every pane (`FileExplorerView.width`).
+    private let explorerHandle = ExplorerResizeHandle()
+    private var explorerDragging = false
     /// Wide (browsing) or folded to the rail (a file is open for real).
     private var explorerExpanded = true
     /// The buffer is a click-preview: soft-wrapped, tree wide, not yet the
@@ -203,6 +208,18 @@ final class EditorPane: NSView, WorkspacePane {
             name: Theme.TypeScale.didChange,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(explorerWidthChanged),
+            name: FileExplorerView.widthDidChange,
+            object: nil
+        )
+    }
+
+    /// Another pane's drag (or a reset) settled on a new tree width.
+    @objc private func explorerWidthChanged() {
+        guard !explorerDragging else { return }
+        layoutExplorer()
     }
 
     @available(*, unavailable)
@@ -304,6 +321,12 @@ final class EditorPane: NSView, WorkspacePane {
             contentHost.bottomAnchor.constraint(equalTo: bottomAnchor),
             contentLeading,
         ])
+        // Frontmost, so the strip wins the hit over the tree's edge and the
+        // buffer's first columns alike. Framed by hand in `layout()`.
+        explorerHandle.onDrag = { [weak self] x in self?.dragExplorerEdge(to: x) }
+        explorerHandle.onDragEnd = { [weak self] in self?.endExplorerDrag() }
+        explorerHandle.onReset = { FileExplorerView.width = FileExplorerView.defaultWidth }
+        addSubview(explorerHandle, positioned: .above, relativeTo: nil)
         layoutExplorer()
         applyWash()
     }
@@ -313,8 +336,49 @@ final class EditorPane: NSView, WorkspacePane {
         explorer.isHidden = !hasRoot
         explorer.setCollapsed(!explorerExpanded)
         let width = !hasRoot ? 0 : (explorerExpanded ? FileExplorerView.width : FileExplorerView.railWidth)
+        setExplorerWidth(width)
+        explorerHandle.isHidden = !(hasRoot && explorerExpanded)
+    }
+
+    private func setExplorerWidth(_ width: CGFloat) {
         explorerWidth.constant = width
         contentLeading.constant = width
+        needsLayout = true
+    }
+
+    /// The widest the tree may be here: the buffer keeps at least a readable
+    /// column, whatever the pane's width. Below the tree's own floor the
+    /// floor wins — a very narrow pane simply can't be resized further.
+    private var explorerWidthCeiling: CGFloat {
+        max(FileExplorerView.minWidth, min(FileExplorerView.maxWidth, bounds.width - 220))
+    }
+
+    private func dragExplorerEdge(to x: CGFloat) {
+        guard explorerExpanded else { return }
+        explorerDragging = true
+        let width = min(max(x.rounded(), FileExplorerView.minWidth), explorerWidthCeiling)
+        guard width != explorerWidth.constant else { return }
+        setExplorerWidth(width)
+        layoutSubtreeIfNeeded()
+    }
+
+    private func endExplorerDrag() {
+        guard explorerDragging else { return }
+        explorerDragging = false
+        FileExplorerView.width = explorerWidth.constant
+        // Another pane may have moved the stored width meanwhile; make sure
+        // this one shows the width it settled on.
+        layoutExplorer()
+    }
+
+    override func layout() {
+        super.layout()
+        let w = ExplorerResizeHandle.width
+        let frame = NSRect(x: explorerWidth.constant - (w - 1) / 2 - 1, y: 0, width: w, height: bounds.height)
+        if explorerHandle.frame != frame {
+            explorerHandle.frame = frame
+            window?.invalidateCursorRects(for: explorerHandle)
+        }
     }
 
     /// The session's directory: what the tree shows and what the language
@@ -491,6 +555,39 @@ final class EditorPane: NSView, WorkspacePane {
                 post(.leftMouseDragged, NSPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t), after: 0.016 * Double(step))
             }
             post(.leftMouseUp, to, after: 0.016 * Double(steps + 1))
+            return
+        }
+        if query.hasPrefix("probe:click=") {
+            // `probe:click=x,y[,count]` — a click (or double-click) at window
+            // points, posted like `probe:drag`.
+            let parts = query.dropFirst("probe:click=".count).split(separator: ",").compactMap { Double($0) }
+            guard parts.count >= 2, let window else { return }
+            let point = NSPoint(x: parts[0], y: parts[1])
+            let clicks = parts.count > 2 ? Int(parts[2]) : 1
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            for count in 1...max(1, clicks) {
+                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                    if let event = NSEvent.mouseEvent(
+                        with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: count, pressure: 1
+                    ) { NSApp.postEvent(event, atStart: false) }
+                }
+            }
+            return
+        }
+        if query == "probe:explorer" {
+            // The tree's width: live constraint, stored preference, and the
+            // grab strip's frame in window points (for `probe:drag`), plus
+            // which view a hit at the strip's centre lands on.
+            guard let window else { return }
+            let frame = explorerHandle.convert(explorerHandle.bounds, to: nil)
+            let centre = NSPoint(x: frame.midX, y: frame.midY)
+            let hit = window.contentView?.hitTest(window.contentView!.convert(centre, from: nil))
+            let report = "width=\(explorerWidth.constant) stored=\(FileExplorerView.width) expanded=\(explorerExpanded) "
+                + "handle=\(explorerHandle.isHidden ? "hidden" : "shown") handleFrame=\(frame) pane=\(convert(bounds, to: nil)) "
+                + "hit=\(hit.map { String(describing: type(of: $0)) } ?? "nil")\n"
+            try? report.write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
             return
         }
         if query == "probe:back" { goBack(); return }
@@ -1616,5 +1713,48 @@ extension EditorPane: JumpToDefinitionDelegate {
     func openLink(link: JumpToDefinitionLink) {
         guard let url = link.url else { return }
         onNavigateRequest?(url.path, link.targetRange.start.line, link.targetRange.start.column)
+    }
+}
+
+/// The grab strip on the file tree's edge: invisible, a few points wide,
+/// centred on the tree's hairline so it reads as the hairline being
+/// draggable. The pointer says ↔ over it; a drag resizes the tree live and
+/// the release remembers the width; a double-click restores the default.
+/// Small on purpose (owner call 2026-09-16: "smallish grab area") — the
+/// tree's rows and the buffer's first column stay clickable right beside it.
+private final class ExplorerResizeHandle: NSView {
+    static let width: CGFloat = 5
+    /// Pointer x in the superview's coordinates, each drag step.
+    var onDrag: ((CGFloat) -> Void)?
+    var onDragEnd: (() -> Void)?
+    var onReset: (() -> Void)?
+
+    init() {
+        super.init(frame: .zero)
+        let area = NSTrackingArea(rect: .zero, options: [.cursorUpdate, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
+    override func cursorUpdate(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let window, let superview else { return }
+        if event.clickCount == 2 {
+            onReset?()
+            return
+        }
+        var current = event
+        while current.type != .leftMouseUp {
+            guard let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) else { break }
+            current = next
+            if current.type == .leftMouseDragged {
+                onDrag?(superview.convert(current.locationInWindow, from: nil).x)
+            }
+        }
+        onDragEnd?()
     }
 }

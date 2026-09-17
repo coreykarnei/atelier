@@ -13,7 +13,28 @@ import CoreServices
 /// FSEvents stream on the root keeps the tree honest while the agent and
 /// shell write files — expansion and selection survive the reload.
 final class FileExplorerView: NSView {
-    static let width: CGFloat = 220
+    /// The tree's width while browsing. Owner-adjustable since 2026-09-16 by
+    /// dragging the tree's edge (`ExplorerResizeHandle` in the editor pane);
+    /// remembered across sessions and launches, one width for every pane.
+    /// Double-click on the edge restores the default.
+    static var width: CGFloat {
+        get {
+            let stored = UserDefaults.standard.double(forKey: widthKey)
+            return stored == 0 ? defaultWidth : clampWidth(CGFloat(stored))
+        }
+        set {
+            let clamped = clampWidth(newValue)
+            guard clamped != width else { return }
+            UserDefaults.standard.set(Double(clamped), forKey: widthKey)
+            NotificationCenter.default.post(name: widthDidChange, object: nil)
+        }
+    }
+    static let defaultWidth: CGFloat = 220
+    static let minWidth: CGFloat = 160
+    static let maxWidth: CGFloat = 560
+    static let widthDidChange = Notification.Name("atelier.explorer.widthDidChange")
+    private static let widthKey = "explorer.width"
+    static func clampWidth(_ w: CGFloat) -> CGFloat { min(max(w.rounded(), minWidth), maxWidth) }
     static let railWidth: CGFloat = 26
 
     /// A file was chosen. `commit` is false for a single click (preview),

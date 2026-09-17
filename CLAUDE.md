@@ -200,7 +200,10 @@ the hit mark is placed from that layout, twice (`EditorPane.reveal`); text
 hits stay on screen until the engine answers, and the FSEvents `.git` filter
 compares Foundation-resolved paths on both sides — before, `/private/tmp`
 roots let the explorer's own `git status` reload the tree in a loop, and
-every reload blanked the results (`ATELIER_FS_TRACE=1` logs the events).
+every reload blanked the results (`ATELIER_FS_TRACE=1` logs the events). **The tree's edge drags** (`ExplorerResizeHandle`, a 5pt strip on the
+hairline, ↔ cursor): the width is one preference for every pane
+(`FileExplorerView.width`, 160–560, clamped so the buffer keeps a column),
+remembered across launches; double-click the edge restores 220.
 
 ## Commands
 
