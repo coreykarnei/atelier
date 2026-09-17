@@ -186,8 +186,21 @@ selecting a tab glides it into view. A worktree or remote folder always
 wears its label tab, even as the only group left. Dev: `ATELIER_STATE_DIR`
 relocates the socket + session file so a test build can run beside the
 live app (unix socket paths cap at ~100 chars — keep it short), and
-`explorerSearch` gained `probe:preview=`, `probe:enter=<gesture>` and
-`probe:key=`.
+`explorerSearch` gained `probe:preview=`, `probe:enter=<gesture>`,
+`probe:key=` and `probe:drag=`. **Divider drags resize live**: the terminal
+grid follows the pointer and the PTY hears one resize per 50ms beat
+(`FreezableTerminalView.resizeThrottled`; a dispatch beat, not a `Timer`,
+because the split view's tracking mode never fires default-mode timers);
+`resizeFrozen` remains the hard freeze layout rebuilds use. **Search panel**:
+the highlighted row is what the buffer shows — eagerly when results land,
+and following arrows and the pointer (`SummonList.onSelectionMove`, coalesced
+120ms in the explorer); a revealed hit is centred by measuring the line after
+a forced layout pass (wrapped previews estimate unlaid lines at one row) and
+the hit mark is placed from that layout, twice (`EditorPane.reveal`); text
+hits stay on screen until the engine answers, and the FSEvents `.git` filter
+compares Foundation-resolved paths on both sides — before, `/private/tmp`
+roots let the explorer's own `git status` reload the tree in a loop, and
+every reload blanked the results (`ATELIER_FS_TRACE=1` logs the events).
 
 ## Commands
 
