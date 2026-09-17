@@ -576,6 +576,42 @@ final class EditorPane: NSView, WorkspacePane {
             }
             return
         }
+        if query.hasPrefix("probe:move=") {
+            // `probe:move=x,y` — a pointer move at window points, posted so
+            // tracking areas see it.
+            let parts = query.dropFirst("probe:move=".count).split(separator: ",").compactMap { Double($0) }
+            guard parts.count >= 2, let window else { return }
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            if let event = NSEvent.mouseEvent(
+                with: .mouseMoved, location: NSPoint(x: parts[0], y: parts[1]), modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 0, pressure: 0
+            ) { NSApp.postEvent(event, atStart: false) }
+            return
+        }
+        if query == "probe:bar" {
+            // Dump the bottom bar's tab area: every subview's class, frame in
+            // window points, alpha, hidden — the per-folder `+` included.
+            guard let window, let root = window.contentView else { return }
+            func find(_ view: NSView) -> NSView? {
+                if String(describing: type(of: view)) == "TabsAreaView", !view.isHiddenOrHasHiddenAncestor { return view }
+                for sub in view.subviews { if let hit = find(sub) { return hit } }
+                return nil
+            }
+            var lines: [String] = []
+            if let area = find(root) {
+                for sub in area.subviews {
+                    let f = sub.convert(sub.bounds, to: nil)
+                    let extra = (sub as? NSButton).map { " tip='\($0.toolTip ?? "")'" } ?? ""
+                    lines.append("\(type(of: sub)) x=\(Int(f.minX)) y=\(Int(f.minY)) w=\(Int(f.width)) h=\(Int(f.height)) alpha=\(String(format: "%.2f", sub.alphaValue)) hidden=\(sub.isHidden)\(extra)")
+                }
+            } else {
+                lines.append("no TabsAreaView")
+            }
+            try? (lines.joined(separator: "\n") + "\n").write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
+            return
+        }
         if query == "probe:explorer" {
             // The tree's width: live constraint, stored preference, and the
             // grab strip's frame in window points (for `probe:drag`), plus

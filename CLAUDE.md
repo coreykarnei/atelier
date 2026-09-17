@@ -203,7 +203,19 @@ roots let the explorer's own `git status` reload the tree in a loop, and
 every reload blanked the results (`ATELIER_FS_TRACE=1` logs the events). **The tree's edge drags** (`ExplorerResizeHandle`, a 5pt strip on the
 hairline, ↔ cursor): the width is one preference for every pane
 (`FileExplorerView.width`, 160–560, clamped so the buffer keeps a column),
-remembered across launches; double-click the edge restores 220.
+remembered across launches; double-click the edge restores 220. **Each folder carries its own `+`** (2026-09-16, owner design): an 18pt
+slot is reserved at every folder cell's trailing end, always, so hovering
+never reflows the strip; the glyph is always drawn — a whisper (α 0.35) at
+rest, full in the active session's folder and in the folder under the
+pointer (cell, label or any of its tabs — `FolderView.onHoverChange`, a
+second geometric tracking area). Clicking it asks for a session *there*:
+the worktree chooser opens with that worktree preselected (New… stays one
+step away from any folder), worktrees off starts straight on that root, a
+remote folder gets another session on the host. The trailing `+` survives
+only in bare-tabs mode (main alone, no folder chrome); ⌥⌘T is unchanged
+(sibling of the active session). Dev probes: `probe:bar` dumps the tab
+area, `probe:move=x,y` posts a pointer move — note posted moves do **not**
+drive tracking areas, so hover volumes are an owner feel-check.
 
 ## Commands
 

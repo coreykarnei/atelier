@@ -3,6 +3,9 @@ import AppKit
 protocol BottomBarDelegate: AnyObject {
     func bottomBarDidSelectSession(at index: Int)
     func bottomBarDidRequestNewSession()
+    /// A folder's own `+`: a new session in that group — the worktree at
+    /// `groupKey`, or another session on the host for an `ssh://host` key.
+    func bottomBarDidRequestNewSession(inGroup groupKey: String)
     func bottomBarDidRequestCloseSession(at index: Int)
     /// Inline rename finished. `title` is the committed text (nil = revert to
     /// the live auto title); a cancelled rename never reaches this.
@@ -76,6 +79,12 @@ final class BottomBar: NSView {
     private static let folderTabHeight: CGFloat = 13
     private static let folderGap: CGFloat = 10
     private static let buttonGap: CGFloat = 6
+    /// Each folder's own `+` (2026-09-16): a slot reserved at the cell's
+    /// trailing end, always, so hovering never reflows the strip. The glyph
+    /// is always there — a whisper at rest, full in the active folder or
+    /// under the pointer — a control at rest, never a hole.
+    private static let addSlotWidth: CGFloat = 18
+    private static let addRestAlpha: CGFloat = 0.35
     private static var cellHeight: CGFloat { tabHeight + folderPadY * 2 }
     /// Row pitch: a cell, the gap, and the lower row's label band.
     private static var rowPitch: CGFloat { cellHeight + rowGap + folderTabHeight }
@@ -108,6 +117,11 @@ final class BottomBar: NSView {
     private var activeIndex = 0
     private var tabViews: [UUID: SessionTabView] = [:]
     private var folderViews: [String: FolderView] = [:]
+    /// One `+` per folder, keyed like the folders. Only in folder mode; bare
+    /// tabs keep the single trailing `addButton`.
+    private var folderAddButtons: [String: HoverPadButton] = [:]
+    /// The folder under the pointer (cell, label, or any of its tabs).
+    private var hoveredGroup: String?
     private var foldersVisible = true
     private var lastFlowWidth: CGFloat = 0
     private var lastFlowHeight: CGFloat = 0
@@ -394,6 +408,7 @@ final class BottomBar: NSView {
         let tabsWidth = Self.folderPadX * 2
             + tabs.reduce(0) { $0 + tabWidth($1) }
             + Self.tabGap * CGFloat(max(0, tabs.count - 1))
+            + (foldersVisible ? Self.tabGap + Self.addSlotWidth : 0)
         let labelWidth = tabs.first.map { FolderView.labelWidth(for: $0.groupLabel) } ?? 0
         return max(tabsWidth, labelWidth + Theme.Elevation.radiusSmall * 2)
     }
@@ -449,9 +464,12 @@ final class BottomBar: NSView {
 
         // Pack, reserving room on the last row for the `+` — and, if anything
         // overflowed, for the `»` too (a second pass with the wider reserve).
-        var packed = pack(chunks: chunks, rowWidth: rowWidth, reserve: 26 + Self.buttonGap)
+        // In folder mode every folder carries its own `+` inside its cell,
+        // so nothing trails the row but the `»` when needed.
+        let addReserve: CGFloat = foldersVisible ? 0 : 26 + Self.buttonGap
+        var packed = pack(chunks: chunks, rowWidth: rowWidth, reserve: addReserve)
         if !packed.overflow.isEmpty {
-            packed = pack(chunks: chunks, rowWidth: rowWidth, reserve: (26 + Self.buttonGap) * 2)
+            packed = pack(chunks: chunks, rowWidth: rowWidth, reserve: addReserve + 26 + Self.buttonGap)
         }
         var rows = packed.rows
         let overflow = packed.overflow
@@ -474,7 +492,12 @@ final class BottomBar: NSView {
             }
             rows[rows.count - 1].append(.overflow)
         }
-        rows[rows.count - 1].append(.add)
+        if foldersVisible {
+            addButton.isHidden = true
+        } else {
+            addButton.isHidden = false
+            rows[rows.count - 1].append(.add)
+        }
 
         place(rows: rows, animated: animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
 
@@ -566,6 +589,7 @@ final class BottomBar: NSView {
     private func place(rows: [[FlowItem]], animated: Bool) {
         var seenTabs = Set<UUID>()
         var seenFolders = Set<String>()
+        var seenGroups = Set<String>()
         var placements: [(NSView, CGRect)] = []
         var arrivals: [NSView] = []
 
@@ -609,6 +633,7 @@ final class BottomBar: NSView {
                     }
                 case .folder(let segment):
                     seenFolders.insert(segment.poolKey)
+                    seenGroups.insert(segment.groupKey)
                     let folder: FolderView
                     if let existing = folderViews[segment.poolKey] {
                         folder = existing
@@ -617,6 +642,7 @@ final class BottomBar: NSView {
                         folder.onDragBegan = { [weak self] view, event in self?.folderDragBegan(view, event) }
                         folder.onDragMoved = { [weak self] view, event in self?.folderDragMoved(view, event) }
                         folder.onDragEnded = { [weak self] view in self?.folderDragEnded(view) }
+                        folder.onHoverChange = { [weak self] view, inside in self?.folderHoverChanged(view, inside) }
                         let key = segment.groupKey
                         folder.branchProvider = key.hasPrefix("ssh://") ? nil : { WorktreeManager.currentBranch(key) }
                         folderViews[segment.poolKey] = folder
@@ -665,6 +691,25 @@ final class BottomBar: NSView {
                         }
                         tabX += tabW + Self.tabGap
                     }
+                    // The folder's `+`, on the group's last segment only.
+                    if tabs.last(where: { $0.groupKey == segment.groupKey })?.id == segment.tabs.last?.id {
+                        let add: HoverPadButton
+                        if let existing = folderAddButtons[segment.groupKey] {
+                            add = existing
+                        } else {
+                            add = makeFolderAddButton()
+                            folderAddButtons[segment.groupKey] = add
+                            tabsArea.addSubview(add)
+                            arrivals.append(add)
+                        }
+                        add.toolTip = "New session in \(FolderView.plainLabel(segment.label))"
+                        if !folderDragged {
+                            placements.append((add, CGRect(
+                                x: x + width - Self.folderPadX - Self.addSlotWidth, y: tabY,
+                                width: Self.addSlotWidth, height: Self.tabHeight
+                            )))
+                        }
+                    }
                 case .overflow:
                     placements.append((overflowButton, CGRect(x: x + 2, y: tabY, width: 22, height: Self.tabHeight)))
                 case .add:
@@ -685,6 +730,12 @@ final class BottomBar: NSView {
             folderViews[key] = nil
             departed.append(view)
         }
+        for (key, view) in folderAddButtons where !seenGroups.contains(key) {
+            folderAddButtons[key] = nil
+            departed.append(view)
+        }
+        if hoveredGroup.map({ !seenGroups.contains($0) }) ?? false { hoveredGroup = nil }
+        refreshAddVolumes(animated: animated)
         for view in departed {
             if animated {
                 NSAnimationContext.runAnimationGroup({ ctx in
@@ -799,6 +850,7 @@ final class BottomBar: NSView {
         // Lift the folder and its tabs above the rest of the strip.
         tabsArea.addSubview(folder)
         for info in tabs where info.groupKey == key { if let view = tabViews[info.id] { tabsArea.addSubview(view) } }
+        if let add = folderAddButtons[key] { tabsArea.addSubview(add) }
         folder.shadow = Theme.Elevation.raisedShadow
         NSCursor.closedHand.push()
     }
@@ -810,6 +862,7 @@ final class BottomBar: NSView {
         let dx = x - folder.frame.minX
         folder.frame.origin.x = x
         for info in tabs where info.groupKey == groupDrag.key { tabViews[info.id]?.frame.origin.x += dx }
+        folderAddButtons[groupDrag.key]?.frame.origin.x += dx
         let cell = CGRect(x: folder.frame.minX, y: folder.frame.minY, width: folder.frame.width, height: Self.cellHeight)
         let proposed = proposeGroupOrder(dragging: groupDrag.key, frame: cell)
         if proposed.map(\.id) != tabs.map(\.id) {
@@ -971,6 +1024,49 @@ final class BottomBar: NSView {
     // MARK: Actions
 
     @objc private func addTapped() { delegate?.bottomBarDidRequestNewSession() }
+
+    // MARK: Per-folder `+` (2026-09-16)
+
+    private func makeFolderAddButton() -> HoverPadButton {
+        let button = HoverPadButton()
+        let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
+        button.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?.withSymbolConfiguration(config)
+        button.contentTintColor = Theme.chromeMutedText
+        button.setAccessibilityLabel("New session in this folder")
+        button.target = self
+        button.action = #selector(folderAddTapped(_:))
+        button.alphaValue = Self.addRestAlpha
+        return button
+    }
+
+    @objc private func folderAddTapped(_ sender: NSButton) {
+        guard let key = folderAddButtons.first(where: { $0.value === sender })?.key else { return }
+        delegate?.bottomBarDidRequestNewSession(inGroup: key)
+    }
+
+    private var activeGroupKey: String? { tabs.first { $0.index == activeIndex }?.groupKey }
+
+    private func folderHoverChanged(_ folder: FolderView, _ inside: Bool) {
+        guard let key = folder.groupKey else { return }
+        let next: String? = inside ? key : (hoveredGroup == key ? nil : hoveredGroup)
+        guard next != hoveredGroup else { return }
+        hoveredGroup = next
+        refreshAddVolumes(animated: true)
+    }
+
+    /// Three volumes for one glyph: a whisper at rest, full in the active
+    /// folder and under the pointer. Weight changes only — nothing moves.
+    private func refreshAddVolumes(animated: Bool) {
+        let active = activeGroupKey
+        let duration = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0.12 : 0
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = duration
+            for (key, button) in folderAddButtons {
+                let alpha: CGFloat = key == active || key == hoveredGroup ? 1 : Self.addRestAlpha
+                if button.alphaValue != alpha { button.animator().alphaValue = alpha }
+            }
+        }
+    }
     @objc private func layoutTapped() { delegate?.bottomBarDidToggleLayout() }
     @objc private func settingsTapped() { delegate?.bottomBarDidRequestSettings() }
     @objc private func overflowTapped() {
@@ -1397,6 +1493,9 @@ private final class FolderView: NSView {
     private var hoverTimer: Timer?
     private var reveal: BranchRevealView?
     private var labelTracking: NSTrackingArea?
+    /// The pointer entered/left the folder — cell, label, or its tabs
+    /// (tracking is geometric, so the tabs sitting over the cell count).
+    var onHoverChange: ((FolderView, Bool) -> Void)?
     var onDragBegan: ((FolderView, NSEvent) -> Void)?
     var onDragMoved: ((FolderView, NSEvent) -> Void)?
     var onDragEnded: ((FolderView) -> Void)?
@@ -1406,6 +1505,12 @@ private final class FolderView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: ["cell": true]
+        ))
     }
 
     /// The label tab's hit region — the folder's handle.
@@ -1445,6 +1550,10 @@ private final class FolderView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
+        if event.trackingArea?.userInfo?["cell"] != nil {
+            onHoverChange?(self, true)
+            return
+        }
         guard branchProvider != nil, !isDragging else { return }
         hoverTimer?.invalidate()
         hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
@@ -1453,6 +1562,10 @@ private final class FolderView: NSView {
     }
 
     override func mouseExited(with event: NSEvent) {
+        if event.trackingArea?.userInfo?["cell"] != nil {
+            onHoverChange?(self, false)
+            return
+        }
         hoverTimer?.invalidate()
         hoverTimer = nil
         hideReveal()
@@ -1544,6 +1657,9 @@ private final class FolderView: NSView {
     private static func split(_ label: String) -> (tree: Bool, text: String) {
         label.hasPrefix(treeMarker) ? (true, String(label.dropFirst(treeMarker.count))) : (false, label)
     }
+
+    /// The label as words (tooltips): `⎇ dir` → `dir`.
+    static func plainLabel(_ label: String) -> String { split(label).text }
 
     /// The tree, drawn: a conifer — two stacked tiers on a short trunk, 10×12
     /// (a conifer was the owner's pick 2026-09-08; a canopy turned to a
