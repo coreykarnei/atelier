@@ -223,7 +223,15 @@ only in bare-tabs mode (main alone, no folder chrome); ⌥⌘T is unchanged
 area, `probe:move=x,y` posts a pointer move — note posted moves do **not**
 drive tracking areas; to exercise hover, warp the real pointer
 (`CGWarpMouseCursorPosition` + a posted `CGEvent`, as the 2026-09-17
-feel-check did) with the app frontmost (`.activeInKeyWindow`).
+feel-check did) with the app frontmost (`.activeInKeyWindow`). **Search
+hits mark the right characters** (2026-09-17, owner report: many text hits
+showed no highlight): `rg --column` and `git grep --column` both report a
+1-based *byte* column, and the buffer read it as characters, so every `—`,
+`⌘` or `⌃` ahead of the match on its line pushed the mark two places
+right — often clean off the line, where it clamped onto the newline and
+drew nothing. `SearchHit.byteColumn` is converted against the line's own
+UTF-8 in `EditorPane.reveal(hit:)`; `probe:hit` reads the placed mark's
+range and text back.
 
 ## Commands
 

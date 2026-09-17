@@ -612,6 +612,18 @@ final class EditorPane: NSView, WorkspacePane {
             try? (lines.joined(separator: "\n") + "\n").write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
             return
         }
+        if query == "probe:hit" {
+            // The search-hit mark as placed: its range and the text under it.
+            guard let controller, let manager = controller.textView?.emphasisManager else { return }
+            let text = controller.text as NSString
+            let report = manager.getEmphases(for: Self.hitEmphasisID).map { e -> String in
+                let range = NSIntersectionRange(e.range, NSRange(location: 0, length: text.length))
+                return "range=\(e.range) text='\(text.substring(with: range))'"
+            }.joined(separator: " | ")
+            try? ((report.isEmpty ? "no hit mark" : report) + " caret=\(cursorPosition.map { "\($0.line):\($0.column)" } ?? "nil")\n")
+                .write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
+            return
+        }
         if query == "probe:explorer" {
             // The tree's width: live constraint, stored preference, and the
             // grab strip's frame in window points (for `probe:drag`), plus
@@ -1173,6 +1185,23 @@ final class EditorPane: NSView, WorkspacePane {
     }
 
     private var revealGeneration = 0
+
+    /// A search hit lands: the tools report a byte column, the buffer wants
+    /// characters, so convert against the line's own UTF-8 first.
+    func reveal(hit: SearchHit) {
+        reveal(line: hit.line, column: characterColumn(line: hit.line, byteColumn: hit.byteColumn), highlightLength: hit.length)
+    }
+
+    /// 1-based byte column on `line` → 1-based UTF-16 column. Past the line's
+    /// end (or mid-sequence, which a real match start never is) it clamps.
+    private func characterColumn(line: Int, byteColumn: Int) -> Int {
+        guard let controller, let start = offset(line: line, column: 1) else { return byteColumn }
+        let text = controller.text as NSString
+        let lineRange = text.lineRange(for: NSRange(location: start, length: 0))
+        let bytes = Array(text.substring(with: lineRange).utf8)
+        let prefix = bytes.prefix(max(0, byteColumn - 1))
+        return String(decoding: prefix, as: UTF8.self).utf16.count + 1
+    }
 
     /// Scroll so `line` (1-based) sits at the viewport's vertical centre.
     /// The layout manager only knows real heights for lines it has laid out

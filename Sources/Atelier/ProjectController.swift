@@ -581,7 +581,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
                 session.editorPane.lspRoot = session.cwd
                 try session.editorPane.open(path: url.path, preview: preview)
                 if let hit {
-                    session.editorPane.reveal(line: hit.line, column: hit.column, highlightLength: hit.length)
+                    session.editorPane.reveal(hit: hit)
                 } else if let cursor {
                     session.editorPane.reveal(line: cursor.line, column: cursor.column)
                 }
