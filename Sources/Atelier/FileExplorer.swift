@@ -95,6 +95,7 @@ final class FileExplorerView: NSView {
     private var fileRows: [SummonItem] = []
     private var textRows: [SummonItem] = []
     private var liveQuery = ""
+    private var previewDebounce: Timer?
     private(set) var isSearchOpen = false
     private static let filesKey = "explorer.search.files"
     private static let textKey = "explorer.search.text"
@@ -291,12 +292,21 @@ final class FileExplorerView: NSView {
         search.translatesAutoresizingMaskIntoConstraints = false
         search.onEscape = { [weak self] in self?.closeSearch(focusTree: true) }
         search.onQueryChange = { [weak self] query in self?.runSearch(query) }
-        search.onArrowSelect = { [weak self] item in
-            guard let self, let root = self.root else { return }
-            if let found = RepoTextSearch.location(of: item, root: root) {
-                self.onPreview?(found.url, found.hit)
-            } else if item.id != RepoTextSearch.moreRowId {
-                self.onPreview?(URL(fileURLWithPath: item.id), nil)
+        search.onSelectionMove = { [weak self] item in
+            // The highlighted row is what the buffer shows — eagerly when
+            // results land, and following arrows and the pointer. Coalesced
+            // a beat so a fast hover sweep or a result set reshaping under a
+            // typed query previews the row you settle on, not every row on
+            // the way (each preview is a file read and a relayout).
+            guard let self else { return }
+            self.previewDebounce?.invalidate()
+            self.previewDebounce = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: false) { [weak self] _ in
+                guard let self, self.isSearchOpen, let root = self.root else { return }
+                if let found = RepoTextSearch.location(of: item, root: root) {
+                    self.onPreview?(found.url, found.hit)
+                } else if item.id != RepoTextSearch.moreRowId {
+                    self.onPreview?(URL(fileURLWithPath: item.id), nil)
+                }
             }
         }
         search.onActivate = { [weak self] item in
@@ -539,9 +549,18 @@ final class FileExplorerView: NSView {
         } else {
             fileRows = []
         }
-        textRows = []
+        // Text hits stay on screen until the engine answers for the new
+        // query — the debounce plus rg is a visible beat, and an offer refresh
+        // (every tree reload re-runs this with the same query) used to blank
+        // the list and refill it: results pulsing to none and back (owner
+        // report 2026-09-16). Only a query that can't have text hits clears
+        // them at once.
+        guard textOn, !q.isEmpty, let engine = textEngine else {
+            textRows = []
+            publishRows()
+            return
+        }
         publishRows()
-        guard textOn, !q.isEmpty, let engine = textEngine else { return }
         engine.search(query, compact: true) { [weak self] items in
             guard let self, self.liveQuery == query else { return }
             self.textRows = items
@@ -862,7 +881,14 @@ final class FileExplorerView: NSView {
 
     // MARK: Watching
 
+    /// The watched root as FSEvents will spell it: symlinks resolved, no
+    /// trailing slash. Set when watching starts.
+    private(set) var resolvedRoot = ""
+
     private func startWatching(_ root: String) {
+        var resolved = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
+        while resolved.count > 1, resolved.hasSuffix("/") { resolved.removeLast() }
+        resolvedRoot = resolved
         var context = FSEventStreamContext()
         context.info = Unmanaged.passUnretained(self).toOpaque()
         let callback: FSEventStreamCallback = { _, info, count, paths, _, _ in
@@ -871,9 +897,23 @@ final class FileExplorerView: NSView {
             // `.git` churns constantly — and our own `git status` refreshes
             // the index, which would otherwise reload the tree in a loop.
             guard let changed = unsafeBitCast(paths, to: CFArray.self) as? [String],
-                  let root = view.root else { return }
-            let gitDir = root + "/.git"
-            let relevant = changed.prefix(Int(count)).contains { !$0.hasPrefix(gitDir) }
+                  view.root != nil else { return }
+            // FSEvents reports real paths (`/private/tmp/…`, symlinks
+            // followed) while Foundation's `resolvingSymlinksInPath` spells
+            // the same place `/tmp/…` — so both sides go through Foundation
+            // before comparing. A plain prefix test against the root as
+            // given let every `.git/` write through, and the tree reloaded in
+            // a loop off its own `git status` (2026-09-16).
+            let gitDir = view.resolvedRoot + "/.git"
+            let relevant = changed.prefix(Int(count)).contains { raw in
+                var path = URL(fileURLWithPath: raw).resolvingSymlinksInPath().path
+                while path.count > 1, path.hasSuffix("/") { path.removeLast() }
+                return !(path == gitDir || path.hasPrefix(gitDir + "/"))
+            }
+            if ProcessInfo.processInfo.environment["ATELIER_FS_TRACE"] != nil {
+                NSLog("Atelier: fsevents %@ root=%@ %@", relevant ? "reload" : "ignored", view.resolvedRoot,
+                      Array(changed.prefix(Int(count))).joined(separator: " "))
+            }
             if relevant { view.scheduleReload() }
         }
         guard let stream = FSEventStreamCreate(

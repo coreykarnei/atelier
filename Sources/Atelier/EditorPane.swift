@@ -467,6 +467,32 @@ final class EditorPane: NSView, WorkspacePane {
             }
             return
         }
+        if query.hasPrefix("probe:drag=") {
+            // `probe:drag=x1,y1,x2,y2[,steps]` — a pointer drag in window
+            // points (origin bottom-left), posted to the queue so split-view
+            // tracking loops see it like a real one. ~60Hz.
+            let parts = query.dropFirst("probe:drag=".count).split(separator: ",").compactMap { Double($0) }
+            guard parts.count >= 4, let window else { return }
+            let steps = parts.count > 4 ? Int(parts[4]) : 30
+            let from = NSPoint(x: parts[0], y: parts[1]), to = NSPoint(x: parts[2], y: parts[3])
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            func post(_ type: NSEvent.EventType, _ point: NSPoint, after delay: Double) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    if let event = NSEvent.mouseEvent(
+                        with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+                    ) { NSApp.postEvent(event, atStart: false) }
+                }
+            }
+            post(.leftMouseDown, from, after: 0)
+            for step in 1...steps {
+                let t = Double(step) / Double(steps)
+                post(.leftMouseDragged, NSPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t), after: 0.016 * Double(step))
+            }
+            post(.leftMouseUp, to, after: 0.016 * Double(steps + 1))
+            return
+        }
         if query == "probe:back" { goBack(); return }
         if query == "probe:forward" { goForward(); return }
         if query.hasPrefix("probe:findseed=") {
@@ -996,14 +1022,65 @@ final class EditorPane: NSView, WorkspacePane {
     /// or reveal.
     func reveal(line: Int, column: Int, highlightLength: Int? = nil) {
         guard let controller else { return }
-        controller.setCursorPositions([CursorPosition(line: line, column: column)], scrollToVisible: true)
+        controller.setCursorPositions([CursorPosition(line: line, column: column)], scrollToVisible: false)
         clearHitMark()
-        guard let highlightLength, highlightLength > 0,
+        revealGeneration &+= 1
+        let generation = revealGeneration
+        // Centre now, off whatever geometry exists; then again after the
+        // window has run a layout pass, when the lines the first scroll made
+        // visible have their real heights (owner report 2026-09-16: hits
+        // landed off-centre or off-screen, and the mark sometimes missing).
+        centerLine(line)
+        placeHitMark(line: line, column: column, length: highlightLength)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.revealGeneration == generation else { return }
+            self.centerLine(line)
+            self.placeHitMark(line: line, column: column, length: highlightLength)
+        }
+    }
+
+    private var revealGeneration = 0
+
+    /// Scroll so `line` (1-based) sits at the viewport's vertical centre.
+    /// The layout manager only knows real heights for lines it has laid out
+    /// — a wrapped preview estimates the rest at one row each — so each
+    /// scroll is followed by a forced layout and a re-measure, until the
+    /// line stops moving (a few passes at most). Horizontal: a wrapped
+    /// buffer never scrolls sideways; an unwrapped one keeps the library's
+    /// own caret-follow, so the column is on screen without cutting the
+    /// line start when it doesn't have to.
+    private func centerLine(_ line: Int) {
+        guard let controller, let textView = controller.textView,
+              let scrollView = controller.scrollView else { return }
+        let clip = scrollView.contentView
+        for _ in 0..<4 {
+            guard let position = textView.layoutManager.textLineForIndex(line - 1) else { return }
+            let lineMid = position.yPos + position.height / 2
+            let docHeight = max(textView.frame.height, textView.layoutManager.estimatedHeight())
+            let target = min(max(0, lineMid - clip.bounds.height / 2), max(0, docHeight - clip.bounds.height))
+            let before = clip.bounds.origin
+            if abs(before.y - target) < 0.5 { break }
+            clip.scroll(to: NSPoint(x: isWrapped ? 0 : before.x, y: target))
+            scrollView.reflectScrolledClipView(clip)
+            textView.needsLayout = true
+            textView.layoutSubtreeIfNeeded()
+        }
+        if !isWrapped {
+            // Column on screen too — the library's padded caret-follow.
+            textView.scrollSelectionToVisible()
+        }
+    }
+
+    /// The search-hit mark, drawn from the layout the line has *now* — the
+    /// emphasis manager builds its shape once at add time, so a mark placed
+    /// before the line was laid out had no shape to draw.
+    private func placeHitMark(line: Int, column: Int, length: Int?) {
+        guard let controller, let length, length > 0,
               let start = offset(line: line, column: column),
               let emphasisManager = controller.textView?.emphasisManager else { return }
         let text = controller.text as NSString
-        let range = NSRange(location: start, length: min(highlightLength, text.length - start))
-        emphasisManager.addEmphases([Emphasis(range: range, style: .standard)], for: Self.hitEmphasisID)
+        let range = NSRange(location: start, length: min(length, text.length - start))
+        emphasisManager.replaceEmphases([Emphasis(range: range, style: .standard)], for: Self.hitEmphasisID)
     }
 
     private static let hitEmphasisID = "search.hit"
