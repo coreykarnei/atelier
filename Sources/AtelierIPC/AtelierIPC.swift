@@ -3,11 +3,24 @@ import Foundation
 /// The IPC contract shared by the app (listener) and the `atelier-notify` CLI
 /// (sender). A unix domain socket carries newline-delimited JSON `NotifyMessage`s.
 public enum AtelierIPC {
-    /// Stable per-user socket path. Mirrors the dotfiles `~/.local/state/...`
-    /// convention so it sits with other Atelier runtime state.
-    public static func socketPath() -> String {
+    /// Where Atelier keeps runtime state — the socket, the persisted session
+    /// tree. Mirrors the dotfiles `~/.local/state/...` convention. Dev-only:
+    /// `ATELIER_STATE_DIR` relocates it so a test build can run beside the
+    /// live app without contending for its socket or clobbering its session
+    /// file; the hook CLI inherits the variable through Claude's environment,
+    /// so notifications from the test instance's sessions land in the test
+    /// instance.
+    public static func stateDirectory() -> String {
+        if let override = ProcessInfo.processInfo.environment["ATELIER_STATE_DIR"], !override.isEmpty {
+            return override
+        }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return "\(home)/.local/state/atelier/notify.sock"
+        return "\(home)/.local/state/atelier"
+    }
+
+    /// Stable per-user socket path, inside `stateDirectory()`.
+    public static func socketPath() -> String {
+        "\(stateDirectory())/notify.sock"
     }
 
     /// Ensure the parent directory exists. Returns the socket path.
