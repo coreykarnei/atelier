@@ -1,10 +1,12 @@
 import AppKit
 import SwiftTerm
 
-/// A terminal view whose resizes can be frozen during continuous divider drags
-/// (§1.5 latency budget: "PTY resize is debounced to drag-end"). While frozen,
-/// frame changes are deferred — the PTY keeps its size and SwiftTerm skips its
-/// per-tick reflow; the last deferred size applies once on thaw.
+/// A terminal view whose resizes can be *frozen* (layout rebuilds: only the
+/// final geometry may reach the process) or *throttled* (divider drags, since
+/// 2026-09-16: the grid follows the pointer live, the PTY hears one resize
+/// per beat, the final size lands on release). While frozen, frame changes
+/// are deferred — the PTY keeps its size and SwiftTerm skips its per-tick
+/// reflow; the last deferred size applies once on thaw.
 class FreezableTerminalView: LocalProcessTerminalView {
     private var deferredSize: NSSize?
 
@@ -70,19 +72,66 @@ class FreezableTerminalView: LocalProcessTerminalView {
         didSet {
             guard !resizeFrozen, let size = deferredSize else { return }
             deferredSize = nil
-            super.setFrameSize(size)
-            // The pane's sliver wash tracks the cell grid; re-lay it out now
-            // that the deferred size (and thus the grid) has applied.
-            superview?.needsLayout = true
+            applyDeferredSize(size)
         }
     }
+
+    /// Divider drags (2026-09-16, owner call): the grid follows the pointer
+    /// *live*, Ghostty-style, but the PTY hears about it at most every
+    /// `liveResizeInterval` — one SIGWINCH per beat instead of one per
+    /// pointer event, which is what the old drag-end freeze protected the
+    /// hosted TUI from. Between beats the last size waits; on release the
+    /// final size lands at once. (`resizeFrozen` is the hard freeze layout
+    /// rebuilds still use: there a transient 0-column frame must never
+    /// reach the process.)
+    var resizeThrottled = false {
+        didSet {
+            guard !resizeThrottled else { return }
+            throttleBeat?.cancel()
+            throttleBeat = nil
+            if let size = deferredSize {
+                deferredSize = nil
+                applyDeferredSize(size)
+            }
+        }
+    }
+    static let liveResizeInterval: TimeInterval = 1.0 / 20
+    /// The pending trailing-edge apply. A dispatch item, not a `Timer`: the
+    /// drag runs inside NSSplitView's tracking loop, whose run-loop mode
+    /// never fires default-mode timers — a `Timer` here waited for mouse-up
+    /// and the "live" resize was the first pointer event and nothing more.
+    private var throttleBeat: DispatchWorkItem?
 
     override func setFrameSize(_ newSize: NSSize) {
         if resizeFrozen {
             deferredSize = newSize
+        } else if resizeThrottled {
+            deferredSize = newSize
+            guard throttleBeat == nil else { return } // a beat is already pending
+            // Leading edge: the first size of a beat applies now, so the
+            // grid moves with the very first pointer event.
+            deferredSize = nil
+            applyDeferredSize(newSize)
+            let beat = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.throttleBeat = nil
+                if let size = self.deferredSize {
+                    self.deferredSize = nil
+                    self.applyDeferredSize(size)
+                }
+            }
+            throttleBeat = beat
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.liveResizeInterval, execute: beat)
         } else {
             super.setFrameSize(newSize)
         }
+    }
+
+    private func applyDeferredSize(_ size: NSSize) {
+        super.setFrameSize(size)
+        // The pane's sliver wash tracks the cell grid; re-lay it out now
+        // that the deferred size (and thus the grid) has applied.
+        superview?.needsLayout = true
     }
 
     /// Fires once, on the first byte the hosted process writes — the resuming

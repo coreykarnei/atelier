@@ -640,10 +640,11 @@ final class Session: NSObject, NSSplitViewDelegate {
         split.delegate = self
         split.onDividerDrag = { [weak self] dragging in
             guard let self else { return }
-            // §1.5: the PTYs hold their size for the duration of the drag and
-            // resize exactly once, at drag end.
-            self.shellPane.terminal.resizeFrozen = dragging
-            self.agentPane.terminal.resizeFrozen = dragging
+            // §1.5 revised 2026-09-16 (owner call): the grid follows the
+            // pointer live, the PTY hears about it at a throttled beat, and
+            // the final size lands on release — see `resizeThrottled`.
+            self.shellPane.terminal.resizeThrottled = dragging
+            self.agentPane.terminal.resizeThrottled = dragging
         }
         first.translatesAutoresizingMaskIntoConstraints = false
         second.translatesAutoresizingMaskIntoConstraints = false
