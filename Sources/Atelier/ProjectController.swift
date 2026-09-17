@@ -983,16 +983,23 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// remote host, not under the local `~/.claude/projects/`. (Reading the
     /// ai-title over the shared ssh link is a possible follow-up.)
     private func refreshTitles() {
-        var changed = false
-        for session in sessions where !session.isRemote {
-            let seed = (session.cwd as NSString).lastPathComponent
-            let resolved = TranscriptTitle.title(sessionId: session.claudeSessionId, cwd: session.cwd) ?? seed
-            if session.title != resolved {
-                session.title = resolved
-                changed = true
+        // Off the main thread and incremental (TranscriptTitle): a day's
+        // transcripts run to 50 MB, and reading them whole every 2 s here
+        // was the ¼–½ s judder the owner saw scrolling the Claude pane.
+        let targets = sessions.filter { !$0.isRemote }.map { (id: $0.claudeSessionId, cwd: $0.cwd) }
+        TranscriptTitle.titles(for: targets) { [weak self] titles in
+            guard let self else { return }
+            var changed = false
+            for session in self.sessions where !session.isRemote {
+                let seed = (session.cwd as NSString).lastPathComponent
+                let resolved = titles[session.claudeSessionId] ?? seed
+                if session.title != resolved {
+                    session.title = resolved
+                    changed = true
+                }
             }
+            if changed { self.updateBottomBar() }
         }
-        if changed { updateBottomBar() }
     }
 
     // MARK: BottomBarDelegate
