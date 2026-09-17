@@ -209,8 +209,9 @@ never reflows the strip; the glyph is always drawn — a whisper at rest
 (subtext0 at α 0.22, the luminance of overlay0 at 0.35), full subtext0 in
 the active session's folder and in the folder under the pointer (cell,
 label or any of its tabs — `FolderView.onHoverChange`, a second geometric
-tracking area). It hugs the last tab by 2pt with the cell's 6pt pad after
-it, folders sit 14pt apart, and the 12pt glyph wears a 16pt pad — the
+tracking area). It hugs the last tab by 2pt with a 3pt cell pad after it
+(the ink lands ~7pt off the closed edge, a hair more than a tab's 6),
+folders sit 14pt apart, and the 12pt glyph wears a 16pt pad — the
 2026-09-17 feel-check found a 10pt mark floating in the inter-folder gap.
 The active tab's close `×` likewise rests at α 0.35 and rises to 0.85 over
 its tab, instead of hiding until hover. Clicking a folder's `+` asks for a session *there*:

@@ -86,10 +86,14 @@ final class BottomBar: NSView {
     /// trailing end, always, so hovering never reflows the strip. The glyph
     /// is always there — a whisper at rest, full in the active folder or
     /// under the pointer — a control at rest, never a hole. It hugs the last
-    /// tab (`addLead`) the way a browser's new-tab button hugs its tabs, and
-    /// the cell pads it by the same 6pt it pads the first tab.
+    /// tab (`addLead`) the way a browser's new-tab button hugs its tabs. The
+    /// cell's trailing pad is `addTrail`, not `folderPadX`: the 16pt pad is
+    /// wider than the glyph's ink, so 3pt lands the ink ~7pt off the closed
+    /// cell edge against the 6pt a tab gets — a hair more air on the wall
+    /// side, measured on the live strip (owner call 2026-09-17).
     private static let addSlotWidth: CGFloat = 18
     private static let addLead: CGFloat = 2
+    private static let addTrail: CGFloat = 3
     /// The pad is 16pt square, centred in the slot, framing the 12pt glyph.
     private static let addPad: CGFloat = 16
     /// Volumes: chrome text at full (the tab titles' weight), and a whisper
@@ -417,10 +421,10 @@ final class BottomBar: NSView {
     /// A folder cell hugs its tabs — but never narrower than its own label
     /// tab, so a one-tab folder still says its whole name.
     private func segmentWidth(_ tabs: [SessionTabInfo]) -> CGFloat {
-        let tabsWidth = Self.folderPadX * 2
+        let tabsWidth = Self.folderPadX
             + tabs.reduce(0) { $0 + tabWidth($1) }
             + Self.tabGap * CGFloat(max(0, tabs.count - 1))
-            + (foldersVisible ? Self.addLead + Self.addSlotWidth : 0)
+            + (foldersVisible ? Self.addLead + Self.addSlotWidth + Self.addTrail : Self.folderPadX)
         let labelWidth = tabs.first.map { FolderView.labelWidth(for: $0.groupLabel) } ?? 0
         return max(tabsWidth, labelWidth + Theme.Elevation.radiusSmall * 2)
     }
@@ -716,7 +720,7 @@ final class BottomBar: NSView {
                         }
                         add.toolTip = "New session in \(FolderView.plainLabel(segment.label))"
                         if !folderDragged {
-                            let slotX = x + width - Self.folderPadX - Self.addSlotWidth
+                            let slotX = x + width - Self.addTrail - Self.addSlotWidth
                             placements.append((add, CGRect(
                                 x: slotX + (Self.addSlotWidth - Self.addPad) / 2,
                                 y: tabY + (Self.tabHeight - Self.addPad) / 2,
