@@ -77,14 +77,26 @@ final class BottomBar: NSView {
     private static let folderPadX: CGFloat = 6
     private static let folderPadY: CGFloat = 2
     private static let folderTabHeight: CGFloat = 13
-    private static let folderGap: CGFloat = 10
+    /// Between folders — clearly more than any space inside one, so a `+`
+    /// at a cell's trailing end reads as that folder's (owner feel-check
+    /// 2026-09-17: at 10pt the `+` floated in the gap between folders).
+    private static let folderGap: CGFloat = 14
     private static let buttonGap: CGFloat = 6
     /// Each folder's own `+` (2026-09-16): a slot reserved at the cell's
     /// trailing end, always, so hovering never reflows the strip. The glyph
     /// is always there — a whisper at rest, full in the active folder or
-    /// under the pointer — a control at rest, never a hole.
+    /// under the pointer — a control at rest, never a hole. It hugs the last
+    /// tab (`addLead`) the way a browser's new-tab button hugs its tabs, and
+    /// the cell pads it by the same 6pt it pads the first tab.
     private static let addSlotWidth: CGFloat = 18
-    private static let addRestAlpha: CGFloat = 0.35
+    private static let addLead: CGFloat = 2
+    /// The pad is 16pt square, centred in the slot, framing the 12pt glyph.
+    private static let addPad: CGFloat = 16
+    /// Volumes: chrome text at full (the tab titles' weight), and a whisper
+    /// that keeps the original floor's luminance (overlay0 at 0.35 ≈
+    /// subtext0 at 0.22 over the mantle) — the owner kept the floor and
+    /// raised the ceiling (2026-09-17).
+    private static let addRestAlpha: CGFloat = 0.22
     private static var cellHeight: CGFloat { tabHeight + folderPadY * 2 }
     /// Row pitch: a cell, the gap, and the lower row's label band.
     private static var rowPitch: CGFloat { cellHeight + rowGap + folderTabHeight }
@@ -408,7 +420,7 @@ final class BottomBar: NSView {
         let tabsWidth = Self.folderPadX * 2
             + tabs.reduce(0) { $0 + tabWidth($1) }
             + Self.tabGap * CGFloat(max(0, tabs.count - 1))
-            + (foldersVisible ? Self.tabGap + Self.addSlotWidth : 0)
+            + (foldersVisible ? Self.addLead + Self.addSlotWidth : 0)
         let labelWidth = tabs.first.map { FolderView.labelWidth(for: $0.groupLabel) } ?? 0
         return max(tabsWidth, labelWidth + Theme.Elevation.radiusSmall * 2)
     }
@@ -704,9 +716,11 @@ final class BottomBar: NSView {
                         }
                         add.toolTip = "New session in \(FolderView.plainLabel(segment.label))"
                         if !folderDragged {
+                            let slotX = x + width - Self.folderPadX - Self.addSlotWidth
                             placements.append((add, CGRect(
-                                x: x + width - Self.folderPadX - Self.addSlotWidth, y: tabY,
-                                width: Self.addSlotWidth, height: Self.tabHeight
+                                x: slotX + (Self.addSlotWidth - Self.addPad) / 2,
+                                y: tabY + (Self.tabHeight - Self.addPad) / 2,
+                                width: Self.addPad, height: Self.addPad
                             )))
                         }
                     }
@@ -1029,9 +1043,9 @@ final class BottomBar: NSView {
 
     private func makeFolderAddButton() -> HoverPadButton {
         let button = HoverPadButton()
-        let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
+        let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
         button.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?.withSymbolConfiguration(config)
-        button.contentTintColor = Theme.chromeMutedText
+        button.contentTintColor = Theme.chromeText
         button.setAccessibilityLabel("New session in this folder")
         button.target = self
         button.action = #selector(folderAddTapped(_:))
@@ -1161,6 +1175,10 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     static let closeGap: CGFloat = 0   // the 16pt pad already insets its 8pt glyph
     static let closeWidth: CGFloat = 16
     static let closeSlot: CGFloat = closeGap + closeWidth + closeMargin
+    /// The `×` at rest and with the pointer over its tab (its own pad then
+    /// marks it under the pointer).
+    static let closeRestAlpha: CGFloat = 0.35
+    static let closeHoverAlpha: CGFloat = 0.85
 
     /// The tab's label: the title, then the `@host` mark for remote sessions —
     /// dropped when the title *is* the host ("jarvis @jarvis" says it once).
@@ -1195,9 +1213,10 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
             titleLabel.textColor = isActive ? Theme.accentTextDark : Theme.chromeText
             closeButton.contentTintColor = Theme.accentTextDark
             closeButton.isHidden = !isActive
-            // Invisible until the pointer is over the tab (owner call
-            // 2026-07-13); the slot stays reserved so nothing shifts on hover.
-            closeButton.alphaValue = 0
+            // A whisper at rest, so the tab always shows where it closes
+            // (owner call 2026-09-17, replacing the invisible-until-hover of
+            // 2026-07-13); the slot is reserved either way, nothing shifts.
+            closeButton.alphaValue = Self.closeRestAlpha
         }
         attentionSince = info.attentionSince
         setAttention(info.attention, animated: applied)
@@ -1409,8 +1428,8 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         }
     }
 
-    // The close `×` reveals on tab hover (its own HoverPadButton tracking
-    // then takes it to full strength under the pointer).
+    // The close `×` rises from its whisper on tab hover (its own
+    // HoverPadButton tracking then pads it under the pointer).
     private var tabTracking: NSTrackingArea?
 
     override func updateTrackingAreas() {
@@ -1427,11 +1446,11 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        if !closeButton.isHidden { closeButton.alphaValue = HoverPadButton.restingAlpha }
+        if !closeButton.isHidden { closeButton.alphaValue = Self.closeHoverAlpha }
     }
 
     override func mouseExited(with event: NSEvent) {
-        closeButton.alphaValue = 0
+        closeButton.alphaValue = Self.closeRestAlpha
     }
 
     @objc private func closeTapped() { onClose?(index) }
