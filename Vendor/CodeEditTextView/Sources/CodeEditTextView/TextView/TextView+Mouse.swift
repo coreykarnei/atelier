@@ -43,10 +43,11 @@ extension TextView {
     fileprivate func handleSingleClick(event: NSEvent, offset: Int) {
         cursorSelectionMode = .character
 
-        guard isEditable else {
-            super.mouseDown(with: event)
-            return
-        }
+        // Atelier patch: a selectable view places its caret on click even
+        // when it isn't editable (NSTextView parity) — `mouseDown` already
+        // required `isSelectable`, and a selection anchor is what shift-click,
+        // drag and copy need. Upstream skipped straight to `super` here, so a
+        // read-only view had no insertion point at all.
         let eventFlags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         // Atelier patch: ⌥-click adds a caret (VSCode) alongside upstream's
         // ⌃⇧-click; ⌘-click sets the caret and hands the offset to the host.

@@ -42,3 +42,12 @@ local override by package identity, the same way `Vendor/CodeEditSymbols` is.
    fragment view it lays out, so `removeFromSuperviewWithoutNeedingDisplay`
    is equivalent and side-effect free. Also adds `TextView.debugTrace` /
    `TextViewController.debugTrace` dev hooks (nil in production).
+
+5. **Selectable views place the caret on click** (`TextView/TextView+Mouse.swift`).
+   `handleSingleClick` returned to `super` whenever `isEditable` was false,
+   so a selectable-but-read-only view had no insertion point: shift-click
+   had nothing to extend, and a host that flips the view editable on the
+   first keystroke had nowhere to put the text. `mouseDown` already gates on
+   `isSelectable`; the click now sets the selection anchor the way NSTextView
+   does for selectable text. Atelier's click-preview buffer is read-only
+   until you enter it, and this is what lets "type here" mean here.

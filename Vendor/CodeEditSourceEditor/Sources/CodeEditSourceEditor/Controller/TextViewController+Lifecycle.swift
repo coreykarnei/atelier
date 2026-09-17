@@ -213,6 +213,12 @@ extension TextViewController {
         let modifierFlags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         switch event.type {
         case .keyDown:
+            // Atelier patch: the editing chords (tab, ⌘/, ⌘[ ⌘], line moves,
+            // duplicates) mutate the buffer, and every mutation is a no-op on
+            // a read-only view. Rather than swallow the key silently, let it
+            // travel the normal responder path so the host can decide what
+            // a keystroke into a read-only buffer means.
+            guard textView.isEditable else { return event }
             let tabKey: UInt16 = 0x30
 
             if event.keyCode == tabKey {

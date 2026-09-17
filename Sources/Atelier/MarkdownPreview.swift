@@ -13,7 +13,7 @@ final class MarkdownPreviewView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.backgroundColor = Theme.Elevation.base.cgColor
+        layer?.backgroundColor = NSColor.clear.cgColor // the pane washes the region once (see EditorPane)
 
         textView.isEditable = false
         textView.isSelectable = true
@@ -48,7 +48,7 @@ final class MarkdownPreviewView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func updateLayer() {
-        layer?.backgroundColor = Theme.Elevation.base.cgColor
+        layer?.backgroundColor = NSColor.clear.cgColor // the pane washes the region once (see EditorPane)
     }
 
     /// Replace the rendering, keeping the scroll position when the document

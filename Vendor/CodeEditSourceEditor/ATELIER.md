@@ -49,3 +49,11 @@ root overrides by identity with `Vendor/` copies.
    now asks the delegate for links before showing the hand — an identifier
    with no definition keeps the arrow — caches them for the click, and
    underlines in the theme colour instead of a filled selection box.
+9. **Editing chords fall through on a read-only view** (`Controller/
+   TextViewController+Lifecycle.swift`): the local key monitor consumed tab,
+   ⌘/, ⌘[ ⌘], ⌥↑↓ and ⇧⌥↑↓ even when `textView.isEditable` was false, and
+   every one of them then hit the `isEditable` guard in `replaceCharacters`
+   — a silently swallowed keystroke. `handleEvent` now returns the event
+   untouched for a read-only view so it travels the responder chain; the
+   host decides what typing into a read-only buffer means (Atelier: it
+   enters the previewed file, then replays the key).
