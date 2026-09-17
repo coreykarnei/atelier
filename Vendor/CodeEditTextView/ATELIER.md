@@ -51,3 +51,16 @@ local override by package identity, the same way `Vendor/CodeEditSymbols` is.
    `isSelectable`; the click now sets the selection anchor the way NSTextView
    does for selectable text. Atelier's click-preview buffer is read-only
    until you enter it, and this is what lets "type here" mean here.
+
+6. **Rects on wrapped rows use fragment-relative offsets**
+   (`TextLayoutManager/TextLayoutManager+Public.swift`, `rectsFor(range:in:)`).
+   The per-fragment loop passed the *line*-relative intersection to
+   `characterRect(in:for:)`, but `LineFragment._xPos(for:)` walks the
+   fragment's contents from zero (as `rectForOffset` already assumes, by
+   subtracting the fragment's location). On any soft-wrapped row after the
+   first, both bounds overflowed the fragment and clamped to its right edge,
+   so `rectsFor`, `roundedPathForRange` and everything built on them — the
+   emphasis manager's find/search marks, the jump-to-definition cursor
+   rects, accessibility frames — drew a sliver at the wrap point instead of
+   the text. Atelier's search-hit mark on a wrapped preview was the report
+   (2026-09-17): matches past the first visual row never appeared.

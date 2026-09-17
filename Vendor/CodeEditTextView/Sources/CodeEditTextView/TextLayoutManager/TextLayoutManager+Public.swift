@@ -236,7 +236,16 @@ extension TextLayoutManager {
         var rects: [CGRect] = []
         for fragmentPosition in line.data.lineFragments.linesInRange(relativeRange) {
             guard let intersectingRange = fragmentPosition.range.intersection(relativeRange) else { continue }
-            let fragmentRect = characterRect(in: fragmentPosition.data, for: intersectingRange)
+            // Fragment offsets are relative to the *fragment* (`_xPos(for:)` walks the
+            // fragment's own contents from zero — see `rectForOffset`, which subtracts
+            // the fragment's location too). Passing the line-relative range here put
+            // every rect on a wrapped line's second or later row at the fragment's
+            // right edge with ~no width. (Atelier patch 6.)
+            let fragmentRange = NSRange(
+                location: intersectingRange.location - fragmentPosition.range.location,
+                length: intersectingRange.length
+            )
+            let fragmentRect = characterRect(in: fragmentPosition.data, for: fragmentRange)
             guard fragmentRect.width > 0 else { continue }
             rects.append(
                 CGRect(

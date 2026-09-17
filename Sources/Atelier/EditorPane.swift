@@ -616,9 +616,13 @@ final class EditorPane: NSView, WorkspacePane {
             // The search-hit mark as placed: its range and the text under it.
             guard let controller, let manager = controller.textView?.emphasisManager else { return }
             let text = controller.text as NSString
+            let textView = controller.textView!
             let report = manager.getEmphases(for: Self.hitEmphasisID).map { e -> String in
                 let range = NSIntersectionRange(e.range, NSRange(location: 0, length: text.length))
-                return "range=\(e.range) text='\(text.substring(with: range))'"
+                let rects = textView.layoutManager.rectsFor(range: range).map { "\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))x\(Int($0.height))" }
+                let layers = (textView.layer?.sublayers ?? []).compactMap { $0 as? CAShapeLayer }.filter { $0.fillColor != nil }
+                    .map { "\(Int($0.frame.minX)),\(Int($0.frame.minY)) \(Int($0.frame.width))x\(Int($0.frame.height))" }
+                return "range=\(e.range) text='\(text.substring(with: range))' rectsNow=[\(rects.joined(separator: "; "))] shapeLayers=[\(layers.joined(separator: "; "))] visible=\(textView.visibleRect) wrapped=\(isWrapped)"
             }.joined(separator: " | ")
             try? ((report.isEmpty ? "no hit mark" : report) + " caret=\(cursorPosition.map { "\($0.line):\($0.column)" } ?? "nil")\n")
                 .write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)

@@ -230,8 +230,12 @@ showed no highlight): `rg --column` and `git grep --column` both report a
 `⌘` or `⌃` ahead of the match on its line pushed the mark two places
 right — often clean off the line, where it clamped onto the newline and
 drew nothing. `SearchHit.byteColumn` is converted against the line's own
-UTF-8 in `EditorPane.reveal(hit:)`; `probe:hit` reads the placed mark's
-range and text back.
+UTF-8 in `EditorPane.reveal(hit:)`. The second half was the library:
+`rectsFor(range:in:)` fed *line*-relative offsets to a fragment whose
+x-lookup is fragment-relative, so on any soft-wrapped row after the first
+the mark collapsed to a sliver at the wrap point — every find/search mark
+on a wrapped preview past row one (CodeEditTextView patch #6). `probe:hit`
+reads the placed mark's range, text, layout rects and layer frames back.
 
 ## Commands
 
