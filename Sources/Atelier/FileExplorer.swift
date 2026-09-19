@@ -138,6 +138,13 @@ final class FileExplorerView: NSView {
     var onRenamed: ((_ from: String, _ to: String) -> Void)?
     private let scroll = NSScrollView()
     private var ignored: Set<String> = []
+    /// One scan of each kind in flight, ever. A reload that lands while one
+    /// runs marks it dirty and the finishing scan runs once more — never a
+    /// pile-up (see `RepoFileOffer.cap`).
+    private var offerInFlight = false
+    private var offerDirty = false
+    private var ignoredInFlight = false
+    private var ignoredDirty = false
     private var stream: FSEventStreamRef?
     private var reloadDebounce: Timer?
     /// The open file's path — the row the tree keeps selected.
@@ -325,7 +332,7 @@ final class FileExplorerView: NSView {
                 guard let self, self.isSearchOpen, let root = self.root else { return }
                 if let found = RepoTextSearch.location(of: item, root: root) {
                     self.onPreview?(found.url, found.hit)
-                } else if item.id != RepoTextSearch.moreRowId {
+                } else if item.id != RepoTextSearch.moreRowId, item.id != RepoFileOffer.moreRowId {
                     self.onPreview?(URL(fileURLWithPath: item.id), nil)
                 }
             }
@@ -335,7 +342,7 @@ final class FileExplorerView: NSView {
             if let found = RepoTextSearch.location(of: item, root: root) {
                 self.closeSearch(focusTree: false)
                 self.onOpenAt?(found.url, found.hit)
-            } else if item.id != RepoTextSearch.moreRowId {
+            } else if item.id != RepoTextSearch.moreRowId, item.id != RepoFileOffer.moreRowId {
                 RecentFilesStore.record(item.id, root: root)
                 self.closeSearch(focusTree: false)
                 self.onOpen?(URL(fileURLWithPath: item.id), true)
@@ -602,10 +609,20 @@ final class FileExplorerView: NSView {
     /// every tree reload (a new file should be findable at once).
     private func refreshOffer() {
         guard let root else { return }
+        if offerInFlight { offerDirty = true; return }
+        offerInFlight = true
         RepoFileOffer.gather(root: root, rowFont: Theme.Typography.small) { [weak self] items in
-            guard let self, self.root == root else { return }
-            self.fileOffer = items
-            if self.isSearchOpen { self.runSearch(self.liveQuery) }
+            guard let self else { return }
+            self.offerInFlight = false
+            if self.root == root {
+                // The superseded offer dies off-main: tens of thousands of
+                // attributed strings are a visible beat to free.
+                let stale = self.fileOffer
+                self.fileOffer = items
+                DispatchQueue.global(qos: .utility).async { withExtendedLifetime(stale) {} }
+                if self.isSearchOpen { self.runSearch(self.liveQuery) }
+            }
+            if self.offerDirty { self.offerDirty = false; self.refreshOffer() }
         }
     }
 
@@ -862,10 +879,25 @@ final class FileExplorerView: NSView {
     /// stays bright — those are the files you're making.
     private func refreshIgnored() {
         guard let root else { return }
+        guard !RepoFileOffer.isUnboundedRoot(root) else {
+            ignored = []
+            return
+        }
+        if ignoredInFlight { ignoredDirty = true; return }
+        ignoredInFlight = true
         DispatchQueue.global(qos: .utility).async { [weak self] in
+            // Porcelain paths are repo-root-relative even from a sub-folder,
+            // so the tree's paths (spelled from `root`) are rebuilt through
+            // the toplevel; `-- .` keeps the walk to the session folder.
+            let toplevel = Self.gitToplevel(root)
+            var resolvedRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
+            while resolvedRoot.count > 1, resolvedRoot.hasSuffix("/") { resolvedRoot.removeLast() }
+            let sub: String? = toplevel.map { top in
+                resolvedRoot == top ? "" : (resolvedRoot.hasPrefix(top + "/") ? String(resolvedRoot.dropFirst(top.count + 1)) + "/" : "")
+            }
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            process.arguments = ["-C", root, "status", "--porcelain", "--ignored", "-z", "--untracked-files=normal"]
+            process.arguments = ["-C", root, "status", "--porcelain", "--ignored", "-z", "--untracked-files=normal", "--", "."]
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = FileHandle.nullDevice
@@ -877,16 +909,41 @@ final class FileExplorerView: NSView {
                 for entry in entries where entry.hasPrefix("!! ") {
                     var rel = String(entry.dropFirst(3))
                     if rel.hasSuffix("/") { rel.removeLast() }
+                    if let sub {
+                        guard rel.hasPrefix(sub) else { continue }
+                        rel = String(rel.dropFirst(sub.count))
+                    }
                     set.insert(root + "/" + rel)
                 }
             }
             DispatchQueue.main.async {
-                guard let self, self.root == root else { return }
-                self.ignored = set
-                self.outline.reloadData()
-                if let revealedPath = self.revealedPath { self.reveal(path: revealedPath, scroll: false) }
+                guard let self else { return }
+                self.ignoredInFlight = false
+                if self.root == root {
+                    self.ignored = set
+                    self.outline.reloadData()
+                    if let revealedPath = self.revealedPath { self.reveal(path: revealedPath, scroll: false) }
+                }
+                if self.ignoredDirty { self.ignoredDirty = false; self.refreshIgnored() }
             }
         }
+    }
+
+    /// `git rev-parse --show-toplevel` for `root`, symlinks resolved as git
+    /// spells it; nil outside a repo.
+    private static func gitToplevel(_ root: String) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-C", root, "rev-parse", "--show-toplevel"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        let top = (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return top.isEmpty ? nil : top
     }
 
     private func isIgnored(_ path: String) -> Bool {

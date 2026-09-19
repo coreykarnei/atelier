@@ -32,25 +32,75 @@ enum RecentFilesStore {
 /// `git ls-files` (tracked + untracked, .gitignore honoured), recents
 /// leading, one row anatomy, one ranking.
 enum RepoFileOffer {
-    /// Gather off-main; `completion` runs on main with the finished items.
+    /// The offer stops here, with an honest tail row: every row is an
+    /// attributed string held on main, and a root the size of a home
+    /// directory listed unbounded once (2026-09-18) — the tree reloaded off
+    /// every FSEvents batch under `~`, each reload spawned another
+    /// `git ls-files` + `git status --ignored` over all of it, sixty-odd git
+    /// processes piled up, and the main thread spent its time freeing the
+    /// last multi-hundred-thousand-row offer while the next one landed —
+    /// every keystroke starved while the pointer still moved.
+    static let cap = 20_000
+    static let moreRowId = "__more-files__"
+
+    /// A root no repo scan should walk in full: the home directory (or `/`).
+    /// `git status --ignored` there descends into `~/Library/Containers`, and
+    /// macOS answers each walk with an "access data from other apps" prompt
+    /// billed to Atelier — a dozen of them queued behind the stalled main
+    /// thread on 2026-09-18. Sessions rooted there get recents only and no
+    /// ignore dimming; anything under `~/repositories` is unaffected.
+    static func isUnboundedRoot(_ root: String) -> Bool {
+        var resolved = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
+        while resolved.count > 1, resolved.hasSuffix("/") { resolved.removeLast() }
+        var home = URL(fileURLWithPath: NSHomeDirectory()).resolvingSymlinksInPath().path
+        while home.count > 1, home.hasSuffix("/") { home.removeLast() }
+        return resolved == "/" || resolved == home
+    }
+
+    /// Gather off-main; `completion` always runs on main — with the finished
+    /// items, or with recents alone when git can't run or the root is
+    /// unbounded. Callers single-flight on that promise.
     static func gather(root: String, rowFont: CGFloat = Theme.Typography.body, completion: @escaping ([SummonItem]) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
+            let recents = recentRelativePaths(root: root)
+            guard !isUnboundedRoot(root) else {
+                let built = items(relativePaths: recents, root: root, rowFont: rowFont)
+                DispatchQueue.main.async { completion(built) }
+                return
+            }
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            process.arguments = ["-C", root, "ls-files", "--cached", "--others", "--exclude-standard"]
+            // `-- .` bounds the listing to the session folder: a root that is
+            // a sub-folder of its repo lists its own subtree, not the repo.
+            process.arguments = ["-C", root, "ls-files", "--cached", "--others", "--exclude-standard", "--", "."]
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = Pipe()
-            guard (try? process.run()) != nil else { return }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            let files = String(data: data, encoding: .utf8)?
-                .split(separator: "\n").map(String.init) ?? []
+            var files: [String] = []
+            if (try? process.run()) != nil {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                files = String(data: data, encoding: .utf8)?
+                    .split(separator: "\n").map(String.init) ?? []
+            }
 
-            let recents = recentRelativePaths(root: root)
             let recentSet = Set(recents)
             let ordered = recents + files.filter { !recentSet.contains($0) }
-            let built = items(relativePaths: ordered, root: root, rowFont: rowFont)
+            var built = items(relativePaths: Array(ordered.prefix(cap)), root: root, rowFont: rowFont)
+            if ordered.count > cap {
+                built.append(SummonItem(
+                    id: moreRowId,
+                    text: NSAttributedString(
+                        string: "… more files — narrow the query",
+                        attributes: [
+                            .font: Theme.Typography.ui(Theme.Typography.small),
+                            .foregroundColor: Theme.chromeMutedText,
+                        ]
+                    ),
+                    matchText: "",
+                    chord: nil
+                ))
+            }
             DispatchQueue.main.async { completion(built) }
         }
     }
@@ -121,7 +171,7 @@ final class FilePicker: SummonCardOverlay {
         )
 
         summon.onActivate = { [weak self] item in
-            guard let self else { return }
+            guard let self, item.id != RepoFileOffer.moreRowId else { return }
             RecentFilesStore.record(item.id, root: self.root)
             self.dismiss()
             self.onOpen(URL(fileURLWithPath: item.id))

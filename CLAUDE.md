@@ -236,6 +236,24 @@ x-lookup is fragment-relative, so on any soft-wrapped row after the first
 the mark collapsed to a sliver at the wrap point — every find/search mark
 on a wrapped preview past row one (CodeEditTextView patch #6). `probe:hit`
 reads the placed mark's range, text, layout rects and layer frames back.
+**Explorer scans are single-flight and bounded** (2026-09-18,
+`fix/explorer-reload-storm`, owner report: keyboard dead, pointer fine,
+then a dozen "access data from other apps" prompts on quit): a session
+promoted on `~` itself (home is a git repo) had the explorer reloading off
+every FSEvents batch under the whole home directory, each reload spawning
+another `git ls-files` + `git status --ignored` over all of it — sixty-odd
+git processes in flight, the main thread freeing the last
+multi-hundred-thousand-row offer while the next landed, and every walk of
+`~/Library/Containers` billed to Atelier as a TCC prompt. Now
+`FileExplorerView` runs one scan of each kind at a time with a dirty flag
+(a reload during a scan re-runs it once), `RepoFileOffer.gather` always
+completes and caps the offer at 20k rows with an honest tail row, the
+superseded offer is released off-main, both scans take `-- .` so a
+sub-folder root walks only its own subtree (porcelain paths are
+repo-root-relative — they're rebased through `git rev-parse
+--show-toplevel`, which also fixes ignore dimming for sub-folder roots),
+and `RepoFileOffer.isUnboundedRoot` (`~` or `/`) skips both scans:
+recents only, no dimming.
 
 ## Commands
 
