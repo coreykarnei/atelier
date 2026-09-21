@@ -1665,7 +1665,11 @@ extension TerminalView {
         let buffer = terminal.displayBuffer
         let vy = buffer.yBase + buffer.y
         
-        if vy >= buffer.yDisp + buffer.rows {
+        // Off the viewport in either direction — upstream only tested the
+        // bottom edge, so a scrolled-back reader kept a caret pinned to a
+        // row it no longer belonged to, sliding as output arrived
+        // (Atelier patch 7).
+        if vy >= buffer.yDisp + buffer.rows || vy < buffer.yDisp {
             caretView.removeFromSuperview()
             return
         } else if terminal.cursorHidden == false && caretView.superview != self {

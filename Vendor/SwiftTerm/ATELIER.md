@@ -36,3 +36,20 @@ a PR; when one lands, drop it here and note the version.
    request used to die in the protocol's empty default, so the local-process
    view's pasteboard write never ran.
 
+8. **Scrollback holds under streaming output** (`Terminal.swift`,
+   `Apple/AppleTerminalView.swift`; owner report 2026-09-21: scrolling up
+   while Claude is mid-turn juddered and then snapped to the bottom).
+   `Terminal.userScrolling` was read in `scroll()` but *never written* —
+   `MacTerminalView` and `iOSTerminalView` each declare a same-named
+   property of their own, and only the scroller thumb path
+   (`scroll(toPosition:)`) touches that one, so the wheel never reached the
+   emulator. Every line of output therefore ran `buffer.yDisp = buffer.yBase`
+   and yanked a scrolled-back reader down; each wheel tick fought the next
+   feed, which is the judder. `viewportHeldByUser` now answers the question
+   positionally — the flag, or `yDisp < yBase` — the way xterm.js compares
+   `ydisp` to `ybase`, and `scroll()` consults it in all three places.
+   Following resumes on its own the moment the reader returns to the bottom.
+   Second half: `updateCursorPosition` removed the caret only when the
+   cursor sat *below* the viewport, so scrolled back it stayed pinned to a
+   row it had left, drifting with each new line. It now leaves on either
+   edge.

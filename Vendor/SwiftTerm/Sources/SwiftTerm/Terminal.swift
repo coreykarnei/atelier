@@ -422,7 +422,19 @@ open class Terminal {
     var refreshEnd = -1
     var scrollInvariantRefreshStart = Int.max
     var scrollInvariantRefreshEnd = -1
+    /// Set while the *view* drives a scroll. It is not the whole story: the
+    /// viewport is "held" whenever it sits above the live bottom, which is
+    /// what `viewportHeldByUser` answers (Atelier patch 7).
     var userScrolling = false
+
+    /// True when the reader has scrolled back: the viewport is above the
+    /// live bottom, so streaming output must not drag it down. Upstream read
+    /// `userScrolling` alone — a flag the Mac/iOS views never set (each has
+    /// its own same-named property), so every line of output reset
+    /// `yDisp = yBase` and yanked a scrolled-back reader to the bottom.
+    var viewportHeldByUser: Bool {
+        userScrolling || buffer.yDisp < buffer.yBase
+    }
     var lineFeedMode = false
     
     // We do not implement smooth scrolling here, dubious value, but
@@ -5259,10 +5271,11 @@ open class Terminal {
             }
 
             // Only adjust ybase and ydisp when the buffer is not trimmed
+            let held = viewportHeldByUser
             if !willBufferBeTrimmed {
                 buffer.yBase += 1
                 // Only scroll the ydisp with ybase if the user has not scrolled up
-                if !userScrolling {
+                if !held {
                     buffer.yDisp += 1
                 }
             } else {
@@ -5272,7 +5285,7 @@ open class Terminal {
 
                 // When the buffer is full and the user has scrolled up, keep the text
                 // stable unless ydisp is right at the top
-                if userScrolling {
+                if held {
                     buffer.yDisp = max (buffer.yDisp - 1, 0)
                 }
             }
@@ -5296,9 +5309,9 @@ open class Terminal {
             lines [bottomRow] = BufferLine (from: newLine)
         }
 
-        // Move the viewport to the bottom of the buffer unless the user is
-        // scrolling.
-        if !userScrolling {
+        // Move the viewport to the bottom of the buffer unless the reader is
+        // holding it in the scrollback.
+        if !viewportHeldByUser {
             buffer.yDisp = buffer.yBase
         }
 
