@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17. Milestones 0, 1 and 2 built (M1.1–M1.6,
+**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17; v1.2.0 (the worktree door below) 2026-09-21. Milestones 0, 1 and 2 built (M1.1–M1.6,
 M2.1–M2.6 landed); polish pass (docs/POLISH_PLAN.md) built through all
 phases — 0 (foundation tokens), 1 (cockpit), 2 (distances), 3 (arrivals),
 4 (overlay physiology).** Read `VISION.md` (the
@@ -272,6 +272,34 @@ what they always claimed; `folderLabel` stops calling a repo-less folder
 `projectRepoRoot ?? projectRoot`. The `.git` filter on the ⌘T Landing
 offer (`LandingView.entries`) is untouched and still decides what the
 scan *lists* — a plain folder is reachable by typing its `~`/`/` path.
+
+**The `+` never asks; the `⎇+` is the door (2026-09-21, v1.2.0, owner
+call).** Every `+` — bare, per-folder, `⌥⌘T` — starts a session
+immediately, in the worktree pointed at or the active session's, with
+worktrees on or off; the chooser no longer stands in front of them. It
+is raised instead by a second glyph beside the `+`: the `⎇+`
+(`BottomBar.worktreeAddGlyph` — `FolderView.treePath`'s conifer with a
+plus laid over its right edge, knocked out by a clear halo), gated on
+`Settings.worktreesEnabled && projectRepoRoot != nil` and re-read on
+`Settings.didChange`, with `⇧⌥⌘T`, a File-menu item and a palette
+command as its twins. It stands `worktreeAddStandoff` (8pt) clear of the
+last folder cell — it is the row's control, not any folder's — and in
+bare mode follows the `+` at the ink spacing the rest of the run keeps.
+The card it raises opens *naming* a new worktree with the existing ones
+listed beneath (primary last, `main checkout` + its drifting branch in
+dim mono): type and `↩` creates, `↩` on an empty field starts the lit
+row, a click starts that row outright, typing puts the highlight out,
+hover and arrows share it. The strip also gained `TabRuleView`
+hairlines between sessions of one group, before the group's `+`, and —
+bare tabs only, where no cell edge does the work — between the `+` and
+the `⎇+` (placed without the arrival fade, so they are right before the
+selection colour moves), one volume for every `+` (the 2026-09-17
+whisper is retired), and a brighter `HoverPadButton` pad (16% white,
+26% pressed). Measured, not eyeballed: the card had sat 40pt
+*below* centre (a positive `centerY` constant moves it down here), and
+the trailing tick is seated off the title's ink, not the chip's frame.
+Probes: `probe:worktreeAdd`, `probe:overlay`, `probe:key=down|up|tab|space`.
+See `docs/devlog/2026-09-21-worktree-door.md`.
 
 ## Commands
 
