@@ -518,8 +518,13 @@ final class EditorPane: NSView, WorkspacePane {
             if parts.contains("shift") { mods.insert(.shift) }
             if parts.contains("opt") { mods.insert(.option) }
             if parts.contains("ctrl") { mods.insert(.control) }
-            let chars = first == "\\r" ? "\r" : first == "\\e" ? "\u{1b}" : first
-            let code: UInt16 = chars == "\r" ? 36 : chars == "\u{1b}" ? 53 : 0
+            let named: [String: (String, UInt16)] = [
+                "\\r": ("\r", 36), "\\e": ("\u{1b}", 53),
+                "down": ("\u{F701}", 125), "up": ("\u{F700}", 126),
+                "tab": ("\t", 48), "space": (" ", 49),
+            ]
+            let chars = named[first]?.0 ?? first
+            let code: UInt16 = named[first]?.1 ?? 0
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
             for type in [NSEvent.EventType.keyDown, .keyUp] {
@@ -588,6 +593,32 @@ final class EditorPane: NSView, WorkspacePane {
                 timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                 context: nil, eventNumber: 0, clickCount: 0, pressure: 0
             ) { NSApp.postEvent(event, atStart: false) }
+            return
+        }
+        if query == "probe:worktreeAdd" {
+            // The `⎇+` / `⇧⌥⌘T` door, without the chord: posted shift-chords
+            // don't match menu key equivalents reliably.
+            (NSApp.delegate as? AppDelegate)?.newWorktreeSession(nil)
+            return
+        }
+        if query == "probe:overlay" {
+            // Where a raised overlay's card actually sits, in window points.
+            guard let window, let root = window.contentView else { return }
+            var lines: [String] = ["window content h=\(Int(root.bounds.height))"]
+            func walk(_ view: NSView) {
+                let name = String(describing: type(of: view))
+                if name.hasSuffix("Overlay") || name == "OverlayMaterialView" {
+                    let f = view.convert(view.bounds, to: nil)
+                    lines.append("\(name) x=\(Int(f.minX)) y=\(Int(f.minY)) w=\(Int(f.width)) h=\(Int(f.height)) midY=\(Int(f.midY))")
+                    for sub in view.subviews {
+                        let sf = sub.convert(sub.bounds, to: nil)
+                        lines.append("  \(type(of: sub)) y=\(Int(sf.minY)) h=\(Int(sf.height)) midY=\(Int(sf.midY))")
+                    }
+                }
+                for sub in view.subviews { walk(sub) }
+            }
+            walk(root)
+            try? (lines.joined(separator: "\n") + "\n").write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
             return
         }
         if query == "probe:bar" {

@@ -335,6 +335,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func toggleLayout(_ sender: Any?) { keyController?.toggleLayout() }
 
     @objc func newSession(_ sender: Any?) { keyController?.requestNewSession() }
+    @objc func newWorktreeSession(_ sender: Any?) { keyController?.bottomBarDidRequestWorktreeSession() }
     @objc func openIDEHere(_ sender: Any?) { keyController?.promoteActiveSessionHere() }
     @objc func closeSession(_ sender: Any?) { keyController?.closeActiveSession() }
     @objc func reopenSession(_ sender: Any?) { keyController?.reopenClosedSession() }
@@ -371,6 +372,9 @@ extension AppDelegate: NSMenuItemValidation {
         if menuItem.action == #selector(toggleAutosave(_:)) {
             menuItem.state = Settings.autosave ? .on : .off
             return true
+        }
+        if menuItem.action == #selector(newWorktreeSession(_:)) {
+            return keyController?.canChooseWorktree ?? false
         }
         if menuItem.action == #selector(reopenSession(_:)) {
             return keyController?.canReopenClosedSession ?? false

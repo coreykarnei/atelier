@@ -33,7 +33,9 @@ enum Menu {
         fileItem.submenu = fileMenu
         fileMenu.addItem(withTitle: "New Project Tab", action: #selector(AppDelegate.newProject(_:)), keyEquivalent: "t")
         fileMenu.addItem(chord("Close Project", #selector(AppDelegate.closeProject(_:)), "w", [.command, .option]))
-        fileMenu.addItem(chord("New Session…", #selector(AppDelegate.newSession(_:)), "t", [.command, .option]))
+        fileMenu.addItem(chord("New Session Here", #selector(AppDelegate.newSession(_:)), "t", [.command, .option]))
+        fileMenu.addItem(chord("New Session in Worktree…", #selector(AppDelegate.newWorktreeSession(_:)),
+                               "t", [.command, .option, .shift]))
         fileMenu.addItem(withTitle: "Open IDE Here", action: #selector(AppDelegate.openIDEHere(_:)), keyEquivalent: "\r")
         fileMenu.addItem(withTitle: "Close Session", action: #selector(AppDelegate.closeSession(_:)), keyEquivalent: "w")
         // ⌘⇧T is the browser's reopen chord — muscle memory the close `×` earns.

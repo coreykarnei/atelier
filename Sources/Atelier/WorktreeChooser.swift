@@ -1,9 +1,11 @@
 import AppKit
 
-/// The worktree chooser (MILESTONE_1 §6, revised 2026-09-03/08): the small
-/// modal the `+` / `⌥⌘T` raise before a session starts. One caption, one
-/// dropdown, and a labeled Return action. The suggestion is the worktree you're already in, so the
-/// fast path is *plus, enter*; the dropdown unfolds an inline list of the
+/// The worktree chooser (MILESTONE_1 §6, revised 2026-09-03/08/21): the small
+/// modal the row's `⎇+` / `⇧⌥⌘T` raise. One caption, one dropdown, and a
+/// labeled Return action. Since 2026-09-21 the `+` starts a session here
+/// without asking, so this card is only ever raised to go *somewhere else*:
+/// it opens naming a new worktree (`↩` creates and starts, `↓` drops into
+/// the existing ones), and the main checkout is no longer one reflex away; the dropdown unfolds an inline list of the
 /// repo's worktrees (each removable by its hover `×`, behind a confirmation)
 /// and offers a new one, which turns the dropdown into a name field. Typing
 /// on the picker jumps straight into naming. `×` top-left, `Esc`, and a
@@ -36,8 +38,11 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
 
 
     /// `initial` is the suggestion (the active session's worktree); `prefill`
-    /// opens the chooser already naming a new worktree.
-    init(worktrees: [Worktree], initial: Worktree? = nil, prefill: String? = nil, onDismiss: @escaping () -> Void) {
+    /// opens the chooser already naming a new worktree; `openList` unfolds the
+    /// list at once — what the `⎇+` / `⇧⌥⌘T` door wants, since choosing is the
+    /// whole reason it was raised.
+    init(worktrees: [Worktree], initial: Worktree? = nil, prefill: String? = nil,
+         openList: Bool = false, onDismiss: @escaping () -> Void) {
         self.worktrees = worktrees
         self.selected = initial ?? worktrees.first(where: { $0.isPrimary }) ?? worktrees[0]
         self.list = WorktreeListView(worktrees: worktrees)
@@ -46,8 +51,14 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
         build()
         if let prefill {
             enterNameMode(seed: prefill)
+        } else if openList {
+            self.openListOnPresent = true
         }
     }
+
+    /// Set at init, spent by `animateIn` — the list can only unfold once the
+    /// card has a window and a size to grow into.
+    private var openListOnPresent = false
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -124,16 +135,18 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
         nameHost.isHidden = true
         nameHost.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(nameHost)
+        // Left-aligned (owner call 2026-09-21): centred, the caret of an
+        // empty field landed in the middle of the placeholder.
         let placeholderParagraph = NSMutableParagraphStyle()
-        placeholderParagraph.alignment = .center
-        nameField.placeholderAttributedString = NSAttributedString(string: "branch name", attributes: [
+        placeholderParagraph.alignment = .left
+        nameField.placeholderAttributedString = NSAttributedString(string: "name a new worktree", attributes: [
             .font: Theme.Typography.mono(Theme.Typography.body),
             .foregroundColor: Theme.chromeMutedText,
             .paragraphStyle: placeholderParagraph,
         ])
         nameField.font = Theme.Typography.mono(Theme.Typography.body, weight: .medium)
         nameField.textColor = Theme.chromeText
-        nameField.alignment = .center
+        nameField.alignment = .left
         nameField.focusRingType = .none
         nameField.isBordered = false
         nameField.drawsBackground = false
@@ -146,7 +159,19 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
         list.translatesAutoresizingMaskIntoConstraints = false
         list.onPick = { [weak self] index in self?.pick(index) }
         list.onRemove = { [weak self] worktree in self?.onRemove?(worktree) }
+        // Hover moves the highlight, in either mode — pointer and keyboard
+        // drive the same one thing (owner call 2026-09-21). It is safe to
+        // arm by hover now that typing puts the highlight out: `↩` belongs
+        // to the field whenever the field has text, and to the lit row only
+        // when it does not — and that row is always visibly lit.
         list.onHover = { [weak self] index in self?.list.select(index) }
+        // Losing or regaining the "New…" row changes how tall the list wants
+        // to be; the card follows while it is open.
+        list.onHeightChange = { [weak self] in
+            guard let self, self.listOpen else { return }
+            self.listHeight?.constant = min(self.list.naturalHeight, self.listLimit)
+            self.layoutSubtreeIfNeeded()
+        }
         list.alphaValue = 0
         list.isHidden = true
         card.addSubview(list)
@@ -172,7 +197,10 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
         cardWidth = width
         NSLayoutConstraint.activate([
             cardHost.centerXAnchor.constraint(equalTo: centerXAnchor),
-            cardHost.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 40), // sits a little above center
+            // A little above centre. Measured 2026-09-21: a positive constant
+            // here moves the card *down* (the old +40 sat it 40pt low, which
+            // only became obvious once the list rode along and the card grew).
+            cardHost.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -40),
             width,
 
             card.topAnchor.constraint(equalTo: cardHost.topAnchor),
@@ -209,7 +237,7 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
             nameHost.widthAnchor.constraint(equalTo: picker.widthAnchor),
             nameHost.heightAnchor.constraint(equalToConstant: 36),
             nameField.centerYAnchor.constraint(equalTo: nameHost.centerYAnchor),
-            nameField.leadingAnchor.constraint(equalTo: nameHost.leadingAnchor, constant: 12),
+            nameField.leadingAnchor.constraint(equalTo: nameHost.leadingAnchor, constant: 16),
             nameField.trailingAnchor.constraint(equalTo: nameHost.trailingAnchor, constant: -12),
             nameField.heightAnchor.constraint(equalToConstant: 20),
 
@@ -252,13 +280,18 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
         switch mode {
         case .pick:
             caption.stringValue = "Start a session in"
-            dropdown.title = selected.branch
+            if selected.isPrimary {
+                dropdown.show("main checkout", mono: false, detail: selected.branch)
+            } else {
+                dropdown.show(selected.branch, mono: true)
+            }
             dropdown.toolTip = selected.path
             list.markCurrent(path: selected.path)
             dropdown.isHidden = false
             nameHost.isHidden = true
         case .name:
-            caption.stringValue = "Name the new worktree"
+            caption.stringValue = "Start a session in"
+            list.markCurrent(path: selected.path)
             dropdown.isHidden = true
             nameHost.isHidden = false
         }
@@ -266,22 +299,21 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
     }
 
     private func enterNameMode(seed: String) {
-        setListOpen(false)
+        // Typing *is* the new-worktree action now, so the row that used to
+        // start it would be a no-op sitting in the list.
+        list.showsNewRow = false
+        // The list stays open beneath the field (owner call 2026-09-21): one
+        // card that both asks for a new name and shows what already exists.
+        setListOpen(true)
         mode = .name
         nameField.stringValue = seed
         applyMode()
         window?.makeFirstResponder(nameField)
         // Caret at the end of the seed, not a select-all.
         if let editor = nameField.currentEditor() as? NSTextView {
-            editor.alignment = .center
+            editor.alignment = .left
             editor.selectedRange = NSRange(location: (seed as NSString).length, length: 0)
         }
-    }
-
-    private func leaveNameMode() {
-        mode = .pick
-        applyMode()
-        window?.makeFirstResponder(picker)
     }
 
     // MARK: The list
@@ -325,11 +357,13 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
 
     /// `↩` / click on a row: a worktree, or the trailing "New worktree…".
     private func pick(_ index: Int) {
+        // Pointing at a worktree *is* the answer — the card's question was
+        // "where", and a click says it (owner report 2026-09-21: the old
+        // two-step choose-then-start survived from when the dropdown was
+        // the only way in, so the first click merely armed a row, and doing
+        // that put the now-redundant "New worktree…" row back).
         if index < worktrees.count {
-            selected = worktrees[index]
-            setListOpen(false)
-            applyMode()
-            window?.makeFirstResponder(picker)
+            onStart?(worktrees[index])
         } else {
             enterNameMode(seed: "")
         }
@@ -353,7 +387,16 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
             }
         case .name:
             let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty, nameIssue(name) == nil else {
+            if name.isEmpty {
+                // Nothing typed: the card is acting as the picker it also is.
+                if list.selectionShown, list.selection < worktrees.count {
+                    onStart?(worktrees[list.selection])
+                } else {
+                    NSSound.beep()
+                }
+                return
+            }
+            guard nameIssue(name) == nil else {
                 NSSound.beep()
                 return
             }
@@ -386,10 +429,16 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
         let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let issue = mode == .name ? nameIssue(name) : nil
         let existing = worktrees.contains { $0.branch == name }
+        if mode == .name {
+            // The field owns `↩` the moment there is something in it.
+            if name.isEmpty { list.select(list.selection) } else { list.clearSelection() }
+        }
         returnKey.actionTitle = mode == .pick ? (listOpen ? "Choose" : "Start session")
-            : (existing ? "Start session" : "Create & start")
-        returnKey.isEnabled = mode == .pick || (!name.isEmpty && issue == nil)
-        hint.stringValue = issue ?? (mode == .name ? "Esc to go back" : (listOpen ? "↑ ↓ to navigate" : "↓ to choose worktree"))
+            : (name.isEmpty || existing ? "Start session" : "Create & start")
+        returnKey.isEnabled = mode == .pick || issue == nil
+        hint.stringValue = issue ?? (mode == .name
+            ? (name.isEmpty ? "↑ ↓ pick · type to name a new one" : "↩ creates the worktree")
+            : (listOpen ? "↑ ↓ to navigate" : "↓ to choose worktree"))
         hint.textColor = issue == nil ? Theme.chromeMutedText : Theme.accentPeach
         hint.toolTip = issue
     }
@@ -401,8 +450,8 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
     // MARK: NSTextFieldDelegate (name mode)
 
     func controlTextDidBeginEditing(_ obj: Notification) {
-        // The field editor takes over drawing; it must center too.
-        (nameField.currentEditor() as? NSTextView)?.alignment = .center
+        // The field editor takes over drawing; it must align the same way.
+        (nameField.currentEditor() as? NSTextView)?.alignment = .left
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
@@ -410,10 +459,19 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
         case #selector(NSResponder.insertNewline(_:)):
             confirm()
             return true
+        case #selector(NSResponder.moveDown(_:)):
+            list.move(1)
+            updateAction()
+            return true
+        case #selector(NSResponder.moveUp(_:)):
+            list.move(-1)
+            updateAction()
+            return true
         case #selector(NSResponder.cancelOperation(_:)), #selector(NSResponder.complete(_:)):
             // The field editor turns an unhandled Esc into `complete:` (the
-            // autocomplete popup) — claim both so Esc always steps back.
-            leaveNameMode()
+            // autocomplete popup) — claim both. There is no half-state to
+            // step back to any more, so Esc leaves the card.
+            dismiss()
             return true
         default:
             return false
@@ -424,6 +482,11 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
 
     /// The same descent the summon card makes (§6), scaled to a card this size.
     func animateIn() {
+        if openListOnPresent {
+            openListOnPresent = false
+            layoutSubtreeIfNeeded()
+            setListOpen(true)
+        }
         guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
         layoutSubtreeIfNeeded()
         let target = cardHost.frame
@@ -494,7 +557,21 @@ private final class WorktreeListView: NSScrollView {
     private let worktrees: [Worktree]
     private var rows: [ListRow] = []
 
-    var naturalHeight: CGFloat { Self.rowHeight * CGFloat(worktrees.count + 1) + 4 }
+    /// Whether the trailing "New worktree…" row is part of the list. Off
+    /// while the name field is asking for one anyway.
+    var showsNewRow = true {
+        didSet {
+            guard showsNewRow != oldValue else { return }
+            rows.last?.isHidden = !showsNewRow
+            select(min(selection, visibleRows - 1))
+            needsLayout = true
+            onHeightChange?()
+        }
+    }
+    var onHeightChange: (() -> Void)?
+    private var visibleRows: Int { showsNewRow ? rows.count : rows.count - 1 }
+
+    var naturalHeight: CGFloat { Self.rowHeight * CGFloat(visibleRows) + 4 }
 
     init(worktrees: [Worktree]) {
         self.worktrees = worktrees
@@ -506,12 +583,14 @@ private final class WorktreeListView: NSScrollView {
         documentView = content
         wantsLayer = true
         for (index, worktree) in worktrees.enumerated() {
-            let row = ListRow(
-                title: worktree.branch,
-                mono: true,
-                suffix: worktree.isPrimary ? "main checkout" : nil,
-                removable: !worktree.isPrimary
-            )
+            // A worktree *is* its branch — one per branch, the name is the
+            // place. The repo's own checkout is the exception: it's a place
+            // whose branch drifts, so it wears the place and trails the ref.
+            let row = worktree.isPrimary
+                ? ListRow(title: "main checkout", mono: false,
+                          suffix: worktree.branch, suffixMono: true, removable: false)
+                : ListRow(title: worktree.branch, mono: true,
+                          suffix: nil, removable: true)
             row.onClick = { [weak self] in self?.onPick?(index) }
             row.toolTip = worktree.path
             row.onRemove = { [weak self] in self?.onRemove?(worktree) }
@@ -546,9 +625,20 @@ private final class WorktreeListView: NSScrollView {
         }
     }
 
+    private(set) var selectionShown = true
+
     func select(_ index: Int) {
-        selection = max(0, min(index, rows.count - 1))
+        selection = max(0, min(index, visibleRows - 1))
+        selectionShown = true
         for (i, row) in rows.enumerated() { row.isSelected = i == selection }
+    }
+
+    /// Drop the highlight without forgetting where it was: while the name
+    /// field has text, `↩` belongs to the field, so no row may look armed.
+    func clearSelection() {
+        guard selectionShown else { return }
+        selectionShown = false
+        for row in rows { row.isSelected = false }
     }
 
     func markCurrent(path: String) {
@@ -570,7 +660,10 @@ private final class WorktreeListView: NSScrollView {
     }
 
     func move(_ delta: Int) {
-        select((selection + delta + rows.count) % rows.count)
+        // Coming back from a cleared highlight, the first arrow re-lights
+        // where it was rather than stepping past it.
+        guard selectionShown else { select(selection); revealSelection(); return }
+        select((selection + delta + visibleRows) % visibleRows)
         revealSelection()
     }
 }
@@ -594,7 +687,7 @@ private final class ListRow: NSView {
     private let rule = NSView()
     private var tracking: NSTrackingArea?
 
-    init(title: String, mono: Bool, suffix: String?, removable: Bool) {
+    init(title: String, mono: Bool, suffix: String?, suffixMono: Bool = false, removable: Bool) {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = Theme.Elevation.radiusMedium
@@ -610,7 +703,9 @@ private final class ListRow: NSView {
         addSubview(label)
 
         suffixLabel.stringValue = suffix ?? ""
-        suffixLabel.font = Theme.Typography.ui(Theme.Typography.small)
+        suffixLabel.font = suffixMono
+            ? Theme.Typography.mono(Theme.Typography.small)
+            : Theme.Typography.ui(Theme.Typography.small)
         suffixLabel.textColor = Theme.chromeMutedText
         suffixLabel.isHidden = suffix == nil
         suffixLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -622,7 +717,9 @@ private final class ListRow: NSView {
         remove.imagePosition = .imageOnly
         remove.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Remove worktree")
         remove.symbolConfiguration = .init(pointSize: 9, weight: .medium)
-        remove.contentTintColor = Theme.chromeMutedText
+        // Full chrome ink, not the muted cap: at 9pt over a raised row the
+        // muted tone was barely there (owner call 2026-09-21).
+        remove.contentTintColor = Theme.chromeText
         remove.alphaValue = 0 // revealed on row hover
         remove.toolTip = "Remove worktree…"
         remove.setAccessibilityLabel("Remove \(title)")
@@ -681,7 +778,7 @@ private final class ListRow: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         onHover?()
-        if !remove.isHidden { remove.alphaValue = HoverPadButton.restingAlpha }
+        if !remove.isHidden { remove.alphaValue = 1 }
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -698,8 +795,10 @@ private final class ListRow: NSView {
     @objc private func removeTapped() { onRemove?() }
 }
 
-/// The dropdown: the branch centered in mono on a raised surface0 fill, a
-/// chevron at the trailing edge that turns when the list is open.
+/// The dropdown: the chosen worktree centered on a raised surface0 fill, a
+/// chevron at the trailing edge that turns when the list is open. A worktree
+/// shows its branch in mono; the repo's own checkout shows "main checkout"
+/// with the branch it currently sits on trailing in dim mono.
 private final class DropdownButton: OverlayActionButton {
     private let label = NSTextField(labelWithString: "")
     private let chevron = NSImageView()
@@ -747,17 +846,40 @@ private final class DropdownButton: OverlayActionButton {
 
     override var title: String {
         get { label.stringValue }
-        set { label.stringValue = newValue; setAccessibilityLabel("Worktree: " + newValue) }
+        set { show(newValue, mono: true) }
+    }
+
+    /// `text` in the voice its kind calls for, `detail` trailing in dim mono.
+    func show(_ text: String, mono: Bool, detail: String? = nil) {
+        let centered = NSMutableParagraphStyle()
+        centered.alignment = .center
+        centered.lineBreakMode = .byTruncatingMiddle
+        let value = NSMutableAttributedString(string: text, attributes: [
+            .font: mono
+                ? Theme.Typography.mono(Theme.Typography.body, weight: .medium)
+                : Theme.Typography.ui(Theme.Typography.body, weight: .medium),
+            .foregroundColor: Theme.chromeText,
+            .paragraphStyle: centered,
+        ])
+        if let detail {
+            value.append(NSAttributedString(string: "  " + detail, attributes: [
+                .font: Theme.Typography.mono(Theme.Typography.small),
+                .foregroundColor: Theme.chromeMutedText,
+                .paragraphStyle: centered,
+            ]))
+        }
+        label.attributedStringValue = value
+        setAccessibilityLabel("Worktree: " + text + (detail.map { ", " + $0 } ?? ""))
     }
 
     override func draw(_ dirtyRect: NSRect) {} // the layer is the whole look
 }
 
-/// A text field whose field editor centers as the field does.
+/// A text field whose field editor aligns as the field does.
 private final class CenteredTextField: NSTextField {
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
-        (currentEditor() as? NSTextView)?.alignment = .center
+        (currentEditor() as? NSTextView)?.alignment = .left
         return ok
     }
 }

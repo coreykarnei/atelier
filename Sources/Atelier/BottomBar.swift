@@ -13,6 +13,10 @@ protocol BottomBarDelegate: AnyObject {
     func bottomBarDidToggleLayout()
     /// Right-click on a worktree folder's label: tear the worktree down.
     func bottomBarDidRequestRemoveWorktree(at path: String)
+    /// The `⎇+` at the row's trailing end: a session in *another* worktree —
+    /// raise the chooser. Only shown when worktrees are on (Settings) and the
+    /// project is a repo; `+` never asks, this one always does.
+    func bottomBarDidRequestWorktreeSession()
     /// The gear at the bar's far right.
     func bottomBarDidRequestSettings()
     /// A tab was dragged to a new place: the full strip order, by session id.
@@ -92,15 +96,35 @@ final class BottomBar: NSView {
     /// cell edge against the 6pt a tab gets — a hair more air on the wall
     /// side, measured on the live strip (owner call 2026-09-17).
     private static let addSlotWidth: CGFloat = 18
-    private static let addLead: CGFloat = 2
+    /// The `+` used to hug the last tab by 2pt. With a hairline now seated
+    /// in that gap the run needed air on both sides of it — 6pt puts the
+    /// tick 3pt off the tab and its ink ~6pt off the glyph, the weight of
+    /// the gap biased toward the `+` (owner call 2026-09-21).
+    private static let addLead: CGFloat = 6
     private static let addTrail: CGFloat = 3
     /// The pad is 16pt square, centred in the slot, framing the 12pt glyph.
     private static let addPad: CGFloat = 16
-    /// Volumes: chrome text at full (the tab titles' weight), and a whisper
-    /// that keeps the original floor's luminance (overlay0 at 0.35 ≈
-    /// subtext0 at 0.22 over the mantle) — the owner kept the floor and
-    /// raised the ceiling (2026-09-17).
-    private static let addRestAlpha: CGFloat = 0.22
+    private static let addGlyph: CGFloat = 12
+    /// One volume for every `+`, chrome text at full — the tab titles'
+    /// weight (owner call 2026-09-21, retiring the 2026-09-17 whisper: with
+    /// the row's `⎇+` reading at full, a dimmed folder `+` beside it was
+    /// merely hard to see). The pad under the pointer is the hover feedback.
+    /// The standoff the `⎇+` keeps from the last folder's cell: clear of the
+    /// folder, so it never reads as that worktree's second button, but well
+    /// short of the `folderGap` a folder would take.
+    private static let worktreeAddStandoff: CGFloat = 8
+    /// Bare tabs have no cell edge to set the `⎇+` apart from the `+`, so a
+    /// hairline does it and the gap widens to seat it at the run's rhythm —
+    /// ~8pt of ink either side (owner call 2026-09-21). With folders drawn
+    /// the cell edge already separates them and no tick is wanted.
+    private static let worktreeAddBareGap: CGFloat = 10
+
+    /// Telling two sessions of the same folder apart (owner report
+    /// 2026-09-21: inactive tabs in one cell ran together). A hairline in
+    /// the gap between them, in the `+`'s own ink — the alternative tried
+    /// alongside, a faint fill per inactive tab, put more ink inside a cell
+    /// that already carries a fill.
+    private static let tabRuleInset: CGFloat = 2.7
     private static var cellHeight: CGFloat { tabHeight + folderPadY * 2 }
     /// Row pitch: a cell, the gap, and the lower row's label band.
     private static var rowPitch: CGFloat { cellHeight + rowGap + folderTabHeight }
@@ -118,6 +142,7 @@ final class BottomBar: NSView {
     /// Manual-layout home of the tab views; sits between pill and clock.
     private let tabsArea = TabsAreaView()
     private let addButton = HoverPadButton()
+    private let worktreeAddButton = HoverPadButton()
     private let overflowButton = HoverPadButton()
     private let clockPrefixLabel = NSTextField(labelWithString: "")
     private let clockColonLabel = BreathingColonLabel(labelWithString: ":")
@@ -136,9 +161,28 @@ final class BottomBar: NSView {
     /// One `+` per folder, keyed like the folders. Only in folder mode; bare
     /// tabs keep the single trailing `addButton`.
     private var folderAddButtons: [String: HoverPadButton] = [:]
-    /// The folder under the pointer (cell, label, or any of its tabs).
-    private var hoveredGroup: String?
+    /// One hairline per tab that follows another of the same group, keyed by
+    /// the right-hand tab.
+    private var tabRules: [UUID: NSView] = [:]
+    /// The same hairline between a group's last tab and its `+`, keyed by
+    /// group — the `+` is one more thing in the run, so it gets the same
+    /// separation (owner call 2026-09-21). Skipped when that last tab is
+    /// active: its fill already draws the edge.
+    private var trailingRules: [String: NSView] = [:]
+    /// Reserved key for the bare-mode tick between the `+` and the `⎇+`; no
+    /// group key can collide (they are paths or `ssh://host`).
+    private static let worktreeRuleKey = "⎇+"
     private var foldersVisible = true
+    /// Whether the trailing `⎇+` is drawn: worktrees enabled and the project
+    /// is a repo. Off, the bar is exactly what it was — one `+`, no glyph
+    /// standing around for a feature you don't use.
+    var showsWorktreeAdd = false {
+        didSet {
+            guard oldValue != showsWorktreeAdd else { return }
+            worktreeAddButton.isHidden = !showsWorktreeAdd
+            flowTabs(animated: true)
+        }
+    }
     private var lastFlowWidth: CGFloat = 0
     private var lastFlowHeight: CGFloat = 0
     /// First population per launch gets the restore stagger (§5); afterwards
@@ -232,9 +276,29 @@ final class BottomBar: NSView {
         addSubview(tabsArea)
 
         configureIconButton(addButton, symbol: "plus", action: #selector(addTapped))
-        addButton.toolTip = "New Session…  ⌥⌘T"
-        addButton.setAccessibilityLabel("New session")
+        // The same 12pt plus the folders carry: one glyph, two hosts.
+        addButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 12, weight: .medium))
+        addButton.contentTintColor = Theme.chromeText
+        addButton.toolTip = "New Session Here  ⌥⌘T"
+        addButton.setAccessibilityLabel("New session here")
         tabsArea.addSubview(addButton)
+
+        // The `⎇+`: the same conifer that labels a worktree folder, badged
+        // with the `+` its neighbour carries bare. Noun then verb, the way
+        // `folder.badge.plus` reads — and two silhouettes, so the pair never
+        // scans as two crosses.
+        worktreeAddButton.image = Self.worktreeAddGlyph()
+        // Parity with its neighbour: one control, one volume — the whisper
+        // rule is for the per-folder `+`, of which there are many.
+        worktreeAddButton.contentTintColor = Theme.chromeText
+        worktreeAddButton.alphaValue = 1
+        worktreeAddButton.target = self
+        worktreeAddButton.action = #selector(worktreeAddTapped)
+        worktreeAddButton.toolTip = "New Session in a Worktree…  ⇧⌥⌘T"
+        worktreeAddButton.setAccessibilityLabel("New session in a worktree")
+        worktreeAddButton.isHidden = true
+        tabsArea.addSubview(worktreeAddButton)
         configureIconButton(overflowButton, symbol: "chevron.right.2", action: nil)
         overflowButton.toolTip = "More sessions"
         overflowButton.setAccessibilityLabel("More sessions")
@@ -377,7 +441,10 @@ final class BottomBar: NSView {
     private enum FlowItem {
         case folder(FolderSegment)
         case overflow
-        case add
+        /// The trailing `⎇+`. The bare-tabs `+` is *not* here: it rides its
+        /// group's cell like a folder's own `+`, so the glyph sits the same
+        /// 2pt off the last tab whether or not folders are drawn.
+        case worktreeAdd
     }
 
     /// A group's tabs on one row. A group wider than a row spills across two;
@@ -424,7 +491,7 @@ final class BottomBar: NSView {
         let tabsWidth = Self.folderPadX
             + tabs.reduce(0) { $0 + tabWidth($1) }
             + Self.tabGap * CGFloat(max(0, tabs.count - 1))
-            + (foldersVisible ? Self.addLead + Self.addSlotWidth + Self.addTrail : Self.folderPadX)
+            + Self.addLead + Self.addSlotWidth + Self.addTrail
         let labelWidth = tabs.first.map { FolderView.labelWidth(for: $0.groupLabel) } ?? 0
         return max(tabsWidth, labelWidth + Theme.Elevation.radiusSmall * 2)
     }
@@ -432,7 +499,9 @@ final class BottomBar: NSView {
     private func itemWidth(_ item: FlowItem) -> CGFloat {
         switch item {
         case .folder(let segment): return segmentWidth(segment.tabs)
-        case .overflow, .add: return 26
+        case .overflow: return 26
+        // One slot wide, exactly like the `+` it follows.
+        case .worktreeAdd: return Self.addSlotWidth
         }
     }
 
@@ -441,6 +510,17 @@ final class BottomBar: NSView {
     private func gap(after previous: FlowItem?, before item: FlowItem) -> CGFloat {
         guard let previous else { return 0 }
         if case .folder = previous, case .folder = item { return Self.folderGap }
+        // The `⎇+` is the row's control, not any folder's. With folders
+        // drawn it stands off the last cell by a full `folderGap`, the way
+        // the next folder would — crowding the cell's edge made it read as
+        // that worktree's second button (owner report 2026-09-21). Bare, the
+        // `+` beside it is a loose glyph too, so it follows at the same
+        // remove the `+` keeps from its last tab.
+        if case .worktreeAdd = item {
+            // Bare: measured ink-to-ink, this lands the `⎇+` the same ~8pt
+            // off the `+` that the `+` keeps off the tick before it.
+            return foldersVisible ? Self.worktreeAddStandoff : Self.worktreeAddBareGap
+        }
         return Self.buttonGap
     }
 
@@ -478,11 +558,11 @@ final class BottomBar: NSView {
         }
         refreshTintIndex()
 
-        // Pack, reserving room on the last row for the `+` — and, if anything
-        // overflowed, for the `»` too (a second pass with the wider reserve).
-        // In folder mode every folder carries its own `+` inside its cell,
-        // so nothing trails the row but the `»` when needed.
-        let addReserve: CGFloat = foldersVisible ? 0 : 26 + Self.buttonGap
+        // Pack, reserving room on the last row for the `⎇+` — and, if
+        // anything overflowed, for the `»` too (a second pass with the wider
+        // reserve). Every group carries its own `+` inside its cell, bare or
+        // foldered, so nothing else trails the row.
+        let addReserve: CGFloat = showsWorktreeAdd ? 26 + Self.buttonGap : 0
         var packed = pack(chunks: chunks, rowWidth: rowWidth, reserve: addReserve)
         if !packed.overflow.isEmpty {
             packed = pack(chunks: chunks, rowWidth: rowWidth, reserve: addReserve + 26 + Self.buttonGap)
@@ -508,11 +588,11 @@ final class BottomBar: NSView {
             }
             rows[rows.count - 1].append(.overflow)
         }
-        if foldersVisible {
-            addButton.isHidden = true
-        } else {
-            addButton.isHidden = false
-            rows[rows.count - 1].append(.add)
+        // The bare-tabs `+` lives in its group's trailing slot (placed with
+        // the tabs); only the `⎇+` trails the row.
+        addButton.isHidden = foldersVisible
+        if showsWorktreeAdd {
+            rows[rows.count - 1].append(.worktreeAdd)
         }
 
         place(rows: rows, animated: animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
@@ -606,8 +686,88 @@ final class BottomBar: NSView {
         var seenTabs = Set<UUID>()
         var seenFolders = Set<String>()
         var seenGroups = Set<String>()
+        var seenRules = Set<UUID>()
+        var seenTrailingRules = Set<String>()
+        /// Trailing edge of the bare `+`'s ink, for the tick before the `⎇+`.
+        var barePlusInkEnd: CGFloat?
         var placements: [(NSView, CGRect)] = []
         var arrivals: [NSView] = []
+
+        /// The hairline between a group's last tab and the `+` that follows
+        /// it, seated in the `addLead` gap.
+        /// A hairline centred on `midX` — the same tick, where the thing it
+        /// separates is not a chip.
+        func placeRuleBetween(key: String, midX: CGFloat, tabY: CGFloat) {
+            seenTrailingRules.insert(key)
+            let rule: NSView
+            if let existing = trailingRules[key] {
+                rule = existing
+            } else {
+                rule = TabRuleView()
+                rule.wantsLayer = true
+                rule.layer?.backgroundColor = Theme.chromeText.cgColor
+                trailingRules[key] = rule
+                tabsArea.addSubview(rule, positioned: .above, relativeTo: nil)
+                arrivals.append(rule)
+            }
+            placements.append((rule, CGRect(
+                x: midX.rounded() - 0.5, y: tabY + Self.tabRuleInset,
+                width: 1, height: Self.tabHeight - Self.tabRuleInset * 2
+            )))
+        }
+
+        func placeTrailingRule(groupKey: String, last: SessionTabInfo?, slotX: CGFloat, tabY: CGFloat) {
+            guard let last, last.index != activeIndex else { return }
+            seenTrailingRules.insert(groupKey)
+            let rule: NSView
+            if let existing = trailingRules[groupKey] {
+                rule = existing
+            } else {
+                rule = TabRuleView()
+                rule.wantsLayer = true
+                rule.layer?.backgroundColor = Theme.chromeText.cgColor
+                trailingRules[groupKey] = rule
+                tabsArea.addSubview(rule, positioned: .above, relativeTo: nil)
+                arrivals.append(rule)
+            }
+            // Measured off the *ink*, not the frames (owner call
+            // 2026-09-21): a tab's title stops 8pt short of its chip, so a
+            // tick centred in the lead gap sat ~11pt from the text while
+            // only 6pt from the `+`. Seated 1pt past the chip it reads ~9pt
+            // from the title, ~8pt from the plus, and the plus keeps the
+            // same ~8pt to the `⎇+` — three even gaps.
+            placements.append((rule, CGRect(
+                x: (slotX - Self.addLead + 1).rounded() - 0.5, y: tabY + Self.tabRuleInset,
+                width: 1, height: Self.tabHeight - Self.tabRuleInset * 2
+            )))
+        }
+
+        /// The hairline between two tabs of one group: centred in their gap,
+        /// short of the chip's full height. Skipped next to the active tab —
+        /// its own fill already draws the edge.
+        func placeRule(before info: SessionTabInfo, previous: SessionTabInfo?, tabX: CGFloat, tabY: CGFloat) {
+            guard let previous else { return }
+            guard info.index != activeIndex, previous.index != activeIndex else { return }
+            seenRules.insert(info.id)
+            let rule: NSView
+            if let existing = tabRules[info.id] {
+                rule = existing
+            } else {
+                rule = TabRuleView()
+                rule.wantsLayer = true
+                // The `+`'s own ink, not the 6%-white hairline: at 1pt wide
+                // that token all but vanished over a folder fill (owner call
+                // 2026-09-21 — same brightness as the plus).
+                rule.layer?.backgroundColor = Theme.chromeText.cgColor
+                tabRules[info.id] = rule
+                tabsArea.addSubview(rule, positioned: .above, relativeTo: nil)
+                arrivals.append(rule)
+            }
+            placements.append((rule, CGRect(
+                x: (tabX - Self.tabGap / 2).rounded() - 0.5, y: tabY + Self.tabRuleInset,
+                width: 1, height: Self.tabHeight - Self.tabRuleInset * 2
+            )))
+        }
 
         // Cells stack from the bottom; the top row's label tabs rise past the
         // area (and the bar) — nothing here clips, by design.
@@ -628,6 +788,7 @@ final class BottomBar: NSView {
                     // Bare tabs: no cell, no label; same geometry so a second
                     // group arriving only fades folders in around them.
                     var tabX = x + Self.folderPadX
+                    var previousTab: SessionTabInfo?
                     for info in segment.tabs {
                         seenTabs.insert(info.id)
                         let view: SessionTabView
@@ -644,8 +805,26 @@ final class BottomBar: NSView {
                         let tabW = tabWidth(info)
                         if drag?.id != info.id {
                             placements.append((view, CGRect(x: tabX, y: tabY, width: tabW, height: Self.tabHeight)))
+                            placeRule(before: info, previous: previousTab, tabX: tabX, tabY: tabY)
                         }
+                        previousTab = info
                         tabX += tabW + Self.tabGap
+                    }
+                    // The `+` hugs the last tab exactly as a folder's does —
+                    // the sole group is the active one, so it wears the full
+                    // volume, not the whisper (owner report 2026-09-21: bare
+                    // mode parked it a row's width out from its tabs).
+                    if tabs.last?.id == segment.tabs.last?.id {
+                        let slotX = x + width - Self.addTrail - Self.addSlotWidth
+                        placeTrailingRule(groupKey: segment.groupKey, last: segment.tabs.last,
+                                          slotX: slotX, tabY: tabY)
+                        barePlusInkEnd = slotX + (Self.addSlotWidth - Self.addPad) / 2
+                            + (Self.addPad - Self.addGlyph) / 2 + Self.addGlyph
+                        placements.append((addButton, CGRect(
+                            x: slotX + (Self.addSlotWidth - Self.addPad) / 2,
+                            y: tabY + (Self.tabHeight - Self.addPad) / 2,
+                            width: Self.addPad, height: Self.addPad
+                        )))
                     }
                 case .folder(let segment):
                     seenFolders.insert(segment.poolKey)
@@ -658,7 +837,6 @@ final class BottomBar: NSView {
                         folder.onDragBegan = { [weak self] view, event in self?.folderDragBegan(view, event) }
                         folder.onDragMoved = { [weak self] view, event in self?.folderDragMoved(view, event) }
                         folder.onDragEnded = { [weak self] view in self?.folderDragEnded(view) }
-                        folder.onHoverChange = { [weak self] view, inside in self?.folderHoverChanged(view, inside) }
                         let key = segment.groupKey
                         folder.branchProvider = key.hasPrefix("ssh://") ? nil : { WorktreeManager.currentBranch(key) }
                         folderViews[segment.poolKey] = folder
@@ -687,6 +865,7 @@ final class BottomBar: NSView {
                         )))
                     }
                     var tabX = x + Self.folderPadX
+                    var previousTab: SessionTabInfo?
                     for info in segment.tabs {
                         seenTabs.insert(info.id)
                         let view: SessionTabView
@@ -704,7 +883,9 @@ final class BottomBar: NSView {
                         // The tab under the pointer follows the pointer, not the flow.
                         if drag?.id != info.id, !folderDragged {
                             placements.append((view, CGRect(x: tabX, y: tabY, width: tabW, height: Self.tabHeight)))
+                            placeRule(before: info, previous: previousTab, tabX: tabX, tabY: tabY)
                         }
+                        previousTab = info
                         tabX += tabW + Self.tabGap
                     }
                     // The folder's `+`, on the group's last segment only.
@@ -721,6 +902,8 @@ final class BottomBar: NSView {
                         add.toolTip = "New session in \(FolderView.plainLabel(segment.label))"
                         if !folderDragged {
                             let slotX = x + width - Self.addTrail - Self.addSlotWidth
+                            placeTrailingRule(groupKey: segment.groupKey, last: segment.tabs.last,
+                                              slotX: slotX, tabY: tabY)
                             placements.append((add, CGRect(
                                 x: slotX + (Self.addSlotWidth - Self.addPad) / 2,
                                 y: tabY + (Self.tabHeight - Self.addPad) / 2,
@@ -730,8 +913,18 @@ final class BottomBar: NSView {
                     }
                 case .overflow:
                     placements.append((overflowButton, CGRect(x: x + 2, y: tabY, width: 22, height: Self.tabHeight)))
-                case .add:
-                    placements.append((addButton, CGRect(x: x + 2, y: tabY, width: 22, height: Self.tabHeight)))
+                case .worktreeAdd:
+                    // Bare tabs: the same hairline the run uses, centred
+                    // between the two glyphs' ink. In folder mode the last
+                    // cell's edge is the separation and none is drawn.
+                    if !foldersVisible, let plusEnd = barePlusInkEnd {
+                        placeRuleBetween(key: Self.worktreeRuleKey,
+                                         midX: (plusEnd + x + 0.2) / 2, tabY: tabY)
+                    }
+                    placements.append((worktreeAddButton, CGRect(
+                        x: x, y: tabY + (Self.tabHeight - Self.addPad) / 2,
+                        width: 15, height: Self.addPad
+                    )))
                 }
                 x += width
                 previous = item
@@ -752,8 +945,14 @@ final class BottomBar: NSView {
             folderAddButtons[key] = nil
             departed.append(view)
         }
-        if hoveredGroup.map({ !seenGroups.contains($0) }) ?? false { hoveredGroup = nil }
-        refreshAddVolumes(animated: animated)
+        for (id, view) in tabRules where !seenRules.contains(id) {
+            tabRules[id] = nil
+            departed.append(view)
+        }
+        for (key, view) in trailingRules where !seenTrailingRules.contains(key) {
+            trailingRules[key] = nil
+            departed.append(view)
+        }
         for view in departed {
             if animated {
                 NSAnimationContext.runAnimationGroup({ ctx in
@@ -1053,38 +1252,54 @@ final class BottomBar: NSView {
         button.setAccessibilityLabel("New session in this folder")
         button.target = self
         button.action = #selector(folderAddTapped(_:))
-        button.alphaValue = Self.addRestAlpha
         return button
     }
+
+    /// The `⎇+` mark, drawn — no SF symbol carries this tree. The folder
+    /// label's own conifer with the `+` its neighbour wears bare laid *over*
+    /// it: half the tree's width right of centre, so the plus straddles the
+    /// right edge and the conifer stays whole, knocked out by a clear halo
+    /// so it reads as sitting on top rather than growing out of the
+    /// branches. Noun then verb, the way `folder.badge.plus` reads — and two
+    /// silhouettes, so the pair never scans as two crosses. (Owner design
+    /// 2026-09-21; the inverse composition, a plus badged with a tree, was
+    /// built alongside and rejected on the strip — it read as a second `+`.)
+    static func worktreeAddGlyph() -> NSImage {
+        let image = NSImage(size: NSSize(width: 15, height: 14), flipped: false) { _ in
+            func plusPath(centre: NSPoint, arm: CGFloat, thickness: CGFloat) -> NSBezierPath {
+                let path = NSBezierPath()
+                let t = thickness / 2
+                path.append(NSBezierPath(rect: NSRect(
+                    x: centre.x - arm, y: centre.y - t, width: arm * 2, height: thickness)))
+                path.append(NSBezierPath(rect: NSRect(
+                    x: centre.x - t, y: centre.y - arm, width: thickness, height: arm * 2)))
+                return path
+            }
+            NSColor.black.setFill()
+            // Thin as the bare `+` beside it — a fatter stroke read stout
+            // against a 6pt span.
+            let arm: CGFloat = 3.3, thickness: CGFloat = 1.6
+            let centre = NSPoint(x: 10.2, y: 6.6)
+            FolderView.treePath(in: NSRect(x: 0.2, y: 0.5, width: 11, height: 13)).fill()
+            // The halo: the same plus, fattened, cut clean out of the tree —
+            // wide enough to read as air, narrow enough to leave the tiers.
+            NSGraphicsContext.current?.compositingOperation = .clear
+            plusPath(centre: centre, arm: arm + 0.85, thickness: thickness + 1.7).fill()
+            NSGraphicsContext.current?.compositingOperation = .sourceOver
+            plusPath(centre: centre, arm: arm, thickness: thickness).fill()
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    @objc private func worktreeAddTapped() { delegate?.bottomBarDidRequestWorktreeSession() }
 
     @objc private func folderAddTapped(_ sender: NSButton) {
         guard let key = folderAddButtons.first(where: { $0.value === sender })?.key else { return }
         delegate?.bottomBarDidRequestNewSession(inGroup: key)
     }
 
-    private var activeGroupKey: String? { tabs.first { $0.index == activeIndex }?.groupKey }
-
-    private func folderHoverChanged(_ folder: FolderView, _ inside: Bool) {
-        guard let key = folder.groupKey else { return }
-        let next: String? = inside ? key : (hoveredGroup == key ? nil : hoveredGroup)
-        guard next != hoveredGroup else { return }
-        hoveredGroup = next
-        refreshAddVolumes(animated: true)
-    }
-
-    /// Three volumes for one glyph: a whisper at rest, full in the active
-    /// folder and under the pointer. Weight changes only — nothing moves.
-    private func refreshAddVolumes(animated: Bool) {
-        let active = activeGroupKey
-        let duration = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0.12 : 0
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = duration
-            for (key, button) in folderAddButtons {
-                let alpha: CGFloat = key == active || key == hoveredGroup ? 1 : Self.addRestAlpha
-                if button.alphaValue != alpha { button.animator().alphaValue = alpha }
-            }
-        }
-    }
     @objc private func layoutTapped() { delegate?.bottomBarDidToggleLayout() }
     @objc private func settingsTapped() { delegate?.bottomBarDidRequestSettings() }
     @objc private func overflowTapped() {
@@ -1094,6 +1309,11 @@ final class BottomBar: NSView {
         delegate?.bottomBarDidSelectSession(at: sender.tag)
     }
 }
+
+/// The 1pt hairline between two chips of one group (and between the last
+/// chip and its `+`). Its own type so the flow can place it without the
+/// arrival fade every other view gets.
+private final class TabRuleView: NSView {}
 
 /// A single session tab: optional attention badge, ellipsized title. The
 /// active tab — and only the active tab — carries a close `×` at its trailing
@@ -1688,7 +1908,7 @@ private final class FolderView: NSView {
     /// (a conifer was the owner's pick 2026-09-08; a canopy turned to a
     /// lollipop at this size). One opaque fill; the trunk runs up into the
     /// lowest tier so there is never a seam. `rect` is the glyph box.
-    private static func treePath(in rect: CGRect) -> NSBezierPath {
+    fileprivate static func treePath(in rect: CGRect) -> NSBezierPath {
         let path = NSBezierPath()
         let w = rect.width, h = rect.height
         func pt(_ x: CGFloat, _ y: CGFloat) -> NSPoint { NSPoint(x: rect.minX + x * w, y: rect.minY + y * h) }

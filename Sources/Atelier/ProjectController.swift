@@ -99,7 +99,14 @@ final class ProjectController: NSObject, BottomBarDelegate {
         self.init()
         view.translatesAutoresizingMaskIntoConstraints = false
         buildChrome(in: view)
+        // Turning worktrees on or off in Settings adds or removes the `⎇+`
+        // while the bar is on screen.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(settingsChanged), name: Settings.didChange, object: nil
+        )
     }
+
+    @objc private func settingsChanged() { updateBottomBar() }
 
     // MARK: Focus articulation (POLISH_PLAN Phase 1)
 
@@ -529,6 +536,8 @@ final class ProjectController: NSObject, BottomBarDelegate {
         return session.state == .ide && !session.isRemote
     }
     var editorHasFile: Bool { activeSession?.editorPane.filePath != nil }
+    /// The `⎇+` / `⇧⌥⌘T` door: only where worktrees are on and possible.
+    var canChooseWorktree: Bool { projectRepoRoot != nil && Settings.worktreesEnabled }
 
     /// Buffers with unsaved edits across this window's sessions — the app's
     /// quit guard names them (§5: the refusal names the actual loss).
@@ -1046,7 +1055,11 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// The row's `⎇+` / `⇧⌥⌘T`: the chooser, opened as a chooser — the list
     /// already unfolded, since choosing is why it was raised.
     func bottomBarDidRequestWorktreeSession() {
-        showWorktreeChooser(openList: true)
+        // Naming a new one is the default answer (owner call 2026-09-21):
+        // the `+` already covers "here", so a card raised to go elsewhere
+        // must not make the main checkout a reflex `↩`. `↓` reaches the
+        // worktrees that exist; with none yet there is nothing else to show.
+        showWorktreeChooser(prefill: "")
     }
     /// The tab's `×`: confirm first (Settings → "Ask before closing a
     /// session"; the alert's own "Don't ask again" turns it off). `↩`
@@ -1158,7 +1171,11 @@ final class ProjectController: NSObject, BottomBarDelegate {
             NSSound.beep() // landing on a non-repo: nothing to choose from
             return
         }
-        let worktrees = WorktreeManager.list(repoRoot: repoRoot)
+        // Linked worktrees first, the repo's own checkout last: this card is
+        // raised to go somewhere else, so the eye should land on the
+        // elsewheres (owner call 2026-09-21). Git lists the primary first.
+        let listed = WorktreeManager.list(repoRoot: repoRoot)
+        let worktrees = listed.filter { !$0.isPrimary } + listed.filter { $0.isPrimary }
         guard !worktrees.isEmpty else {
             NSSound.beep()
             return
@@ -1400,6 +1417,9 @@ final class ProjectController: NSObject, BottomBarDelegate {
         }
 
         if projectRepoRoot != nil {
+            commands.append(PaletteCommand(id: "session.worktree", title: "Session: New in Worktree…", key: "⇧⌥⌘T") { [weak self] in
+                self?.bottomBarDidRequestWorktreeSession()
+            })
             commands.append(PaletteCommand(id: "worktree.new", title: "Worktree: New…", key: nil) { [weak self] in
                 self?.showWorktreeChooser(prefill: "")
             })
