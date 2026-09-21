@@ -183,7 +183,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the target's primary checkout, opening one if none exists.
     private func handle(_ command: CommandMessage) {
         let root = WorktreeManager.repoRoot(for: command.path) ?? command.path
-        let controller = projects.first { $0.projectRepoRoot == root }
+        // A window anchored on a repo is matched by that repo; one anchored on
+        // a plain folder has no repo root, so it answers to the folder itself.
+        let controller = projects.first { ($0.projectRepoRoot ?? $0.projectRoot) == root }
 
         switch command.verb {
         case .open:

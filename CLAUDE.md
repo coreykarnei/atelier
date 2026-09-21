@@ -255,6 +255,24 @@ repo-root-relative — they're rebased through `git rev-parse
 and `RepoFileOffer.isUnboundedRoot` (`~` or `/`) skips both scans:
 recents only, no dimming.
 
+**A project wears the name of the folder you opened** (2026-09-21,
+`fix/project-name-is-the-folder`, owner call): `ProjectController` split
+the one anchor in two. `projectRoot` is that folder — the tab title, the
+bar pill, and where `⌥⌘T` starts a sibling — while `projectRepoRoot` is
+the primary checkout behind it and is now **nil when there is no repo**
+(the old `?? cwd` fallback made it never-nil, so `repoRoot != nil` was
+false comfort). Before, the title came from git's root, so opening a
+subdirectory named the repo instead of the directory, and — because home
+is itself a repo — a folder like `~/Ableton Projects` resolved all the
+way up and titled its tab `core`, with the worktree chooser aimed at the
+whole home directory. Dropping the fallback is what makes the three
+worktree gates (folder `+`, `⌥⌘T`, the palette's Worktree: New…) mean
+what they always claimed; `folderLabel` stops calling a repo-less folder
+`main`, and the `atelier` CLI matches a window by
+`projectRepoRoot ?? projectRoot`. The `.git` filter on the ⌘T Landing
+offer (`LandingView.entries`) is untouched and still decides what the
+scan *lists* — a plain folder is reachable by typing its `~`/`/` path.
+
 ## Commands
 
 - `make build` — compile all targets via SwiftPM.

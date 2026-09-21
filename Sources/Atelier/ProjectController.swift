@@ -30,8 +30,16 @@ final class ProjectController: NSObject, BottomBarDelegate {
     private var activeIndex = 0
     private var processesStarted = false
 
-    /// The primary checkout this window's project is anchored to — set when the
-    /// first IDE session lands. The `atelier` CLI routes commands by this.
+    /// The folder this window's project was opened on — set when the first IDE
+    /// session lands. This is the project's name and where ⌥⌘T starts a
+    /// sibling: you opened this folder, so the tab wears this folder's name,
+    /// git or not, repo root or a subdirectory of one.
+    private(set) var projectRoot: String?
+
+    /// The primary checkout behind `projectRoot`, or nil when that folder isn't
+    /// in a repo at all — the one answer to "does this project have git?", so
+    /// the worktree UI never offers itself where `git worktree` would fail.
+    /// The `atelier` CLI routes commands by this.
     private(set) var projectRepoRoot: String?
 
     private let sessionArea = NSView()
@@ -226,7 +234,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
     func addSessionOnMain() {
         if let session = activeSession, case .remote(let host) = session.location {
             adopt(Session(remoteHost: host, remoteDir: session.cwd))
-        } else if let root = projectRepoRoot {
+        } else if let root = projectRoot {
             adopt(Session(ideRoot: root))
         } else {
             addSession()
@@ -288,7 +296,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
     }
 
     /// Anchor the window to its project once the first IDE session exists: cache
-    /// the primary checkout and name the native tab after it.
+    /// the folder it opened (the tab's name) and the repo behind it, if any.
     private func noteProjectRoot(for session: Session) {
         // A remote dir is not a local repo root — anchoring the window to it
         // would aim ⌥⌘T and the worktree chooser at a path that isn't here.
@@ -296,22 +304,26 @@ final class ProjectController: NSObject, BottomBarDelegate {
             refreshTitle()
             return
         }
-        if projectRepoRoot == nil {
-            projectRepoRoot = WorktreeManager.repoRoot(for: session.cwd) ?? session.cwd
+        if projectRoot == nil {
+            projectRoot = session.cwd
+            // No `?? cwd` fallback: nil *means* "not a repo", which is what
+            // every worktree gate below reads it for.
+            projectRepoRoot = WorktreeManager.repoRoot(for: session.cwd)
             refreshMainBranch()
         }
         refreshTitle()
     }
 
     /// The project's name, nothing else (owner call 2026-09-10): the worktree
-    /// and the session live in the bottom bar; the project tab says which repo
-    /// (or host) this is.
+    /// and the session live in the bottom bar; the project tab says which
+    /// folder (or host) this is — the folder you opened, not the repo it
+    /// happens to sit in (owner call 2026-09-21).
     private func refreshTitle() {
         if let session = activeSession, case .remote(let host) = session.location {
             title = host
             return
         }
-        guard let root = projectRepoRoot else {
+        guard let root = projectRoot else {
             title = "New Tab"
             return
         }
@@ -425,6 +437,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
     }
 
     private func revertToLanding() {
+        projectRoot = nil
         projectRepoRoot = nil
         title = "New Tab"
         addSession()
@@ -856,14 +869,17 @@ final class ProjectController: NSObject, BottomBarDelegate {
         // switching sessions never reflows the bar. Pre-anchor it shows where a
         // landing would open.
         let pill: String
-        if let projectRepoRoot {
-            pill = (projectRepoRoot as NSString).lastPathComponent
+        if let projectRoot {
+            pill = (projectRoot as NSString).lastPathComponent
         } else if let session = activeSession {
             pill = Self.abbreviate(session.cwd)
         } else {
             pill = ""
         }
         let mode: LayoutMode? = activeSession?.state == .ide ? activeSession?.layoutMode : nil
+        // The `⎇+` earns its place only where worktrees are both on and
+        // possible: a repo project with the feature enabled.
+        bottomBar.showsWorktreeAdd = projectRepoRoot != nil && Settings.worktreesEnabled
         bottomBar.update(
             tabs: groupedTabs(),
             activeIndex: activeIndex,
@@ -919,6 +935,9 @@ final class ProjectController: NSObject, BottomBarDelegate {
     private func folderLabel(for session: Session, key: String) -> String {
         if let host = session.location.host { return "@\(host)" }
         if session.isWorktree { return "⎇ \((session.cwd as NSString).lastPathComponent)" }
+        // "main" is git's word for the primary checkout — a folder with no repo
+        // behind it has no primary, so it wears its own name instead.
+        guard projectRepoRoot != nil else { return (session.cwd as NSString).lastPathComponent }
         return "main"
     }
 
@@ -1007,11 +1026,11 @@ final class ProjectController: NSObject, BottomBarDelegate {
     func bottomBarDidSelectSession(at index: Int) { showSession(at: index) }
     func bottomBarDidRequestNewSession() { requestNewSession() }
 
-    /// A folder's `+`: a sibling *there*. Remote folders get another session
-    /// on the host (the active session's dir when it lives there, else the
-    /// folder's first); a local folder opens the chooser with its worktree
-    /// preselected — one path to New… from any folder — or, worktrees off,
-    /// starts straight on that root.
+    /// A folder's `+`: a sibling *there*, immediately — pointing at the
+    /// folder already answered the only question the chooser asked (owner
+    /// call 2026-09-21). Remote folders get another session on the host (the
+    /// active session's dir when it lives there, else the folder's first).
+    /// Branching has its own door now: the row's `⎇+`.
     func bottomBarDidRequestNewSession(inGroup groupKey: String) {
         if groupKey.hasPrefix("ssh://") {
             let host = String(groupKey.dropFirst("ssh://".count))
@@ -1019,11 +1038,15 @@ final class ProjectController: NSObject, BottomBarDelegate {
                 ?? sessions.first { $0.location.host == host }
             guard let sibling else { return }
             adopt(Session(remoteHost: host, remoteDir: sibling.cwd))
-        } else if projectRepoRoot != nil, Settings.worktreesEnabled {
-            showWorktreeChooser(initialPath: groupKey)
         } else {
             adopt(Session(ideRoot: groupKey))
         }
+    }
+
+    /// The row's `⎇+` / `⇧⌥⌘T`: the chooser, opened as a chooser — the list
+    /// already unfolded, since choosing is why it was raised.
+    func bottomBarDidRequestWorktreeSession() {
+        showWorktreeChooser(openList: true)
     }
     /// The tab's `×`: confirm first (Settings → "Ask before closing a
     /// session"; the alert's own "Don't ask again" turns it off). `↩`
@@ -1112,22 +1135,22 @@ final class ProjectController: NSObject, BottomBarDelegate {
         preOverlayFocus = nil
     }
 
-    /// The `+` / `⌥⌘T`: a new session — after one question, which worktree,
-    /// when worktrees are enabled in Settings. Defaults to the main checkout
-    /// so the fast path is plus-enter. Worktrees off: straight onto main. A
-    /// remote session's sibling is another session on the same host and dir
-    /// (no worktrees across the wire); an unanchored window gets a Landing.
+    /// The `+` / `⌥⌘T`: a new session *here*, no question asked (owner call
+    /// 2026-09-21) — the worktree the active session lives in, which is what
+    /// the chooser defaulted to anyway. A remote session's sibling is another
+    /// session on the same host and dir (no worktrees across the wire); an
+    /// unanchored window gets a Landing. Another worktree is the `⎇+`.
     func requestNewSession() {
         if let session = activeSession, case .remote = session.location {
             addSessionOnMain()
-        } else if projectRepoRoot != nil, Settings.worktreesEnabled {
-            showWorktreeChooser()
+        } else if let session = activeSession, session.state == .ide {
+            adopt(Session(ideRoot: session.cwd))
         } else {
             addSessionOnMain()
         }
     }
 
-    func showWorktreeChooser(prefill: String? = nil, initialPath: String? = nil) {
+    func showWorktreeChooser(prefill: String? = nil, initialPath: String? = nil, openList: Bool = false) {
         guard chooserOverlay == nil, palette == nil, filePicker == nil, repoSearch == nil else { return }
         let container = view
         guard let repoRoot = projectRepoRoot
@@ -1147,7 +1170,9 @@ final class ProjectController: NSObject, BottomBarDelegate {
         // The suggestion is where you already are (owner call 2026-09-08) —
         // or the folder whose `+` asked.
         let initial = worktrees.first { $0.path == (initialPath ?? activeSession?.cwd) }
-        let overlay = WorktreeChooserOverlay(worktrees: worktrees, initial: initial, prefill: prefill) { [weak self] in
+        let overlay = WorktreeChooserOverlay(
+            worktrees: worktrees, initial: initial, prefill: prefill, openList: openList
+        ) { [weak self] in
             self?.dismissChooser()
         }
         overlay.onRemove = { [weak self] worktree in
