@@ -326,6 +326,22 @@ session (`ProjectController.focusSession(id:)` switches the tab *before* the
 project comes forward, so arriving marks the right session seen); tooltip
 `title — waiting · 4m` via the shared `AttentionTip`.
 
+**Peach clears when you answer** (2026-09-23, owner report: a session
+stayed peach long after the prompt was approved). Claude Code has no hook
+for an approved permission — after `Notification(permission_prompt)` the
+next is `PostToolUse`, when the approved tool *ends*, and Atelier listened
+to neither (only `Stop` moved it, to green). Two layers now: the hooks gain
+`PostToolUse` + `PostToolUseFailure` → `atelier-notify tool` → working
+(main agent only: a payload with `agent_id` is a subagent's, which a
+background one sends even after the parent's `Stop`); and the host reads
+the answer as it's typed — `FreezableTerminalView.onInput` sees every PTY
+write, and while a session is blocked `PromptAnswer` classifies ↩/a digit
+as confirm → working and Esc as dismiss → waiting, legacy and kitty
+(`CSI 13/27/49–57 u`) encodings alike. Hooks overrule the guess within
+moments. Remote hosts re-provision (`provisioned-v2`). Upgrading: the new
+helper must be installed before the `tool` entries are merged — an older
+one reads unknown verbs as `stop`.
+
 ## Commands
 
 - `make build` — compile all targets via SwiftPM.

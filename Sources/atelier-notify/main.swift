@@ -1,9 +1,10 @@
 import Foundation
 import AtelierIPC
 
-// atelier-notify <stop|input|working> [message...]
+// atelier-notify <stop|input|working|tool> [message...]
 //
-// Invoked by Claude Code's Stop / Notification / UserPromptSubmit hooks. Connects
+// Invoked by Claude Code's Stop / Notification / UserPromptSubmit /
+// PostToolUse(Failure) hooks. Connects
 // to the running Atelier app's unix socket and sends one NotifyMessage. If Atelier
 // isn't running (no socket / refused), it exits 0 silently — a notification helper
 // must never break the agent's hook chain.
@@ -35,7 +36,10 @@ case "input", "inputNeeded", "notification":
     kind = .inputNeeded
     defaultTitle = "Claude needs you"
     defaultBody = "The agent is waiting for input."
-case "working", "prompt":
+case "working", "prompt", "tool":
+    // UserPromptSubmit, and PostToolUse/PostToolUseFailure (`tool`): a tool
+    // just returned, so the turn is moving — the one hook after a permission
+    // prompt is approved (Claude Code fires none on the approval itself).
     kind = .working
     defaultTitle = ""
     defaultBody = ""
@@ -52,6 +56,11 @@ if isatty(0) == 0 {
     let stdinData = FileHandle.standardInput.readDataToEndOfFile()
     if let payload = try? JSONSerialization.jsonObject(with: stdinData) as? [String: Any] {
         sessionId = payload["session_id"] as? String
+        // A subagent's tool calls carry `agent_id` under the parent's
+        // session id — and a background one keeps calling after the
+        // parent's Stop, which would repaint a finished session blue with
+        // nothing to correct it. Only the main agent's tools speak.
+        if kindArg == "tool", payload["agent_id"] != nil { exit(0) }
     }
 }
 

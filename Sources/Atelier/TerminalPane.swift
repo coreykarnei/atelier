@@ -138,6 +138,15 @@ class FreezableTerminalView: LocalProcessTerminalView {
     /// placard's cross-fade-out cue (POLISH_PLAN §5).
     var onFirstData: (() -> Void)?
 
+    /// Every write the user makes to the hosted process — keys, paste,
+    /// mouse reports — as the bytes sent, after encoding. Observation only.
+    var onInput: ((ArraySlice<UInt8>) -> Void)?
+
+    override func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        onInput?(data)
+        super.send(source: source, data: data)
+    }
+
     override func dataReceived(slice: ArraySlice<UInt8>) {
         if let callback = onFirstData {
             onFirstData = nil

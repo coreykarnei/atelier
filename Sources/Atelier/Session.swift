@@ -267,6 +267,7 @@ final class Session: NSObject, NSSplitViewDelegate {
     func start() {
         guard !shellStarted else { return }
         shellStarted = true
+        agentPane.terminal.onInput = { [weak self] bytes in self?.agentInput(bytes) }
         switch location {
         case .local:
             shellPane.start(executable: "/bin/zsh", args: ["-l"], cwd: cwd)
@@ -363,6 +364,24 @@ final class Session: NSObject, NSSplitViewDelegate {
             NSLog("Atelier: agent process exited (session \(self.id), code: \(String(describing: code)))")
             self.agentExited()
         }
+    }
+
+    /// Answering a permission prompt fires no hook (Claude Code has none for
+    /// "approved"; the next is PostToolUse, when the approved tool *ends* —
+    /// a long build would stay peach throughout). The answer is typed here,
+    /// though, so the host reads it: confirming (↩, or a menu digit) means
+    /// the agent is moving again, Esc means it stopped and it's your move.
+    /// A guess the hooks overrule within moments — a denial ends the turn
+    /// (Stop), a tool finishing reports working — and only ever made while
+    /// the session is blocked; every other state belongs to the hooks alone.
+    private func agentInput(_ bytes: ArraySlice<UInt8>) {
+        guard attention == .needsInput || attention == .needsInputUnseen else { return }
+        switch PromptAnswer(bytes) {
+        case .confirm: attention = .working
+        case .dismiss: attention = .waiting
+        case nil: return
+        }
+        onAttentionChanged?()
     }
 
     /// Claude ended (`/exit`, ⌃C⌃C, a crash, a kill). The tab stays; the pane
@@ -784,5 +803,35 @@ final class Session: NSObject, NSSplitViewDelegate {
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return path.isEmpty ? known : path
+    }
+}
+
+/// How a keystroke answers a permission prompt, read from the bytes the
+/// terminal sent — both encodings Claude may have asked for: legacy
+/// (`\r`, a lone ESC) and the kitty keyboard protocol (`CSI 13 u`,
+/// `CSI 27 u`, with or without a modifier field). A digit picks a menu
+/// row and answers at once (a key release, `CSI 13;1:3 u`, reads as the
+/// same answer — harmless, the state has already moved). Anything else — arrows moving the highlight,
+/// a paste, a mouse report — isn't an answer.
+enum PromptAnswer {
+    case confirm
+    case dismiss
+
+    init?(_ bytes: ArraySlice<UInt8>) {
+        let b = Array(bytes)
+        if b == [0x0D] || b == [0x0A] { self = .confirm; return }
+        if b == [0x1B] { self = .dismiss; return }
+        if b.count == 1, (0x31...0x39).contains(b[0]) { self = .confirm; return }
+        // CSI <code> [; <mods>] u
+        guard b.count >= 4, b[0] == 0x1B, b[1] == 0x5B, b.last == 0x75 else { return nil }
+        let body = String(decoding: b[2..<(b.count - 1)], as: UTF8.self)
+        // The key code is the first `:`-field of the first `;`-field.
+        guard let field = body.split(separator: ";").first?.split(separator: ":").first,
+              let code = Int(field) else { return nil }
+        switch code {
+        case 13, 49...57: self = .confirm // ↩, or a digit under "report all keys"
+        case 27: self = .dismiss
+        default: return nil
+        }
     }
 }

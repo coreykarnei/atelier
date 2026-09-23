@@ -7,11 +7,11 @@
 #
 # What it sets up:
 #   ~/.local/bin/atelier-notify         — the hook → forwarded-socket sender
-#   ~/.claude/settings.json             — Atelier's four hook entries, merged
+#   ~/.claude/settings.json             — Atelier's six hook entries, merged
 #                                         additively (one-time .atelier-bak)
 set -e
 
-MARKER="$HOME/.local/state/atelier/provisioned-v1"
+MARKER="$HOME/.local/state/atelier/provisioned-v2"
 [ -f "$MARKER" ] && exit 0
 
 mkdir -p "$HOME/.local/bin" "$HOME/.local/state/atelier"
@@ -51,6 +51,8 @@ ensure("Stop", None, "stop")
 ensure("Notification", "permission_prompt", "blocked")
 ensure("Notification", "idle_prompt", "waiting")
 ensure("UserPromptSubmit", None, "working")
+ensure("PostToolUse", None, "tool")
+ensure("PostToolUseFailure", None, "tool")
 
 if os.path.exists(path) and not os.path.exists(path + ".atelier-bak"):
     shutil.copy2(path, path + ".atelier-bak")

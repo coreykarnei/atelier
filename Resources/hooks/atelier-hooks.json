@@ -40,6 +40,26 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Applications/Atelier.app/Contents/MacOS/atelier-notify tool"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Applications/Atelier.app/Contents/MacOS/atelier-notify tool"
+          }
+        ]
+      }
     ]
   }
 }

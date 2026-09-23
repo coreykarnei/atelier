@@ -33,6 +33,9 @@ KINDS = {
     "notification": ("inputNeeded", "Claude needs you", "The agent is waiting for input."),
     # UserPromptSubmit — tab state only, no banner.
     "working": ("working", "", ""),
+    # PostToolUse / PostToolUseFailure — a tool returned, the turn is moving
+    # (the one signal after an approved permission prompt). Main agent only.
+    "tool": ("working", "", ""),
     "prompt": ("working", "", ""),
     "stop": ("stop", "Claude finished", "The agent completed its turn."),
 }
@@ -51,7 +54,12 @@ def main():
     session_id = None
     if not sys.stdin.isatty():
         try:
-            session_id = json.load(sys.stdin).get("session_id")
+            payload = json.load(sys.stdin)
+            session_id = payload.get("session_id")
+            # A subagent's tools report under the parent's session id, even
+            # after the parent's Stop — only the main agent's tools speak.
+            if verb == "tool" and payload.get("agent_id") is not None:
+                return
         except Exception:
             pass
 

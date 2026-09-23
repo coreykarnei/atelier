@@ -45,6 +45,11 @@ Atelier. Launch the bundled `.app` and allow notifications when macOS asks.
 The helper used by the example is
 `/Applications/Atelier.app/Contents/MacOS/atelier-notify`.
 
+Upgrading from before 2026-09-23: the `PostToolUse` / `PostToolUseFailure`
+entries call the helper with `tool`, which older helpers read as `stop` (a
+"Claude finished" banner after every tool call). Build and install the new
+app *before* merging those two entries.
+
 If banners are missing, check Atelier's permissions in macOS System Settings
 → Notifications. If session indicators do not update, check that the helper
 path exists and that the hook entries are in Claude's settings.
