@@ -183,6 +183,9 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, Pro
             self.close(project)
         }
         strip.onNew = { (NSApp.delegate as? AppDelegate)?.newProject(nil) }
+        strip.onSelectSession = { [weak self] id, session in
+            self?.projects.first(where: { ObjectIdentifier($0) == id })?.focusSession(id: session)
+        }
         container.addSubview(strip)
 
         projectArea.translatesAutoresizingMaskIntoConstraints = false

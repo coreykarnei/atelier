@@ -759,9 +759,9 @@ final class ProjectController: NSObject, BottomBarDelegate {
         activeSession?.container.removeFromSuperview()
         activeIndex = index
         let session = sessions[index]
-        // Focusing a tab is "seeing" it: an unseen completion becomes *waiting* —
-        // the agent finished and it's your move (§7.1). Live states stay as-is.
-        if session.attention == .doneUnseen { session.attention = .waiting }
+        // Focusing a tab is "seeing" it: an unseen completion becomes *waiting*,
+        // an unseen block plain *blocked* (§7.1). Live states stay as-is.
+        session.attention = session.attention.seen
 
         session.container.removeFromSuperview()
         sessionArea.addSubview(session.container)
@@ -778,27 +778,37 @@ final class ProjectController: NSObject, BottomBarDelegate {
     }
 
     /// The project tab's marks: every session's attention, tab order, the
-    /// silent ones dropped.
-    var attentionMarks: [Session.Attention] {
-        sessions.map(\.attention).filter { $0 != .none }
+    /// silent ones dropped. Each names its session, so a dot is a way there.
+    var attentionMarks: [ProjectMark] {
+        sessions.filter { $0.attention != .none }.map {
+            ProjectMark(sessionId: $0.id, attention: $0.attention, title: $0.displayTitle, since: $0.attentionSince)
+        }
+    }
+
+    /// A project tab's dot was clicked: show that session. Switch tabs
+    /// before the project comes forward, so arriving marks *this* session
+    /// seen — not whichever one the project had up.
+    func focusSession(id: UUID) {
+        guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
+        if index != activeIndex { showSession(at: index) }
+        activate()
     }
 
     /// The project came on screen (tab switch): seeing the active session's
-    /// unseen completion turns it into *waiting* (§7.1), as focusing its tab
-    /// would.
+    /// unseen mark into its seen state (§7.1), as focusing its tab would.
     func didBecomeVisible() {
-        guard let session = activeSession, session.attention == .doneUnseen else { return }
-        session.attention = .waiting
+        guard let session = activeSession, session.attention.isUnseen else { return }
+        session.attention = session.attention.seen
         updateBottomBar()
     }
 
     /// Dev-only (`ATELIER_DEBUG_ATTENTION=1` at launch, or the `seedAttention`
     /// debug message): one session per attention state, so the marks can be
-    /// judged side by side. Adds Landings until there are four; the active
+    /// judged side by side. Adds Landings until there are five; the active
     /// tab takes *working* so nothing here flips on focus. Real hook events
     /// overwrite the seed as they arrive.
     func debugSeedAttention() {
-        let states: [Session.Attention] = [.working, .waiting, .needsInput, .doneUnseen]
+        let states: [Session.Attention] = [.working, .waiting, .needsInput, .doneUnseen, .needsInputUnseen]
         let active = sessions.firstIndex { $0 === activeSession } ?? 0
         if sessions.count < states.count {
             while sessions.count < states.count { addSession() }
@@ -816,7 +826,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// completions and explicit blocks. Feeds the Dock badge (§4); plain
     /// peach waiting and working deliberately don't count.
     var actionableSessionCount: Int {
-        sessions.filter { $0.attention == .doneUnseen || $0.attention == .needsInput }.count
+        sessions.filter { $0.attention.isUnseen || $0.attention == .needsInput }.count
     }
 
     // MARK: Layout & focus
@@ -971,7 +981,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
         case .blocked:
             // Structured at the source: the hook's `permission_prompt` matcher
             // fired. This is the `!`.
-            sessions[index].attention = .needsInput
+            sessions[index].attention = onScreen ? .needsInput : .needsInputUnseen
         case .inputNeeded:
             // `idle_prompt`-matched hooks: done, your move. Blockers arrive
             // structured as `.blocked` (the `permission_prompt` matcher), so

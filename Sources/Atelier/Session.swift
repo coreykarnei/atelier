@@ -38,7 +38,22 @@ final class Session: NSObject, NSSplitViewDelegate {
         case working      // agent mid-turn (blue dot)
         case waiting      // turn done, your move (green dot)
         case needsInput   // agent explicitly blocked — permission/question (peach dot)
-        case doneUnseen   // finished while you were elsewhere (pulsing green → waiting on focus)
+        case doneUnseen   // finished while you were elsewhere (ringing green → waiting on focus)
+        case needsInputUnseen // blocked while you were elsewhere (ringing peach → needsInput on focus)
+
+        /// The two states that arrived while you were looking elsewhere —
+        /// the only marks that move to catch your eye (the ring).
+        var isUnseen: Bool { self == .doneUnseen || self == .needsInputUnseen }
+
+        /// What the state becomes once you've looked: the ring stops, the
+        /// colour and the meaning stay.
+        var seen: Attention {
+            switch self {
+            case .doneUnseen: return .waiting
+            case .needsInputUnseen: return .needsInput
+            default: return self
+            }
+        }
     }
 
     let id = UUID()
@@ -188,11 +203,12 @@ final class Session: NSObject, NSSplitViewDelegate {
         self.location = restored.remoteHost.map { .remote(host: $0) } ?? .local
         self.state = restored.isIDE ? .ide : .landing
         // What relaunch can honestly say: a resumed agent is idle, so a turn
-        // that was mid-flight or blocked comes back as plain waiting; an
-        // unseen completion stays unseen until you look (owner ask 2026-09-10).
+        // that was mid-flight or blocked comes back as plain waiting (the
+        // prompt that blocked it died with the process); an unseen
+        // completion stays unseen until you look (owner ask 2026-09-10).
         switch restored.attention.flatMap(Attention.init(rawValue:)) ?? .none {
         case .doneUnseen: self.attention = .doneUnseen
-        case .waiting, .working, .needsInput: self.attention = .waiting
+        case .waiting, .working, .needsInput, .needsInputUnseen: self.attention = .waiting
         case .none: break
         }
         let restoredMode = LayoutMode(rawValue: restored.layoutMode) ?? .triptych

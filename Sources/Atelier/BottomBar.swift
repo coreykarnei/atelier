@@ -579,7 +579,7 @@ final class BottomBar: NSView {
             // The `»` itself wears the loudest overflowed state (§7.1): peach
             // for a block, green for an unseen completion, else muted. Still —
             // no motion, no escalation.
-            if overflow.contains(where: { $0.attention == .needsInput }) {
+            if overflow.contains(where: { $0.attention == .needsInput || $0.attention == .needsInputUnseen }) {
                 overflowButton.contentTintColor = Theme.accentPeach
             } else if overflow.contains(where: { $0.attention == .doneUnseen }) {
                 overflowButton.contentTintColor = Theme.accentGreen
@@ -1212,7 +1212,7 @@ final class BottomBar: NSView {
             switch attention {
             case .none:
                 break
-            case .working, .waiting, .doneUnseen, .needsInput:
+            case .working, .waiting, .doneUnseen, .needsInput, .needsInputUnseen:
                 Theme.attentionColor(attention).setFill()
                 NSBezierPath(ovalIn: NSRect(x: 2, y: 2, width: 6, height: 6)).fill()
             }
@@ -1568,7 +1568,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
 
     /// No escalation (§1.3, rule standing): states swap by ~250 ms cross-fade;
     /// the other motions live in `AttentionDotView` (working's subliminal
-    /// pulse, unseen-done's clear one) plus the green arrival's single
+    /// pulse, unseen-done's ring) plus the green arrival's single
     /// scale-in here. Nothing raises its voice with age; peach and plain green
     /// are deliberately still.
     private func setAttention(_ newAttention: Session.Attention, animated: Bool) {
@@ -1605,9 +1605,9 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         }
         guard !reduceMotion else { return }
 
-        if newAttention == .doneUnseen, let dot = (badge as? AttentionDotView)?.dotLayer {
+        if newAttention.isUnseen, let dot = (badge as? AttentionDotView)?.dotLayer {
             // One soft scale-in (1.0 → 1.3 → 1.0) on arrival; the clear
-            // pulse the dot installs itself carries on from there.
+            // ring the dot installs itself carries on from there.
             let arrival = CAKeyframeAnimation(keyPath: "transform.scale")
             arrival.values = [1.0, 1.3, 1.0]
             arrival.keyTimes = [0, 0.5, 1]
@@ -1683,23 +1683,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     /// unasked (§1.3). NSToolTipOwner callback (informal protocol, not an
     /// override).
     @objc func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData: UnsafeMutableRawPointer?) -> String {
-        let word: String
-        switch attention {
-        case .working: word = "working"
-        case .waiting: word = "waiting"
-        case .needsInput: word = "blocked"
-        case .doneUnseen: word = "done"
-        case .none: return ""
-        }
-        guard let since = attentionSince else { return word }
-        let seconds = max(0, Int(Date().timeIntervalSince(since)))
-        let elapsed: String
-        switch seconds {
-        case ..<60: elapsed = "\(seconds)s"
-        case ..<3600: elapsed = "\(seconds / 60)m"
-        default: elapsed = "\(seconds / 3600)h \((seconds % 3600) / 60)m"
-        }
-        return "\(word) · \(elapsed)"
+        AttentionTip.line(attention, since: attentionSince)
     }
 }
 

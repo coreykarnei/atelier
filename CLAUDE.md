@@ -65,8 +65,8 @@ Milestone 1 (built; see `docs/MILESTONE_1.md`):
 
 Also built: per-tab attention state (§7.1 — the agent's exact state, always
 visible, every mark a plain dot since 2026-09-15: blue working, green your
-move — waiting, or an unseen completion that pulses until you look — and
-peach for the one blocked state; fed by hooks carrying
+move — waiting, or an unseen completion that rings until you look — and
+peach for the one blocked state (ringing too while unseen); fed by hooks carrying
 `session_id`, banner clicks focus the exact session), **worktree folders** in
 the tab strip (2026-09-03: each root's tabs sit in a folder-shaped cell whose
 label tab names the worktree — `main` / `⎇ dir` / `@host` — stepped lighter/
@@ -311,6 +311,20 @@ workspace, and the next launch opened a blank Landing and saved *that*.
 remote work left running). Ending sessions stays per-tab; the last
 project closing by hand still closes the window through `close()`, which
 never asks, and leaves an empty snapshot on purpose.
+
+**Unseen marks ring; project-tab dots are doors** (2026-09-23, owner
+call). A completion *or a block* that lands while you're elsewhere
+(`doneUnseen`, and the new `needsInputUnseen`) keeps a steady dot and gives
+off a hairline ring in its colour — bounds animated, not scale, so the
+stroke stays 1pt; 2.2× reach, 1.3s travel on a 2s beat, phase-locked to one
+app-wide clock so a row of them rings as one signal. Seeing the session
+settles it (`Attention.seen`: green → waiting, peach → still blocked — a
+seen block still never moves). Reduce Motion holds the ring still, halfway
+out. The project tab's dots grew to 7pt and each is a `MarkButton`: pointing
+hand, the hover pad's fills on a circle, press-and-release inside shows that
+session (`ProjectController.focusSession(id:)` switches the tab *before* the
+project comes forward, so arriving marks the right session seen); tooltip
+`title — waiting · 4m` via the shared `AttentionTip`.
 
 ## Commands
 

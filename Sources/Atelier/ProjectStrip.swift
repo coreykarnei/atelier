@@ -7,7 +7,16 @@ struct ProjectTabInfo {
     let isActive: Bool
     /// The attention marks of the project's sessions, in tab order, states
     /// with nothing to say already dropped.
-    let marks: [Session.Attention]
+    let marks: [ProjectMark]
+}
+
+/// One session's mark on its project tab: the state, and which session it
+/// is — a dot is also a way to that session.
+struct ProjectMark: Equatable {
+    let sessionId: UUID
+    let attention: Session.Attention
+    let title: String
+    let since: Date?
 }
 
 /// The project tab row under the titlebar (2026-09-10): Atelier's own tabs,
@@ -16,10 +25,12 @@ struct ProjectTabInfo {
 /// active tab is a rounded chip in the panes' base, flush with the content;
 /// the others sit darker in crust. Every tab carries its
 /// sessions' attention marks after the title (blue working, green done,
-/// pulsing green unseen completion, peach blocked), so a project you're not
+/// ringing green unseen completion, peach blocked), so a project you're not
 /// looking at still says where its agents stand. `+` opens a new project
 /// tab; the active tab's leading `×` closes it. Gaps pass clicks through to the
-/// wash (drag to move, double-click to zoom).
+/// wash (drag to move, double-click to zoom). Each dot is a way to its
+/// session (2026-09-23, owner call): click one and the project comes
+/// forward on that session's tab.
 ///
 /// Crowding (2026-09-16, owner call): tabs never shrink below `minTabWidth`.
 /// Past that the row keeps every tab at that width and runs off the edge —
@@ -32,6 +43,8 @@ final class ProjectStripView: NSView {
     var onSelect: ((ObjectIdentifier) -> Void)?
     var onClose: ((ObjectIdentifier) -> Void)?
     var onNew: (() -> Void)?
+    /// A dot was clicked: this project, this session.
+    var onSelectSession: ((ObjectIdentifier, UUID) -> Void)?
 
     static let rowHeight: CGFloat = 32
     static let tabHeight: CGFloat = 26
@@ -120,6 +133,7 @@ final class ProjectStripView: NSView {
         let tab = ProjectTabView(id: id)
         tab.onSelect = { [weak self] in self?.onSelect?(id) }
         tab.onClose = { [weak self] in self?.onClose?(id) }
+        tab.onSelectSession = { [weak self] session in self?.onSelectSession?(id, session) }
         tabsHost.addSubview(tab)
         return tab
     }
@@ -242,11 +256,12 @@ private final class ProjectTabView: NSView {
     let id: ObjectIdentifier
     var onSelect: (() -> Void)?
     var onClose: (() -> Void)?
+    var onSelectSession: ((UUID) -> Void)?
 
     private let titleLabel = NSTextField(labelWithString: "")
     private let closeButton = HoverPadButton()
-    private var markViews: [NSView] = []
-    private var marks: [Session.Attention] = []
+    private var markViews: [MarkButton] = []
+    private var marks: [ProjectMark] = []
     private var isActive = false
     private var hovered = false
     private var tracking: NSTrackingArea?
@@ -254,8 +269,10 @@ private final class ProjectTabView: NSView {
     private static let closeWidth: CGFloat = 16
     private static let closeSlot: CGFloat = 6 + 16 + 6
     private static let markGap: CGFloat = 6
-    private static let dot: CGFloat = 5
-    private static let dotGap: CGFloat = 3
+    /// A touch larger than the session tabs' 6pt (2026-09-23): these dots
+    /// are click targets now, and they sit in a quieter row.
+    private static let dot: CGFloat = 7
+    private static let dotGap: CGFloat = 5
 
     override var mouseDownCanMoveWindow: Bool { false }
 
@@ -299,17 +316,22 @@ private final class ProjectTabView: NSView {
         closeButton.toolTip = "Close Project  ⌥⌘W"
         closeButton.isHidden = !isActive
         toolTip = info.title
-        if info.marks != marks {
-            // Rebuild only on change — the bar refreshes often, and a
-            // rebuilt dot restarts its pulse.
-            marks = info.marks
+        let identity = { (marks: [ProjectMark]) in marks.map { "\($0.sessionId)\($0.attention)" } }
+        if identity(info.marks) != identity(marks) {
+            // Rebuild only when a dot's session or state changes — the bar
+            // refreshes often, and a rebuilt dot restarts its motion.
             for view in markViews { view.removeFromSuperview() }
             markViews = info.marks.map { mark in
-                let view = Self.makeMark(mark)
+                let view = MarkButton(mark: mark, diameter: Self.dot)
+                view.onPress = { [weak self] in self?.onSelectSession?(mark.sessionId) }
                 addSubview(view)
                 return view
             }
+        } else {
+            // Titles and timestamps move without a rebuild.
+            for (view, mark) in zip(markViews, info.marks) { view.mark = mark }
         }
+        marks = info.marks
         restyle()
         needsLayout = true
     }
@@ -327,10 +349,6 @@ private final class ProjectTabView: NSView {
         closeButton.alphaValue = hovered ? HoverPadButton.restingAlpha : 0
     }
 
-    private static func makeMark(_ attention: Session.Attention) -> NSView {
-        AttentionDotView(attention: attention, diameter: dot)
-    }
-
     override func layout() {
         super.layout()
         // Title and marks sit centered as one group; the `×` keeps its own
@@ -342,8 +360,10 @@ private final class ProjectTabView: NSView {
         var x = round((bounds.width - group) / 2)
         titleLabel.frame = CGRect(x: x, y: round((bounds.height - textHeight) / 2), width: textWidth, height: textHeight)
         x += textWidth + Self.markGap
+        // Each dot's target spans half the gap either side and the tab's
+        // full height; the dot itself stays on the title's centre line.
         for view in markViews {
-            view.frame = CGRect(x: x, y: round((bounds.height - Self.dot) / 2), width: Self.dot, height: Self.dot)
+            view.frame = CGRect(x: x - Self.dotGap / 2, y: 0, width: Self.dot + Self.dotGap, height: bounds.height)
             x += Self.dot + Self.dotGap
         }
         if !closeButton.isHidden {
@@ -389,4 +409,113 @@ private final class ProjectTabView: NSView {
     override func accessibilityPerformPress() -> Bool { onSelect?(); return true }
 
     @objc private func closeTapped() { onClose?() }
+}
+
+/// A project tab's attention dot as a target (2026-09-23, owner call): the
+/// pointing hand over it, the strip's hover pad behind it (HoverPadButton's
+/// fills, on a circle the dot's own shape), and a click — press and release
+/// inside, as a button — shows its session. It never selects the tab under
+/// it by accident: the press stops here.
+private final class MarkButton: NSView {
+    var mark: ProjectMark {
+        didSet { setAccessibilityLabel(Self.accessibilityText(mark)) }
+    }
+    var onPress: (() -> Void)?
+
+    private let dotView: AttentionDotView
+    private let padLayer = CALayer()
+    private let diameter: CGFloat
+    private var hovered = false
+    private var pressed = false
+
+    /// The pad a hovered dot sits in.
+    private static let pad: CGFloat = 15
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    init(mark: ProjectMark, diameter: CGFloat) {
+        self.mark = mark
+        self.diameter = diameter
+        dotView = AttentionDotView(attention: mark.attention, diameter: diameter)
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.masksToBounds = false
+        padLayer.cornerRadius = Self.pad / 2
+        padLayer.bounds = CGRect(x: 0, y: 0, width: Self.pad, height: Self.pad)
+        layer?.addSublayer(padLayer)
+        addSubview(dotView)
+        addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        ))
+        addToolTip(bounds, owner: self, userData: nil)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(Self.accessibilityText(mark))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private static func accessibilityText(_ mark: ProjectMark) -> String {
+        "\(mark.title), \(AttentionTip.line(mark.attention, since: nil))"
+    }
+
+    override func layout() {
+        super.layout()
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        dotView.frame = CGRect(x: round(center.x - diameter / 2), y: round(center.y - diameter / 2),
+                               width: diameter, height: diameter)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        padLayer.position = CGPoint(x: dotView.frame.midX, y: dotView.frame.midY)
+        CATransaction.commit()
+        removeAllToolTips()
+        addToolTip(bounds, owner: self, userData: nil)
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func mouseEntered(with event: NSEvent) { hovered = true; refreshPad() }
+    override func mouseExited(with event: NSEvent) { hovered = false; refreshPad() }
+    override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); hovered = false; pressed = false; refreshPad() }
+
+    override func mouseDown(with event: NSEvent) {
+        pressed = true
+        refreshPad()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let inside = bounds.contains(convert(event.locationInWindow, from: nil))
+        guard inside != pressed else { return }
+        pressed = inside
+        refreshPad()
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let fire = pressed && bounds.contains(convert(event.locationInWindow, from: nil))
+        pressed = false
+        refreshPad()
+        if fire { onPress?() }
+    }
+
+    override func accessibilityPerformPress() -> Bool { onPress?(); return true }
+
+    private func refreshPad() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        padLayer.backgroundColor = hovered || pressed
+            ? NSColor.white.withAlphaComponent(pressed ? 0.26 : 0.16).cgColor : nil
+        CATransaction.commit()
+    }
+
+    /// `Atelier checkout flow — waiting · 4m`: which session, and the one
+    /// line the dots everywhere answer (§4, time on inquiry).
+    @objc func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData: UnsafeMutableRawPointer?) -> String {
+        "\(mark.title) — \(AttentionTip.line(mark.attention, since: mark.since))"
+    }
 }
