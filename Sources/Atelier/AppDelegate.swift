@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var keyController: ProjectController? { workspace?.activeProject }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        LoginEnvironment.prefetch()
         NSApp.mainMenu = Menu.build()
         if let windowMenu = NSApp.mainMenu?.items.first(where: { $0.submenu?.title == "Window" })?.submenu {
             NSApp.windowsMenu = windowMenu

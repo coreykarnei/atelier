@@ -341,7 +341,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         } else {
             args = ["--session-id", claudeSessionId]
         }
-        agentPane.start(executable: claude, args: args, cwd: cwd)
+        agentPane.start(executable: claude, args: args, cwd: cwd, loginEnvironment: true)
         agentPane.onProcessTerminated = { [weak self] code in
             guard let self else { return }
             NSLog("Atelier: agent process exited (session \(self.id), code: \(String(describing: code)))")

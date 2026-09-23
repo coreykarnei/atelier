@@ -359,10 +359,13 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
         terminal.needsDisplay = true
     }
 
-    /// Spawn a process in this pane's PTY. `environment` defaults to the inherited
-    /// environment with TERM set so full-screen TUIs (Claude Code, hx) render.
-    func start(executable: String, args: [String] = [], cwd: String? = nil) {
-        var env = Terminal.getEnvironmentVariables(termName: "xterm-256color")
+    /// Spawn a process in this pane's PTY, with TERM set so full-screen TUIs
+    /// (Claude Code, hx) render. `loginEnvironment` hands the process what
+    /// the owner's interactive zsh would (PATH above all) — for programs
+    /// spawned directly rather than through a login shell.
+    func start(executable: String, args: [String] = [], cwd: String? = nil, loginEnvironment: Bool = false) {
+        let terminalEnv = Terminal.getEnvironmentVariables(termName: "xterm-256color")
+        var env = loginEnvironment ? LoginEnvironment.entries(overriding: terminalEnv) : terminalEnv
         if let cwd {
             // The spawned child inherits the parent's working directory; set it here
             // so the pane opens in `cwd` rather than `/`. (Per-pane cwd for worktrees
