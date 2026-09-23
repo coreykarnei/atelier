@@ -282,3 +282,56 @@ class OverlayActionButton: NSButton {
         layer?.borderColor = Theme.chromeMutedText.withAlphaComponent(0.4).cgColor
     }
 }
+
+/// The compact keyboard action: a verb and its key hint (`↩`, `⇧↩`), with
+/// shared control feedback.
+final class KeyActionButton: OverlayActionButton {
+    var actionTitle = "" {
+        didSet { label.stringValue = actionTitle; setAccessibilityLabel(actionTitle) }
+    }
+    private let label = NSTextField(labelWithString: "")
+
+    init(keyHint: String) {
+        super.init(frame: .zero)
+        isBordered = false
+        title = ""
+        wantsLayer = true
+        layer?.backgroundColor = Theme.Typography.Keycap.fill.cgColor
+        layer?.cornerRadius = Theme.Typography.Keycap.radius
+
+        label.font = Theme.Typography.ui(Theme.Typography.small, weight: .medium)
+        label.textColor = Theme.chromeText
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+
+        let key = NSTextField(labelWithString: keyHint)
+        key.font = Theme.Typography.Keycap.font
+        key.textColor = Theme.chromeMutedText
+        key.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(key)
+
+        let topEdge = NSView()
+        topEdge.wantsLayer = true
+        topEdge.layer?.backgroundColor = Theme.Typography.Keycap.topEdge.cgColor
+        topEdge.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(topEdge)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 28),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            key.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 8),
+            key.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
+            key.centerYAnchor.constraint(equalTo: centerYAnchor),
+            topEdge.topAnchor.constraint(equalTo: topAnchor),
+            topEdge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Theme.Typography.Keycap.radius),
+            topEdge.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Theme.Typography.Keycap.radius),
+            topEdge.heightAnchor.constraint(equalToConstant: 1),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func draw(_ dirtyRect: NSRect) {}
+}

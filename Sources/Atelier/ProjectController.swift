@@ -294,6 +294,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
             }
             self.updateBottomBar()
         }
+        session.onAttentionChanged = { [weak self] in self?.updateBottomBar() }
         let insertAt = min(index ?? sessions.count, sessions.count)
         sessions.insert(session, at: insertAt)
         if processesStarted { session.start() }

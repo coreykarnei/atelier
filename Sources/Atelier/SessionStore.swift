@@ -11,6 +11,10 @@ struct PersistedSession: Codable {
     var title: String
     var customTitle: String?
     var claudeSessionId: String
+    /// Names the host-side tmux sessions when it differs from
+    /// `claudeSessionId` (a new conversation started in the tab). Optional:
+    /// absent means the two are the same, as in every older snapshot.
+    var tmuxKey: String? = nil
     var dividers: [String: Double]
     /// Editor buffer path (M2.1). Optional so pre-M2 snapshots still decode.
     var openFile: String?

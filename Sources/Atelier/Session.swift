@@ -48,8 +48,13 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// ssh into host-side tmux; `cwd` then holds the *remote* directory.
     let location: SessionLocation
     var isRemote: Bool { location.isRemote }
-    /// Lowercased to match Claude's on-disk transcript filename.
-    let claudeSessionId: String
+    /// Lowercased to match Claude's on-disk transcript filename. Replaced
+    /// when the exit card's New session starts a fresh conversation here.
+    private(set) var claudeSessionId: String
+    /// Names this session's host-side tmux sessions. The birth
+    /// `claudeSessionId`, fixed for life: a new conversation in the tab must
+    /// not orphan the remote shell it shares the tab with.
+    let tmuxKey: String
     /// True when this session came back from disk — the agent then *resumes* its
     /// previous Claude conversation instead of starting a fresh one.
     private let isRestored: Bool
@@ -97,6 +102,10 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// replaces this Landing with a fresh remote session in the same tab slot.
     var onRemoteRequested: ((_ host: String, _ dir: String) -> Void)?
 
+    /// Attention changed from inside the session (the agent exited), not
+    /// from a hook event — the tab strip must re-read it.
+    var onAttentionChanged: (() -> Void)?
+
     private(set) var layoutMode: LayoutMode = .triptych
 
     /// Divider fractions keyed by slot id (ids already encode the mode). In-memory
@@ -113,6 +122,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         self.cwd = cwd
         self.title = (cwd as NSString).lastPathComponent
         self.claudeSessionId = UUID().uuidString.lowercased()
+        self.tmuxKey = claudeSessionId
         self.isRestored = false
         self.location = .local
         super.init()
@@ -136,6 +146,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         self.title = (ideRoot as NSString).lastPathComponent
         self.state = .ide
         self.claudeSessionId = UUID().uuidString.lowercased()
+        self.tmuxKey = claudeSessionId
         self.isRestored = false
         self.location = .local
         super.init()
@@ -155,6 +166,7 @@ final class Session: NSObject, NSSplitViewDelegate {
             : (remoteDir as NSString).lastPathComponent
         self.state = .ide
         self.claudeSessionId = UUID().uuidString.lowercased()
+        self.tmuxKey = claudeSessionId
         self.isRestored = false
         self.location = .remote(host: remoteHost)
         self.layoutMode = .split
@@ -171,6 +183,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         self.title = restored.title
         self.customTitle = restored.customTitle
         self.claudeSessionId = restored.claudeSessionId
+        self.tmuxKey = restored.tmuxKey ?? restored.claudeSessionId
         self.isRestored = true
         self.location = restored.remoteHost.map { .remote(host: $0) } ?? .local
         self.state = restored.isIDE ? .ide : .landing
@@ -218,6 +231,7 @@ final class Session: NSObject, NSSplitViewDelegate {
             title: title,
             customTitle: customTitle,
             claudeSessionId: claudeSessionId,
+            tmuxKey: tmuxKey == claudeSessionId ? nil : tmuxKey,
             dividers: dividers.mapValues { Double($0) },
             openFile: editorPane.committedFilePath,
             remoteHost: location.host,
@@ -280,7 +294,13 @@ final class Session: NSObject, NSSplitViewDelegate {
         // §5: the notification-permission prompt fires the moment the first
         // agent exists — promote or restore — not at app launch.
         NotificationPermission.requestOnce()
+        spawnAgent(resume: isRestored)
+    }
 
+    /// Spawn Claude in the agent pane. `resume` matters only remotely — the
+    /// transcript lives on the host, so the caller says whether one exists;
+    /// locally the transcript on disk decides.
+    private func spawnAgent(resume: Bool) {
         if case .remote(let host) = location {
             // A login shell so the remote PATH resolves claude; `--session-id`
             // is still app-chosen so transcripts and (M-remote phase 3) hook
@@ -288,10 +308,13 @@ final class Session: NSObject, NSSplitViewDelegate {
             // resumes — but `new -A` only *runs* it when the tmux session is
             // gone; if claude is still alive out there we just reattach to it,
             // mid-conversation, which no local `--resume` can match.
-            let flag = isRestored ? "--resume" : "--session-id"
-            if isRestored {
+            let flag = resume ? "--resume" : "--session-id"
+            if resume {
+                // At launch the tmux session may still hold a live claude;
+                // after an exit there is nothing to reattach to.
                 agentPane.showResumingPlacard(
-                    title: displayTitle, subtitle: "reattaching to \(host)…"
+                    title: displayTitle,
+                    subtitle: agentHasExited ? "resuming…" : "reattaching to \(host)…"
                 )
             }
             // The unsets matter as much as COLORTERM: Claude Code fingerprints
@@ -319,9 +342,34 @@ final class Session: NSObject, NSSplitViewDelegate {
             args = ["--session-id", claudeSessionId]
         }
         agentPane.start(executable: claude, args: args, cwd: cwd)
-        agentPane.onProcessTerminated = { [id] code in
-            NSLog("Atelier: agent process exited (session \(id), code: \(String(describing: code)))")
+        agentPane.onProcessTerminated = { [weak self] code in
+            guard let self else { return }
+            NSLog("Atelier: agent process exited (session \(self.id), code: \(String(describing: code)))")
+            self.agentExited()
         }
+    }
+
+    /// Claude ended (`/exit`, ⌃C⌃C, a crash, a kill). The tab stays; the pane
+    /// offers the way back in — this conversation, or a fresh one here.
+    private var agentHasExited = false
+
+    private func agentExited() {
+        guard !intentionalTeardown else { return }
+        agentHasExited = true
+        if attention != .none {
+            attention = .none
+            onAttentionChanged?()
+        }
+        agentPane.showExitCard(
+            title: displayTitle,
+            subtitle: "Claude exited",
+            onResume: { [weak self] in self?.spawnAgent(resume: true) },
+            onNew: { [weak self] in
+                guard let self else { return }
+                self.claudeSessionId = UUID().uuidString.lowercased()
+                self.spawnAgent(resume: false)
+            }
+        )
     }
 
     // MARK: Remote panes
@@ -341,7 +389,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         RemoteLink.link(for: host).activate()
         let argv = RemoteCommand.paneArgv(
             host: host,
-            tmuxSession: RemoteCommand.tmuxSessionName(claudeSessionId: claudeSessionId, pane: suffix),
+            tmuxSession: RemoteCommand.tmuxSessionName(key: tmuxKey, pane: suffix),
             remoteDir: cwd,
             command: command
         )
@@ -359,6 +407,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         guard !intentionalTeardown else { return }
         guard RemoteCommand.isLinkFailure(code) else {
             NSLog("Atelier: remote pane ended (session \(id), code: \(String(describing: code)))")
+            if pane === agentPane { agentExited() }
             return
         }
         let key = ObjectIdentifier(pane)
@@ -396,7 +445,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         shellPane.terminate()
         if agentStarted { agentPane.terminate() }
         if killRemote, shellStarted, case .remote(let host) = location {
-            RemoteCommand.killRemoteSessions(host: host, claudeSessionId: claudeSessionId)
+            RemoteCommand.killRemoteSessions(host: host, key: tmuxKey)
         }
     }
 
@@ -409,7 +458,7 @@ final class Session: NSObject, NSSplitViewDelegate {
     var defaultFocusView: NSView {
         switch state {
         case .landing: return landingView?.focusView ?? shellPane.terminal
-        case .ide: return agentPane.terminal
+        case .ide: return agentPane.focusView
         }
     }
 

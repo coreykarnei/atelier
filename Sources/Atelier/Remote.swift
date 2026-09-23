@@ -162,10 +162,10 @@ enum RemoteCommand {
     }
 
     /// The tmux session name for one pane of one Atelier session. Derived from
-    /// the persisted `claudeSessionId` so a restored session reattaches to
+    /// the persisted `Session.tmuxKey` so a restored session reattaches to
     /// exactly its own tmux sessions.
-    static func tmuxSessionName(claudeSessionId: String, pane suffix: String) -> String {
-        "atelier-\(claudeSessionId.prefix(8))-\(suffix)"
+    static func tmuxSessionName(key: String, pane suffix: String) -> String {
+        "atelier-\(key.prefix(8))-\(suffix)"
     }
 
     /// argv for one remote pane: self-provision the tmux conf (idempotent,
@@ -200,9 +200,9 @@ enum RemoteCommand {
     /// Tear down both of a session's tmux sessions on the host (⌘W — a
     /// deliberate close; app quit deliberately does *not* call this, so the
     /// work is still there to reattach to on relaunch). Fire-and-forget.
-    static func killRemoteSessions(host: String, claudeSessionId: String) {
+    static func killRemoteSessions(host: String, key: String) {
         let kills = ["sh", "ai"]
-            .map { tmuxSessionName(claudeSessionId: claudeSessionId, pane: $0) }
+            .map { tmuxSessionName(key: key, pane: $0) }
             .map { "tmux -L atelier kill-session -t \(quoted($0)) 2>/dev/null" }
             .joined(separator: "; ")
         try? sshProcess(host: host, command: kills + "; true").run()

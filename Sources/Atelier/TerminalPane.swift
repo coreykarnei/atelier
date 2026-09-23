@@ -216,8 +216,9 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
     /// over: the grid never reaches it, so the wash still paints exactly once.
     private let sliverWash = NSView()
 
-    /// Focus target for the window's `⌃⌘+hjkl` focus manager.
-    var focusView: NSView { terminal }
+    /// Focus target for the window's `⌃⌘+hjkl` focus manager — the exit card
+    /// while the hosted process is dead.
+    var focusView: NSView { exitCard ?? terminal }
 
     /// Called when the hosted process exits, so the host can decide what to do
     /// (e.g. respawn the shell, or mark the agent pane idle).
@@ -466,6 +467,59 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
         }
     }
 
+    // MARK: Exit card
+
+    private var exitCard: ExitCardView?
+
+    /// The hosted process ended and the pane is dead: cover it with the
+    /// placard's material and two ways back in, instead of leaving the last
+    /// screenful as a dead end. Keyboard-first — the card takes focus if the
+    /// pane had it, `↩` resumes, `⇧↩` starts fresh.
+    func showExitCard(
+        title: String,
+        subtitle: String,
+        onResume: @escaping () -> Void,
+        onNew: @escaping () -> Void
+    ) {
+        currentPlacard?.removeFromSuperview()
+        currentPlacard = nil
+        exitCard?.removeFromSuperview()
+
+        let hadFocus = window.map { fr in
+            fr.firstResponder === terminal || (fr.firstResponder as? NSView)?.isDescendant(of: self) == true
+        } ?? false
+
+        // Wipe the dead screen now: the card's material is translucent (one
+        // wash over the blur), and a resumed Claude repaints its own
+        // conversation — the old copy would read through, then read twice.
+        // The caret hides too, or it blinks at the origin through the card.
+        terminal.feed(text: "\u{1b}c\u{1b}[?25l")
+
+        let card = ExitCardView(title: title, subtitle: subtitle)
+        card.onResume = { [weak self] in self?.dismissExitCard(then: onResume) }
+        card.onNew = { [weak self] in self?.dismissExitCard(then: onNew) }
+        card.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(card)
+        NSLayoutConstraint.activate([
+            card.topAnchor.constraint(equalTo: topAnchor),
+            card.bottomAnchor.constraint(equalTo: bottomAnchor),
+            card.leadingAnchor.constraint(equalTo: leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ])
+        exitCard = card
+        if hadFocus { window?.makeFirstResponder(card) }
+    }
+
+    private func dismissExitCard(then respawn: () -> Void) {
+        guard let card = exitCard else { return }
+        let hadFocus = window?.firstResponder === card
+        exitCard = nil
+        card.removeFromSuperview()
+        terminal.feed(text: "\u{1b}[?25h")
+        respawn()
+        if hadFocus { window?.makeFirstResponder(terminal) }
+    }
+
     // MARK: LocalProcessTerminalViewDelegate
 
     func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {
@@ -479,6 +533,80 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
     func processTerminated(source: TerminalView, exitCode: Int32?) {
         onProcessTerminated?(exitCode)
     }
+}
+
+/// What a pane shows once its hosted process has ended: the resuming
+/// placard's material and type (title in mono, state in SF Pro), with the
+/// two ways back in beneath — the placard's arrival state and the exit
+/// card's departure state read as one family.
+private final class ExitCardView: NSView {
+    var onResume: (() -> Void)?
+    var onNew: (() -> Void)?
+
+    init(title: String, subtitle: String) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.backgroundColor = Theme.Elevation.base.cgColor
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = Theme.Typography.mono(Theme.Typography.body, weight: .medium)
+        titleLabel.textColor = Theme.chromeText
+        titleLabel.lineBreakMode = .byTruncatingMiddle
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(titleLabel)
+
+        let state = NSTextField(labelWithString: subtitle)
+        state.font = Theme.Typography.ui(Theme.Typography.small)
+        state.textColor = Theme.chromeMutedText
+        state.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(state)
+
+        let resume = KeyActionButton(keyHint: "↩")
+        resume.actionTitle = "Resume session"
+        resume.target = self
+        resume.action = #selector(resumeTapped)
+        let fresh = KeyActionButton(keyHint: "⇧↩")
+        fresh.actionTitle = "New session"
+        fresh.target = self
+        fresh.action = #selector(newTapped)
+
+        let buttons = NSStackView(views: [resume, fresh])
+        buttons.orientation = .horizontal
+        buttons.spacing = 10
+        buttons.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(buttons)
+
+        NSLayoutConstraint.activate([
+            titleLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -28),
+            titleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 20),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -20),
+            state.centerXAnchor.constraint(equalTo: centerXAnchor),
+            state.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 6),
+            buttons.centerXAnchor.constraint(equalTo: centerXAnchor),
+            buttons.topAnchor.constraint(equalTo: state.bottomAnchor, constant: 18),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard event.keyCode == 36 || event.keyCode == 76, // return, keypad enter
+              mods.subtracting(.shift).isEmpty
+        else { return super.keyDown(with: event) }
+        if mods.contains(.shift) { newTapped() } else { resumeTapped() }
+    }
+
+    @objc private func resumeTapped() { onResume?() }
+    @objc private func newTapped() { onNew?() }
 }
 
 private extension NSColor {

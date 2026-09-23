@@ -30,7 +30,7 @@ final class WorktreeChooserOverlay: NSView, NSTextFieldDelegate {
     private let list: WorktreeListView
     private var listHeight: NSLayoutConstraint?
     private var cardWidth: NSLayoutConstraint?
-    private let returnKey = ReturnKeyButton()
+    private let returnKey = KeyActionButton(keyHint: "↩")
 
     private enum Mode { case pick, name }
     private var mode: Mode = .pick
@@ -882,57 +882,4 @@ private final class CenteredTextField: NSTextField {
         (currentEditor() as? NSTextView)?.alignment = .left
         return ok
     }
-}
-
-/// The compact primary action: a verb and a Return hint, with shared control feedback.
-private final class ReturnKeyButton: OverlayActionButton {
-    var actionTitle = "Start session" {
-        didSet { label.stringValue = actionTitle; setAccessibilityLabel(actionTitle) }
-    }
-    private let label = NSTextField(labelWithString: "Start session")
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        isBordered = false
-        title = ""
-        wantsLayer = true
-        layer?.backgroundColor = Theme.Typography.Keycap.fill.cgColor
-        layer?.cornerRadius = Theme.Typography.Keycap.radius
-
-        label.font = Theme.Typography.ui(Theme.Typography.small, weight: .medium)
-        label.textColor = Theme.chromeText
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
-
-        let key = NSTextField(labelWithString: "↩")
-        key.font = Theme.Typography.Keycap.font
-        key.textColor = Theme.chromeMutedText
-        key.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(key)
-        NSLayoutConstraint.activate([
-            key.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
-            key.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-        let topEdge = NSView()
-        topEdge.wantsLayer = true
-        topEdge.layer?.backgroundColor = Theme.Typography.Keycap.topEdge.cgColor
-        topEdge.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(topEdge)
-
-        NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 28),
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -30),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            topEdge.topAnchor.constraint(equalTo: topAnchor),
-            topEdge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Theme.Typography.Keycap.radius),
-            topEdge.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Theme.Typography.Keycap.radius),
-            topEdge.heightAnchor.constraint(equalToConstant: 1),
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override func draw(_ dirtyRect: NSRect) {}
-
 }
