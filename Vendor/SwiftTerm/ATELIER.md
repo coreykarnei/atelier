@@ -53,3 +53,13 @@ a PR; when one lands, drop it here and note the version.
    cursor sat *below* the viewport, so scrolled back it stayed pinned to a
    row it had left, drifting with each new line. It now leaves on either
    edge.
+9. **Typing returns to the live view** (`Mac/MacTerminalView.swift`
+   `ensureCaretIsVisible`; owner report 2026-09-21: text typed while scrolled
+   back sometimes never appeared). Upstream snapped to the bottom on a
+   keystroke only when the caret's own row had left the viewport. Once
+   patch 8 made the hold real, a reader scrolled back only a little kept
+   the caret row on screen, so the snap never fired, the hold stayed, and
+   the next line of output (a wrapping prompt, Claude repainting below the
+   caret) landed under the bottom edge. Any keystroke now releases a held
+   viewport, as in iTerm2 and Ghostty (the iOS view already jumped
+   unconditionally).

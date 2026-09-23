@@ -2398,12 +2398,17 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     
     func ensureCaretIsVisible ()
     {
-        let displayBuffer = terminal.displayBuffer
-        let realCaret = displayBuffer.y + displayBuffer.yBase
-        let viewportEnd = displayBuffer.yDisp + displayBuffer.rows
-        
-        if realCaret >= viewportEnd || realCaret < displayBuffer.yDisp {
-            scrollTo (row: displayBuffer.yBase)
+        // Typing is the same "come back to the bottom" gesture as scrolling
+        // there yourself: real terminals (iTerm2, Ghostty) return to the
+        // live view on any keystroke, not only once the caret's own row has
+        // scrolled out of the visible window. Gating on caret visibility
+        // left the viewport pinned mid-scrollback whenever a line the user
+        // was composing wrapped or a program printed more output below an
+        // still-visible cursor row — held stayed true, and the next scroll()
+        // kept ydisp behind ybase, so the freshly typed text landed off
+        // the bottom edge of the viewport.
+        if terminal.viewportHeldByUser {
+            scrollTo (row: terminal.displayBuffer.yBase)
         }
     }
     
