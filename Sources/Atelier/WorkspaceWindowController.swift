@@ -81,7 +81,7 @@ final class AtelierWindow: NSWindow {
 /// tinted, rounded, or made to carry the sessions' attention marks). Each
 /// project's content is a `ProjectController.view` filling the area below
 /// the strip; one is visible, the rest keep running hidden.
-final class WorkspaceWindowController: NSWindowController, ProjectHost {
+final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, ProjectHost {
     private(set) var projects: [ProjectController] = []
     private(set) var activeIndex = 0
     var activeProject: ProjectController? {
@@ -127,6 +127,7 @@ final class WorkspaceWindowController: NSWindowController, ProjectHost {
         window.appearance = NSAppearance(named: .darkAqua)
 
         super.init(window: window)
+        window.delegate = self
         window.center()
         window.setFrameAutosaveName("AtelierMainWindow")
         if !WindowBackgroundBlur.apply(to: window, radius: Theme.backgroundBlurRadius) {
@@ -275,6 +276,18 @@ final class WorkspaceWindowController: NSWindowController, ProjectHost {
     func activatePrevious() {
         guard !projects.isEmpty else { return }
         activate(index: (activeIndex - 1 + projects.count) % projects.count)
+    }
+
+    /// The close button is Quit (2026-09-23, owner report: a relaunch lost
+    /// every session). It used to tear the projects down first and quit
+    /// with nothing left to snapshot — no gesture for "I'm done with
+    /// these": in a single-window app the red button is how you leave, and
+    /// leaving keeps your place, the same as ⌘Q. Ending sessions stays a
+    /// per-tab act (⌘W, Close Project); the last project closing still
+    /// closes the window directly (`close()` never asks this).
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        NSApp.terminate(sender)
+        return false // reached only if the quit was cancelled
     }
 
     /// Close a project: its sessions die (remote ones included — this is a

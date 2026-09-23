@@ -58,8 +58,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Persistence (MILESTONE_1 §9)
 
     /// Snapshot before the window tears down — `applicationWillTerminate` is
-    /// too late, the projects are already gone by then. Closing the window by
-    /// hand quits without a snapshot; that's deliberate ("I closed my projects").
+    /// too late, the projects are already gone by then. The close button
+    /// lands here too (`WorkspaceWindowController.windowShouldClose`); only closing the last
+    /// project by hand leaves an empty snapshot.
     ///
     /// Dirty editor buffers get the informative refusal first (M2.1's ⌘W
     /// guard, at quit scale): the files are named, saving is one button away.
@@ -264,8 +265,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Closing the last project window closes the app — the close button means
     /// leave, not "swap my window for a fresh Landing" (owner report
     /// 2026-07-21; the old respawn read as a window that refused to die).
-    /// The by-hand close path saves no meaningful snapshot ("I closed my
-    /// projects"), so relaunch starts at the Launch view anyway.
+    /// The close button itself is Quit (`windowShouldClose`), so
+    /// only closing the last project lands here — nothing left to restore,
+    /// and relaunch starts at the Launch view.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
@@ -304,8 +306,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func windowWillClose(_ note: Notification) {
         guard let window = note.object as? NSWindow, window === workspace?.window else { return }
         NotificationCenter.default.removeObserver(self, name: NSWindow.willCloseNotification, object: window)
-        // A by-hand window close is deliberate ("I closed my projects") and
-        // kills remote work too; during quit the snapshot already promised
+        // Outside quit this is the last project closing by hand ("I closed
+        // my projects"), which kills remote work too; during quit the snapshot already promised
         // these sessions back, so their remote side must survive.
         for project in projects { project.terminateAllSessions(killRemote: !isTerminating) }
         workspace = nil

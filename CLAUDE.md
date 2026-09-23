@@ -301,6 +301,17 @@ the trailing tick is seated off the title's ink, not the chip's frame.
 Probes: `probe:worktreeAdd`, `probe:overlay`, `probe:key=down|up|tab|space`.
 See `docs/devlog/2026-09-21-worktree-door.md`.
 
+**The close button is Quit** (2026-09-23, owner report: a relaunch lost
+every session). The red button used to tear every project down and then
+quit with nothing left to snapshot — the unified log caught it: a click,
+`finishing close`, then `applicationShouldTerminate` over an empty
+workspace, and the next launch opened a blank Landing and saved *that*.
+`WorkspaceWindowController.windowShouldClose` now routes to
+`NSApp.terminate`, so the button is ⌘Q exactly (dirty guard, snapshot,
+remote work left running). Ending sessions stays per-tab; the last
+project closing by hand still closes the window through `close()`, which
+never asks, and leaves an empty snapshot on purpose.
+
 ## Commands
 
 - `make build` — compile all targets via SwiftPM.
