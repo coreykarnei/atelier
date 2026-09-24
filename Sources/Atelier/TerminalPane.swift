@@ -86,13 +86,8 @@ class FreezableTerminalView: LocalProcessTerminalView {
     /// reach the process.)
     var resizeThrottled = false {
         didSet {
-            guard !resizeThrottled else { return }
-            throttleBeat?.cancel()
-            throttleBeat = nil
-            if let size = deferredSize {
-                deferredSize = nil
-                applyDeferredSize(size)
-            }
+            guard !resizeThrottled, !windowResizing else { return }
+            flushThrottle()
         }
     }
     static let liveResizeInterval: TimeInterval = 1.0 / 20
@@ -102,10 +97,41 @@ class FreezableTerminalView: LocalProcessTerminalView {
     /// and the "live" resize was the first pointer event and nothing more.
     private var throttleBeat: DispatchWorkItem?
 
+    /// Window edge drags (2026-09-23, owner report: resizing the window was
+    /// jittery): the same beat as a divider drag. Unthrottled, every column
+    /// gained or lost reflowed both grids and sent a SIGWINCH, and Claude
+    /// answered each with a full-screen repaint the host then had to parse
+    /// mid-drag. AppKit brackets the drag with these two on every view.
+    private var windowResizing = false {
+        didSet {
+            guard !windowResizing, !resizeThrottled else { return }
+            flushThrottle()
+        }
+    }
+
+    override func viewWillStartLiveResize() {
+        super.viewWillStartLiveResize()
+        windowResizing = true
+    }
+
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        windowResizing = false
+    }
+
+    private func flushThrottle() {
+        throttleBeat?.cancel()
+        throttleBeat = nil
+        if let size = deferredSize {
+            deferredSize = nil
+            applyDeferredSize(size)
+        }
+    }
+
     override func setFrameSize(_ newSize: NSSize) {
         if resizeFrozen {
             deferredSize = newSize
-        } else if resizeThrottled {
+        } else if resizeThrottled || windowResizing {
             deferredSize = newSize
             guard throttleBeat == nil else { return } // a beat is already pending
             // Leading edge: the first size of a beat applies now, so the
@@ -147,7 +173,12 @@ class FreezableTerminalView: LocalProcessTerminalView {
         super.send(source: source, data: data)
     }
 
+    /// Bytes the hosted process has written — dev probes measure a resize's
+    /// repaint cost with it.
+    private(set) var bytesReceived = 0
+
     override func dataReceived(slice: ArraySlice<UInt8>) {
+        bytesReceived += slice.count
         if let callback = onFirstData {
             onFirstData = nil
             DispatchQueue.main.async(execute: callback)

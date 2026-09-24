@@ -441,6 +441,49 @@ final class EditorPane: NSView, WorkspacePane {
             window.setFrame(frame, display: true, animate: false)
             return
         }
+        if query.hasPrefix("probe:liveresize=") {
+            // `probe:liveresize=steps,dx[,bracket]` — a window edge drag without
+            // a pointer: `steps` width changes of `dx` points at 60Hz, bracketed
+            // by the live-resize calls AppKit makes (bracket=0 leaves them out,
+            // the old behaviour). Reports main-thread time per step and the
+            // bytes the hosted processes wrote from start to 1s after release.
+            let parts = query.dropFirst("probe:liveresize=".count).split(separator: ",").compactMap { Double($0) }
+            guard parts.count >= 2, let window = window ?? NSApp.windows.first(where: { $0 is AtelierWindow }),
+                  let root = window.contentView else { return }
+            let steps = Int(parts[0]), dx = parts[1], bracket = parts.count < 3 || parts[2] != 0
+            func terminals(_ view: NSView) -> [FreezableTerminalView] {
+                (view as? FreezableTerminalView).map { [$0] } ?? view.subviews.flatMap(terminals)
+            }
+            let panes = terminals(root)
+            let bytesBefore = panes.map(\.bytesReceived)
+            if bracket { panes.forEach { $0.viewWillStartLiveResize() } }
+            let start = window.frame
+            var times: [Double] = []
+            func step(_ i: Int) {
+                if i == steps {
+                    if bracket { panes.forEach { $0.viewDidEndLiveResize() } }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                        let bytes = zip(panes.map(\.bytesReceived), bytesBefore).map { $0 - $1 }
+                        let sorted = times.sorted()
+                        let ms = { (v: Double) in String(format: "%.1f", v * 1000) }
+                        let report = "bracket=\(bracket) steps=\(steps) mean=\(ms(times.reduce(0, +) / Double(times.count)))ms "
+                            + "p50=\(ms(sorted[sorted.count / 2]))ms max=\(ms(sorted.last ?? 0))ms bytes=\(bytes)\n"
+                        try? report.write(toFile: NSHomeDirectory() + "/.local/state/atelier/probe.txt", atomically: true, encoding: .utf8)
+                        window.setFrame(start, display: true)
+                    }
+                    return
+                }
+                var frame = start
+                let offset = dx * Double(i < steps / 2 ? i : steps - i)
+                frame.size.width -= offset
+                let t0 = CACurrentMediaTime()
+                window.setFrame(frame, display: true, animate: false)
+                times.append(CACurrentMediaTime() - t0)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { step(i + 1) }
+            }
+            step(0)
+            return
+        }
         if query.hasPrefix("probe:preview=") {
             // `probe:preview=/path` — a tree-click preview, without a pointer.
             try? open(path: String(query.dropFirst("probe:preview=".count)), preview: true)
