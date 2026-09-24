@@ -173,6 +173,11 @@ class FreezableTerminalView: LocalProcessTerminalView {
         super.send(source: source, data: data)
     }
 
+    /// Dev probes: every draw's duration while set, else nothing is kept.
+    var drawTimes: [Double]? {
+        didSet { drawObserver = drawTimes == nil ? nil : { [weak self] in self?.drawTimes?.append($0) } }
+    }
+
     /// Bytes the hosted process has written — dev probes measure a resize's
     /// repaint cost with it.
     private(set) var bytesReceived = 0

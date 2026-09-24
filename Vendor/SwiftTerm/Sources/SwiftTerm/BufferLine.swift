@@ -72,6 +72,12 @@ public final class BufferLine: CustomDebugStringConvertible {
         }
     }
 
+    /// The row's cells as raw memory, for content-keyed caches (Atelier's
+    /// row render cache). Valid only inside `body`.
+    func withCellBytes<R>(_ body: (UnsafeRawBufferPointer) -> R) -> R {
+        body(UnsafeRawBufferPointer(start: data.baseAddress, count: dataSize * MemoryLayout<CharData>.stride))
+    }
+
     public func getData() -> [CharData] {
         Array(data[0..<dataSize])
     }

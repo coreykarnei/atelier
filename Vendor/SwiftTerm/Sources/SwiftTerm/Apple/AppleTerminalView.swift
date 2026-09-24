@@ -92,6 +92,7 @@ extension TerminalView {
         self.urlAttributes = [:]
         self.colors = Array(repeating: nil, count: 256)
         self.trueColors = [:]
+        rowRenderCache.removeAll()
     }
     
     // This is invoked when the font changes to recompute state
@@ -290,6 +291,7 @@ extension TerminalView {
     {
         urlAttributes = [:]
         attributes = [:]
+        rowRenderCache.removeAll()
         
         terminal.updateFullScreen ()
         queuePendingDisplay()
@@ -713,6 +715,44 @@ extension TerminalView {
                             kittyPlaceholders: kittyPlaceholders,
                             blockElements: blockElements,
                             boxDrawings: boxDrawings)
+    }
+
+    /// A row's build output and shaped runs — from the row render cache when
+    /// its content and every other input the build reads are unchanged
+    /// (Atelier patch; see `RowRenderCache`). Rows carrying images or kitty
+    /// placeholders are built fresh every time.
+    func preparedRow(row: Int, line: BufferLine, cols: Int) -> (ViewLineInfo, [PreparedRun]) {
+        guard RowRenderCache.isEnabled, line.images == nil else {
+            let lineInfo = buildAttributedString(row: row, line: line, cols: cols)
+            return (lineInfo, PreparedRow.runs(for: lineInfo))
+        }
+        let hover: Range<Int>?
+        switch linkHighlightMode {
+        case .hover:
+            hover = linkHighlightRange?.first(where: { $0.row == row })?.range
+        case .hoverWithModifier:
+            hover = commandActive ? linkHighlightRange?.first(where: { $0.row == row })?.range : nil
+        case .always, .alwaysWithModifier:
+            hover = nil
+        }
+        let key = RowRenderCache.Key(cols: cols,
+                                     selection: selectedColumnsRange(row: row, cols: cols),
+                                     linkHover: hover,
+                                     linkModifier: linkHighlightMode == .alwaysWithModifier && commandActive,
+                                     brightColors: useBrightColors,
+                                     customGlyphs: customBlockGlyphs)
+        return line.withCellBytes { cells in
+            let (hit, hash) = rowRenderCache.row(for: key, cells: cells)
+            if let hit {
+                return (hit.lineInfo, hit.runs)
+            }
+            let lineInfo = buildAttributedString(row: row, line: line, cols: cols)
+            let runs = PreparedRow.runs(for: lineInfo)
+            if lineInfo.kittyPlaceholders.isEmpty {
+                rowRenderCache.insert(key: key, cells: cells, hash: hash, lineInfo: lineInfo, runs: runs)
+            }
+            return (lineInfo, runs)
+        }
     }
 
     func shouldUnderlineLink(row: Int, column: Int, width: Int, cell: CharData) -> Bool
@@ -1173,6 +1213,7 @@ extension TerminalView {
             }
         }
         var placeholderImageCache: [UInt32: TTImage] = [:]
+        rowRenderCache.beginDraw(limit: max(256, terminal.rows * 6))
 
         for row in firstRow...lastRow {
             if row < 0 {
@@ -1235,7 +1276,7 @@ extension TerminalView {
             } 
             #endif
             let line = displayBuffer.lines [row]
-            let lineInfo = buildAttributedString(row: row, line: line, cols: displayBuffer.cols)
+            let (lineInfo, preparedRuns) = preparedRow(row: row, line: line, cols: displayBuffer.cols)
             let rowBase = lineOrigin.y + cellDimension.height
             var underTextImages: [AppleImage] = []
             var overTextKittyImages: [AppleImage] = []
@@ -1267,70 +1308,43 @@ extension TerminalView {
                 overTextKittyImages.sort(by: sortKitty)
             }
 
-            // Pre-create CTLines and runs once per row to avoid duplicate creation
-            let preparedSegments: [(segment: ViewLineSegment, ctLine: CTLine, runs: [CTRun])] =
-                lineInfo.segments.compactMap { segment in
-                    guard segment.attributedString.length > 0 else { return nil }
-                    let ctLine = CTLineCreateWithAttributedString(segment.attributedString)
-                    guard let runs = CTLineGetGlyphRuns(ctLine) as? [CTRun] else { return nil }
-                    return (segment, ctLine, runs)
-                }
-
-            // Background fill loop — uses cached CTLines
+            // Background fill loop — from the row's prepared runs
             context.saveGState()
             context.setShouldAntialias(false)
             context.setLineCap(.square)
             context.setLineWidth(0)
 
-            for prepared in preparedSegments {
-                var processedGlyphs = 0
-                for run in prepared.runs {
-                    let runGlyphsCount = CTRunGetGlyphCount(run)
-                    if runGlyphsCount == 0 {
-                        continue
-                    }
-                    let runAttributes = CTRunGetAttributes(run) as? [NSAttributedString.Key: Any] ?? [:]
-                    let startColumn = prepared.segment.column + (processedGlyphs * prepared.segment.columnWidth)
-                    let endColumn = startColumn + (runGlyphsCount * prepared.segment.columnWidth)
-                    var backgroundColor: TTColor?
-                    if runAttributes.keys.contains(.selectionBackgroundColor) {
-                        backgroundColor = runAttributes[.selectionBackgroundColor] as? TTColor
-                    } else if runAttributes.keys.contains(.backgroundColor) {
-                        backgroundColor = runAttributes[.backgroundColor] as? TTColor
-                    }
+            for run in preparedRuns {
+                if let backgroundColor = run.background {
+                    let columnSpan = max(0, run.endColumn - run.startColumn)
+                    if columnSpan > 0 {
+                        context.setFillColor(backgroundColor.cgColor)
 
-                    if let backgroundColor = backgroundColor {
-                        let columnSpan = max(0, endColumn - startColumn)
-                        if columnSpan > 0 {
-                            context.setFillColor(backgroundColor.cgColor)
+                        var rect = CGRect(
+                            x: lineOrigin.x + (CGFloat(run.startColumn) * cellDimension.width),
+                            y: lineOrigin.y,
+                            width: CGFloat(columnSpan) * cellDimension.width,
+                            height: cellDimension.height)
 
-                            var rect = CGRect(
-                                x: lineOrigin.x + (CGFloat(startColumn) * cellDimension.width),
-                                y: lineOrigin.y,
-                                width: CGFloat(columnSpan) * cellDimension.width,
-                                height: cellDimension.height)
-
-                            #if (lastLineExtends)
-                            if (row-displayBuffer.yDisp) >= displayBuffer.rows - 1 {
-                                let missing = frame.height - (cellDimension.height + CGFloat(row) + 1)
-                                rect.size.height += missing
-                                rect.origin.y -= missing
-                            }
-                            #endif
-
-                            if endColumn >= terminal.cols {
-                                rect.size.width = frame.width - rect.origin.x
-                            }
-
-                            #if os(macOS)
-                            backgroundColor.setFill()
-                            rect.fill()
-                            #else
-                            context.fill(rect)
-                            #endif
+                        #if (lastLineExtends)
+                        if (row-displayBuffer.yDisp) >= displayBuffer.rows - 1 {
+                            let missing = frame.height - (cellDimension.height + CGFloat(row) + 1)
+                            rect.size.height += missing
+                            rect.origin.y -= missing
                         }
+                        #endif
+
+                        if run.endColumn >= terminal.cols {
+                            rect.size.width = frame.width - rect.origin.x
+                        }
+
+                        #if os(macOS)
+                        backgroundColor.setFill()
+                        rect.fill()
+                        #else
+                        context.fill(rect)
+                        #endif
                     }
-                    processedGlyphs += runGlyphsCount
                 }
             }
 
@@ -1365,53 +1379,31 @@ extension TerminalView {
             context.setAllowsFontSmoothing(true)
             #endif
 
-            // Glyph drawing loop — reuses cached CTLines
-            for prepared in preparedSegments {
-                var processedGlyphs = 0
-                for run in prepared.runs {
-                    let runGlyphsCount = CTRunGetGlyphCount(run)
-                    if runGlyphsCount == 0 {
-                        continue
-                    }
-                    let runAttributes = CTRunGetAttributes(run) as? [NSAttributedString.Key: Any] ?? [:]
-                    let runFont = runAttributes[.font] as! TTFont
-                    let startColumn = prepared.segment.column + (processedGlyphs * prepared.segment.columnWidth)
-
-                    let runGlyphs = [CGGlyph](unsafeUninitializedCapacity: runGlyphsCount) { (bufferPointer, count) in
-                        CTRunGetGlyphs(run, CFRange(), bufferPointer.baseAddress!)
-                        count = runGlyphsCount
-                    }
-
-                    var coreTextPositions = [CGPoint](repeating: .zero, count: runGlyphsCount)
-                    CTRunGetPositions(run, CFRange(), &coreTextPositions)
-
-                    var positions = [CGPoint](repeating: .zero, count: runGlyphsCount)
-                    for i in 0..<runGlyphsCount {
-                        let ctPosition = coreTextPositions[i]
-                        let glyphColumn = startColumn + (i * prepared.segment.columnWidth)
-                        positions[i] = CGPoint(
-                            x: lineOrigin.x + CGFloat(glyphColumn) * cellDimension.width,
-                            y: lineOrigin.y + yOffset + ctPosition.y)
-                    }
-
-                    nativeForegroundColor.set()
-
-                    if runAttributes.keys.contains(.foregroundColor) {
-                        let color = runAttributes[.foregroundColor] as! TTColor
-                        let cgColor = color.cgColor
-                        if let colorSpace = cgColor.colorSpace {
-                            context.setFillColorSpace(colorSpace)
-                        }
-                        context.setFillColor(cgColor)
-                    }
-
-                    CTFontDrawGlyphs(runFont, runGlyphs, &positions, positions.count, context)
-
-                    // Draw other attributes
-                    drawRunAttributes(runAttributes, glyphPositions: positions, in: context)
-
-                    processedGlyphs += runGlyphsCount
+            // Glyph drawing loop — from the row's prepared runs
+            for run in preparedRuns {
+                let runGlyphsCount = run.glyphs.count
+                var positions = [CGPoint](repeating: .zero, count: runGlyphsCount)
+                for i in 0..<runGlyphsCount {
+                    let glyphColumn = run.startColumn + (i * run.columnWidth)
+                    positions[i] = CGPoint(
+                        x: lineOrigin.x + CGFloat(glyphColumn) * cellDimension.width,
+                        y: lineOrigin.y + yOffset + run.glyphYOffsets[i])
                 }
+
+                nativeForegroundColor.set()
+
+                if let color = run.foreground {
+                    let cgColor = color.cgColor
+                    if let colorSpace = cgColor.colorSpace {
+                        context.setFillColorSpace(colorSpace)
+                    }
+                    context.setFillColor(cgColor)
+                }
+
+                CTFontDrawGlyphs(run.font, run.glyphs, &positions, positions.count, context)
+
+                // Draw other attributes
+                drawRunAttributes(run.attributes, glyphPositions: positions, in: context)
             }
 
             if !lineInfo.kittyPlaceholders.isEmpty {

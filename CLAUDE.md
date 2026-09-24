@@ -387,6 +387,16 @@ tool result quoting it doesn't count), and a working or peach session goes to
 green, unringing, once per interrupt. Local sessions only; remote transcripts
 live on the host.
 
+**Drawn rows are remembered** (2026-09-23, owner call: Claude scrolling felt
+sluggish). SwiftTerm patch 10 (`RowRenderCache`) keys each drawn row by its
+cell bytes plus selection/link state and skips rebuilding and CoreText
+shaping on a hit; scrolling Claude's pane measured ~22ms → 12–15ms per draw.
+Hit rate while scrolling Claude was only ~45% in one run and the reason
+wasn't pinned down — the next lever if it still feels slow. Probes:
+`probe:scroll=<agent|shell>,ticks,dy` (wheel events at 60Hz, reports draw
+times and row hits/misses), `probe:rowcache=0|1`, `probe:type=<text>` (types
+into the agent pane, then a kitty-encoded Return).
+
 ## Commands
 
 - `make build` — compile all targets via SwiftPM.

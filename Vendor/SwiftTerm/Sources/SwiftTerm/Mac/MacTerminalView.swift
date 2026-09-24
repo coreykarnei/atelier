@@ -155,6 +155,8 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     // of attributes for an NSAttributedString
     var attributes: [Attribute: [NSAttributedString.Key:Any]] = [:]
     var urlAttributes: [Attribute: [NSAttributedString.Key:Any]] = [:]
+    /// Shaped rows by content (Atelier patch — `RowRenderCache`).
+    let rowRenderCache = RowRenderCache()
     
     
     // Cache for the colors in the 0..255 range
@@ -473,6 +475,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         }
         set {
             _selectedTextBackgroundColor = newValue
+            rowRenderCache.removeAll()
         }
     }
 
@@ -673,8 +676,18 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         guard let currentContext = getCurrentGraphicsContext() else {
             return
         }
+        guard let drawObserver else {
+            drawTerminalContents (dirtyRect: dirtyRect, context: currentContext, bufferOffset: terminal.displayBuffer.yDisp)
+            return
+        }
+        let start = CACurrentMediaTime()
         drawTerminalContents (dirtyRect: dirtyRect, context: currentContext, bufferOffset: terminal.displayBuffer.yDisp)
+        drawObserver(CACurrentMediaTime() - start)
     }
+
+    /// Called after each CPU draw with its duration in seconds — a
+    /// measurement hook for hosts (Atelier's dev probes). Nil costs nothing.
+    public var drawObserver: ((CFTimeInterval) -> Void)?
     
     open override func cursorUpdate(with event: NSEvent)
     {

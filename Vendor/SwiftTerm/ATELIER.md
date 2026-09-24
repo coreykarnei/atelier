@@ -63,3 +63,17 @@ a PR; when one lands, drop it here and note the version.
    caret) landed under the bottom edge. Any keystroke now releases a held
    viewport, as in iTerm2 and Ghostty (the iOS view already jumped
    unconditionally).
+10. **Row render cache** (`Apple/RowRenderCache.swift`,
+    `Apple/AppleTerminalView.swift`, `BufferLine.swift`,
+    `Mac/MacTerminalView.swift`; owner report 2026-09-23: Claude scrolling
+    and window resizes felt sluggish). Every CPU draw rebuilt every visible
+    row's attributed string, shaped it with CoreText and bridged each run's
+    attributes — about half the draw. Rows are now kept by content: the key
+    is the row's raw cell bytes plus everything else the build reads (cols,
+    the row's selection span, link-hover state, bright-colour and
+    custom-glyph flags); fonts, palette and selection colour clear the
+    store. A row that only moved (scrollback, a TUI repainting shifted
+    lines) skips straight to glyph drawing. Rows with images or kitty
+    placeholders bypass it. Measured scrolling Claude's pane: ~22ms → 12–15ms
+    per draw. `RowRenderCache.isEnabled` switches it (A/B), and
+    `TerminalView.drawObserver` reports each draw's duration.

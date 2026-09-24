@@ -1,5 +1,6 @@
 import AppKit
 import AtelierIPC
+import SwiftTerm
 import CodeEditSourceEditor
 import CodeEditTextView
 import CodeEditLanguages
@@ -396,6 +397,15 @@ final class EditorPane: NSView, WorkspacePane {
         explorer.openSearch()
     }
 
+    private static func probeTerminals(in window: NSWindow?) -> [FreezableTerminalView] {
+        func walk(_ view: NSView) -> [FreezableTerminalView] {
+            (view as? FreezableTerminalView).map { [$0] } ?? view.subviews.flatMap(walk)
+        }
+        return (window?.contentView).map(walk) ?? []
+    }
+
+    private static func probeX(_ view: NSView) -> CGFloat { view.convert(view.bounds, to: nil).minX }
+
     /// Dev-only: unfold the tree and hand the query to the explorer's driver.
     /// `probe:dupundo` instead exercises ⇧⌥↓ then ⌘Z on the buffer and
     /// writes what happened to ~/.local/state/atelier/probe.txt.
@@ -482,6 +492,71 @@ final class EditorPane: NSView, WorkspacePane {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { step(i + 1) }
             }
             step(0)
+            return
+        }
+        if query.hasPrefix("probe:rowcache=") {
+            // `probe:rowcache=0|1` — the terminals' row render cache off/on.
+            RowRenderCache.isEnabled = query.hasSuffix("1")
+            return
+        }
+        if query.hasPrefix("probe:type=") {
+            // `probe:type=<text>` — the text, then a Return, into the agent pane
+            // (the rightmost terminal), as if typed.
+            guard let agent = Self.probeTerminals(in: window).max(by: { Self.probeX($0) < Self.probeX($1) }) else { return }
+            let text = String(query.dropFirst("probe:type=".count))
+            if !text.isEmpty { agent.send(txt: text) }
+            // Return on its own beat — in the same write it reads as a paste —
+            // and in the kitty encoding Claude turns on.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { agent.send(txt: "\u{1b}[13u") }
+            return
+        }
+        if query.hasPrefix("probe:scroll=") {
+            // `probe:scroll=<agent|shell>,ticks,dy` — `ticks` real wheel events
+            // (continuous, `dy` pixels each) posted to this process at 60Hz over
+            // the pane's centre; reports that pane's draws while they ran, to
+            // 0.5s after the last. The window must be uncovered at that point.
+            let parts = query.dropFirst("probe:scroll=".count).split(separator: ",").map(String.init)
+            guard parts.count == 3, let ticks = Int(parts[1]), let dy = Int32(parts[2]),
+                  let window = window ?? NSApp.windows.first(where: { $0 is AtelierWindow }) else { return }
+            let panes = Self.probeTerminals(in: window).sorted { Self.probeX($0) < Self.probeX($1) }
+            guard let pane = parts[0] == "agent" ? panes.last : panes.first(where: { !$0.isHiddenOrHasHiddenAncestor }),
+                  let screen = window.screen else { return }
+            let rect = window.convertToScreen(pane.convert(pane.bounds, to: nil))
+            let point = CGPoint(x: rect.midX, y: screen.frame.maxY - rect.midY)
+            pane.drawTimes = []
+            RowRenderCache.hits = 0
+            RowRenderCache.misses = 0
+            let start = CACurrentMediaTime()
+            func tick(_ i: Int) {
+                guard i < ticks else {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        let times = pane.drawTimes ?? []
+                        pane.drawTimes = nil
+                        let sorted = times.sorted()
+                        let ms = { (v: Double) in String(format: "%.1f", v * 1000) }
+                        let report = "scroll \(parts[0]) ticks=\(ticks) draws=\(times.count) "
+                            + (times.isEmpty ? "" : "mean=\(ms(times.reduce(0, +) / Double(times.count)))ms p50=\(ms(sorted[sorted.count / 2]))ms "
+                               + "p90=\(ms(sorted[sorted.count * 9 / 10]))ms max=\(ms(sorted.last!))ms total=\(ms(times.reduce(0, +)))ms ")
+                            + "wall=\(ms(CACurrentMediaTime() - start))ms rows hit=\(RowRenderCache.hits) miss=\(RowRenderCache.misses)\n"
+                        try? report.write(toFile: NSHomeDirectory() + "/.local/state/atelier/probe.txt", atomically: true, encoding: .utf8)
+                    }
+                    return
+                }
+                // Handed to the window, as AppKit would after its hit test:
+                // a posted event is routed by the window server, and another
+                // app's window may sit over this one.
+                if let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: dy, wheel2: 0, wheel3: 0) {
+                    event.location = point
+                    event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+                    event.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(window.windowNumber))
+                    event.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(window.windowNumber))
+                    if let nsEvent = NSEvent(cgEvent: event) {
+                        if nsEvent.window === window { window.sendEvent(nsEvent) } else { pane.scrollWheel(with: nsEvent) }
+                    }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { tick(i + 1) }
+            }
+            tick(0)
             return
         }
         if query.hasPrefix("probe:preview=") {
