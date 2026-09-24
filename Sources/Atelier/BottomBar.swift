@@ -280,8 +280,8 @@ final class BottomBar: NSView {
         addButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 12, weight: .medium))
         addButton.contentTintColor = Theme.chromeText
-        addButton.tip = "New Session Here  ⌥⌘T"
-        addButton.setAccessibilityLabel("New session here")
+        addButton.tip = "New Session  ⌥⌘T"
+        addButton.setAccessibilityLabel("New session")
         tabsArea.addSubview(addButton)
 
         // The `⎇+`: the same conifer that labels a worktree folder, badged
@@ -901,8 +901,9 @@ final class BottomBar: NSView {
                         }
                         // Only on change: reassigning a tooltip resets its
                         // hover timer, and layout runs every bar refresh.
-                        let tip = "New session in \(FolderView.plainLabel(segment.label))"
-                        if add.tip != tip { add.tip = tip }
+                        // No chord: ⌥⌘T starts beside the active session,
+                        // not in the folder this `+` belongs to.
+                        if add.tip == nil { add.tip = "New Session" }
                         if !folderDragged {
                             let slotX = x + width - Self.addTrail - Self.addSlotWidth
                             placeTrailingRule(groupKey: segment.groupKey, last: segment.tabs.last,
@@ -1894,8 +1895,6 @@ private final class FolderView: NSView {
         label.hasPrefix(treeMarker) ? (true, String(label.dropFirst(treeMarker.count))) : (false, label)
     }
 
-    /// The label as words (tooltips): `⎇ dir` → `dir`.
-    static func plainLabel(_ label: String) -> String { split(label).text }
 
     /// The tree, drawn: a conifer — two stacked tiers on a short trunk, 10×12
     /// (a conifer was the owner's pick 2026-09-08; a canopy turned to a
