@@ -970,10 +970,14 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// missed shows green until seen.
     @discardableResult
     func applyAgentEvent(_ message: NotifyMessage) -> Bool {
+        // The tab first — it survives the conversation changing under it —
+        // then the conversation id, for helpers and agents that predate it.
+        let byTab = message.tab.flatMap { tab in sessions.firstIndex { $0.id.uuidString == tab } }
         guard let sessionId = message.sessionId,
-              let index = sessions.firstIndex(where: { $0.claudeSessionId == sessionId }) else {
+              let index = byTab ?? sessions.firstIndex(where: { $0.claudeSessionId == sessionId }) else {
             return false
         }
+        if byTab != nil { sessions[index].adoptConversation(sessionId) }
         let onScreen = index == activeIndex && isActive && (window?.isKeyWindow ?? false)
         switch message.kind {
         case .working:

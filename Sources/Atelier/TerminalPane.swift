@@ -372,9 +372,11 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
     /// (Claude Code, hx) render. `loginEnvironment` hands the process what
     /// the owner's interactive zsh would (PATH above all) — for programs
     /// spawned directly rather than through a login shell.
-    func start(executable: String, args: [String] = [], cwd: String? = nil, loginEnvironment: Bool = false) {
+    func start(executable: String, args: [String] = [], cwd: String? = nil, loginEnvironment: Bool = false,
+               extraEnvironment: [String] = []) {
         let terminalEnv = Terminal.getEnvironmentVariables(termName: "xterm-256color")
         var env = loginEnvironment ? LoginEnvironment.entries(overriding: terminalEnv) : terminalEnv
+        env.append(contentsOf: extraEnvironment)
         if let cwd {
             // The spawned child inherits the parent's working directory; set it here
             // so the pane opens in `cwd` rather than `/`. (Per-pane cwd for worktrees

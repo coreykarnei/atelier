@@ -66,6 +66,10 @@ def main():
     message = {"kind": kind, "title": title, "body": body}
     if session_id:
         message["sessionId"] = session_id
+    # The Atelier tab this agent was spawned for (survives /resume, /clear).
+    tab = os.environ.get("ATELIER_TAB")
+    if tab:
+        message["tab"] = tab
 
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(2)

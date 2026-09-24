@@ -1,4 +1,5 @@
 import AppKit
+import AtelierIPC
 
 /// A pane that can take keyboard focus. The window's focus manager (`⌃⌘+hjkl`) moves
 /// the first responder between these (MILESTONE_1 §5).
@@ -342,7 +343,7 @@ final class Session: NSObject, NSSplitViewDelegate {
             startRemotePane(
                 agentPane, host: host, suffix: "ai",
                 command: "bash -lc \"unset TMUX TMUX_PANE TERM_PROGRAM TERM_PROGRAM_VERSION;"
-                    + " COLORTERM=truecolor exec claude \(flag) \(claudeSessionId)\""
+                    + " COLORTERM=truecolor \(tabEnvironment) exec claude \(flag) \(claudeSessionId)\""
             )
             return
         }
@@ -358,7 +359,8 @@ final class Session: NSObject, NSSplitViewDelegate {
         } else {
             args = ["--session-id", claudeSessionId]
         }
-        agentPane.start(executable: claude, args: args, cwd: cwd, loginEnvironment: true)
+        agentPane.start(executable: claude, args: args, cwd: cwd, loginEnvironment: true,
+                        extraEnvironment: [tabEnvironment])
         agentPane.onProcessTerminated = { [weak self] code in
             guard let self else { return }
             NSLog("Atelier: agent process exited (session \(self.id), code: \(String(describing: code)))")
@@ -382,6 +384,22 @@ final class Session: NSObject, NSSplitViewDelegate {
         case nil: return
         }
         onAttentionChanged?()
+    }
+
+    /// `ATELIER_TAB=<this tab>` for the agent, so every hook it fires names
+    /// this tab whatever conversation it's in (see `adoptConversation`).
+    private var tabEnvironment: String { "\(NotifyMessage.tabEnvironmentKey)=\(id.uuidString)" }
+
+    /// A hook from this tab's agent reported a different conversation:
+    /// `/resume` or `/clear` inside Claude moved it (owner report
+    /// 2026-09-23: tabs stuck on the repo name, no dot, their hooks dropped
+    /// under an id nothing knew). Follow it — the title, the dots, banner
+    /// clicks, and relaunch's `--resume` all key on `claudeSessionId`.
+    func adoptConversation(_ sessionId: String) {
+        let id = sessionId.lowercased()
+        guard id != claudeSessionId else { return }
+        NSLog("Atelier: tab \(self.id) followed its agent from \(claudeSessionId) to \(id)")
+        claudeSessionId = id
     }
 
     /// Claude ended (`/exit`, ⌃C⌃C, a crash, a kill). The tab stays; the pane

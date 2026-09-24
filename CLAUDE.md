@@ -342,6 +342,18 @@ moments. Remote hosts re-provision (`provisioned-v2`). Upgrading: the new
 helper must be installed before the `tool` entries are merged — an older
 one reads unknown verbs as `stop`.
 
+**A tab follows its agent's conversation** (2026-09-23, owner report: some
+tabs kept the repo name and never showed a dot, though Claude worked fine).
+`/resume` or `/clear` *inside* Claude switch its session id; Atelier knew
+the tab only by the id it launched, so the title lookup found no
+transcript and every hook was dropped as a stranger. Now every agent is
+spawned with `ATELIER_TAB=<Session.id>` (remote: on the `exec claude`
+line), the helpers forward it as `NotifyMessage.tab`, and
+`applyAgentEvent` matches the tab first — a new `session_id` from it is
+adopted (`Session.adoptConversation`), so title, dots, banner clicks and
+relaunch's `--resume` all move with the conversation. Agents spawned
+before this build carry no tab and still match by id only.
+
 ## Commands
 
 - `make build` — compile all targets via SwiftPM.

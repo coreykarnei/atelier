@@ -66,7 +66,8 @@ if isatty(0) == 0 {
 
 let override = args.dropFirst().joined(separator: " ")
 let body = override.isEmpty ? defaultBody : override
-let message = NotifyMessage(kind: kind, title: defaultTitle, body: body, sessionId: sessionId)
+let tab = ProcessInfo.processInfo.environment[NotifyMessage.tabEnvironmentKey]
+let message = NotifyMessage(kind: kind, title: defaultTitle, body: body, sessionId: sessionId, tab: tab)
 
 // Connect to the unix domain socket.
 let path = AtelierIPC.socketPath()

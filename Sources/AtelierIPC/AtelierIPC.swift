@@ -51,12 +51,22 @@ public struct NotifyMessage: Codable {
     public let title: String
     public let body: String
     public let sessionId: String?
+    /// The Atelier tab whose Claude fired the hook — `ATELIER_TAB`, set on
+    /// every agent Atelier spawns and inherited by its hooks. It outlives
+    /// the conversation: `/resume` or `/clear` inside Claude switch
+    /// `sessionId`, never this. Absent from older helpers and from agents
+    /// started outside Atelier.
+    public let tab: String?
 
-    public init(kind: Kind, title: String, body: String, sessionId: String? = nil) {
+    /// The environment variable that carries `tab` from agent to hook.
+    public static let tabEnvironmentKey = "ATELIER_TAB"
+
+    public init(kind: Kind, title: String, body: String, sessionId: String? = nil, tab: String? = nil) {
         self.kind = kind
         self.title = title
         self.body = body
         self.sessionId = sessionId
+        self.tab = tab
     }
 
     /// Encode as a single newline-terminated JSON line for the stream protocol.
