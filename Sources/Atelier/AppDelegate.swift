@@ -359,6 +359,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func biggerText(_ sender: Any?) { Theme.TypeScale.bump(1) }
     @objc func smallerText(_ sender: Any?) { Theme.TypeScale.bump(-1) }
     @objc func resetTextSize(_ sender: Any?) { Theme.TypeScale.reset() }
+    @objc func selectSession(_ sender: NSMenuItem) { keyController?.selectSession(number: sender.tag) }
     @objc func nextSession(_ sender: Any?) { keyController?.selectNext() }
     @objc func prevSession(_ sender: Any?) { keyController?.selectPrev() }
 
@@ -378,6 +379,11 @@ extension AppDelegate: NSMenuItemValidation {
         }
         if menuItem.action == #selector(newWorktreeSession(_:)) {
             return keyController?.canChooseWorktree ?? false
+        }
+        if menuItem.action == #selector(selectSession(_:)) {
+            // Numbers past the last tab are greyed out, and their chords
+            // do nothing.
+            return menuItem.tag <= (keyController?.sessionCount ?? 0)
         }
         if menuItem.action == #selector(reopenSession(_:)) {
             return keyController?.canReopenClosedSession ?? false

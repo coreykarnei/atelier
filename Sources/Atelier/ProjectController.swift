@@ -751,6 +751,15 @@ final class ProjectController: NSObject, BottomBarDelegate {
         }
     }
 
+    var sessionCount: Int { sessions.count }
+
+    /// ⌥⌘1…9: the Nth tab in the bar (which draws `sessions` in order).
+    func selectSession(number: Int) {
+        let index = number - 1
+        guard sessions.indices.contains(index) else { return }
+        if index != activeIndex { showSession(at: index) }
+    }
+
     func selectNext() { guard !sessions.isEmpty else { return }; showSession(at: (activeIndex + 1) % sessions.count) }
     func selectPrev() { guard !sessions.isEmpty else { return }; showSession(at: (activeIndex - 1 + sessions.count) % sessions.count) }
 

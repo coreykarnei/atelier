@@ -33,7 +33,7 @@ enum Menu {
         fileItem.submenu = fileMenu
         fileMenu.addItem(withTitle: "New Project Tab", action: #selector(AppDelegate.newProject(_:)), keyEquivalent: "t")
         fileMenu.addItem(chord("Close Project", #selector(AppDelegate.closeProject(_:)), "w", [.command, .option]))
-        fileMenu.addItem(chord("New Session Here", #selector(AppDelegate.newSession(_:)), "t", [.command, .option]))
+        fileMenu.addItem(chord("New Session", #selector(AppDelegate.newSession(_:)), "t", [.command, .option]))
         fileMenu.addItem(chord("New Session in Worktree…", #selector(AppDelegate.newWorktreeSession(_:)),
                                "t", [.command, .option, .shift]))
         fileMenu.addItem(withTitle: "Open IDE Here", action: #selector(AppDelegate.openIDEHere(_:)), keyEquivalent: "\r")
@@ -111,7 +111,10 @@ enum Menu {
         viewMenu.addItem(withTitle: "Reset Text Size", action: #selector(AppDelegate.resetTextSize(_:)), keyEquivalent: "0")
 
         // Window menu. ⌘1..⌘9 focus the Nth project tab (MILESTONE_1 §5);
-        // ⌃⇥ / ⌃⇧⇥ cycle them (View menu), as native tabs did.
+        // ⌃⇥ / ⌃⇧⇥ cycle them (View menu), as native tabs did. ⌥⌘1..⌥⌘9
+        // focus the Nth session of the project on screen, in the bar's
+        // order (2026-09-23, owner call) — the ⌥⌘ family already means
+        // "session" (⌥⌘T), and macOS claims none of these.
         let windowItem = NSMenuItem()
         main.addItem(windowItem)
         let windowMenu = NSMenu(title: "Window")
@@ -120,6 +123,12 @@ enum Menu {
         windowMenu.addItem(.separator())
         for n in 1...9 {
             let item = NSMenuItem(title: "Project \(n)", action: #selector(AppDelegate.selectProject(_:)), keyEquivalent: "\(n)")
+            item.tag = n
+            windowMenu.addItem(item)
+        }
+        windowMenu.addItem(.separator())
+        for n in 1...9 {
+            let item = chord("Session \(n)", #selector(AppDelegate.selectSession(_:)), "\(n)", [.command, .option])
             item.tag = n
             windowMenu.addItem(item)
         }

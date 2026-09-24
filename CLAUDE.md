@@ -42,7 +42,7 @@ Milestone 1 (built; see `docs/MILESTONE_1.md`):
   `ProjectStrip.swift`, replacing native window tabbing — rounded selected
   chip, each tab carrying its sessions' attention marks; `ProjectController`
   owns everything below the row),
-  **sessions as bottom-bar tabs** (`⌥⌘T` sibling on the same root; `⌘⇧T` reopens
+  **sessions as bottom-bar tabs** (`⌥⌘1..9` jump to the Nth in bar order, 2026-09-23; `⌥⌘T` sibling on the same root; `⌘⇧T` reopens
   the last-closed session; the active tab's close `×` sits in its status dot's slot), each hosting
   its own pinned `claude --session-id` whose transcript `ai-title` labels the tab.
 - **The Landing** (§2.1): sessions start as an opener-over-terminal and promote

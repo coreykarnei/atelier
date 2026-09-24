@@ -3,7 +3,7 @@ import AppKit
 /// A tooltip that opens *above* its control (2026-09-23, owner call). The
 /// system's tip always drops below the pointer, and at the bottom bar that
 /// is the screen's edge (or the Dock). Two voices (§1.4): the sentence in
-/// SF Pro, the chord after it in mono, dimmer — "New Session Here  ⌥⌘T"
+/// SF Pro, the chord after it in mono, dimmer — "New Session  ⌥⌘T"
 /// splits on its double space. Shown after the system's hover delay, gone
 /// on exit or press; a short fade in, a plain appear under Reduce Motion.
 final class BarTip {
