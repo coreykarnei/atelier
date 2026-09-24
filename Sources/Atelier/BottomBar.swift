@@ -899,7 +899,10 @@ final class BottomBar: NSView {
                             tabsArea.addSubview(add)
                             arrivals.append(add)
                         }
-                        add.toolTip = "New session in \(FolderView.plainLabel(segment.label))"
+                        // Only on change: reassigning a tooltip resets its
+                        // hover timer, and layout runs every bar refresh.
+                        let tip = "New session in \(FolderView.plainLabel(segment.label))"
+                        if add.toolTip != tip { add.toolTip = tip }
                         if !folderDragged {
                             let slotX = x + width - Self.addTrail - Self.addSlotWidth
                             placeTrailingRule(groupKey: segment.groupKey, last: segment.tabs.last,

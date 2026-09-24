@@ -450,7 +450,6 @@ private final class MarkButton: NSView {
             owner: self,
             userInfo: nil
         ))
-        addToolTip(bounds, owner: self, userData: nil)
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         setAccessibilityLabel(Self.accessibilityText(mark))
@@ -472,9 +471,16 @@ private final class MarkButton: NSView {
         CATransaction.setDisableActions(true)
         padLayer.position = CGPoint(x: dotView.frame.midX, y: dotView.frame.midY)
         CATransaction.commit()
-        removeAllToolTips()
-        addToolTip(bounds, owner: self, userData: nil)
+        // Re-registered only when the rect moves: tearing the tip down each
+        // pass resets its hover timer, and it would never show.
+        if bounds != tipRect {
+            tipRect = bounds
+            removeAllToolTips()
+            addToolTip(bounds, owner: self, userData: nil)
+        }
     }
+
+    private var tipRect: CGRect = .null
 
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: .pointingHand)
