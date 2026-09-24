@@ -369,6 +369,24 @@ screen's edge down there), SF Pro sentence + dim mono chord split on the
 double space, the system's delay, warm hand-off between neighbours.
 `probe:tip=<fragment>` raises one without a hover.
 
+**Window drags ride the divider beat; interrupts turn the dot green**
+(2026-09-23, owner reports). Resizing the window now throttles the
+terminals exactly as a divider drag does (`FreezableTerminalView`'s
+`viewWillStartLiveResize`/`viewDidEndLiveResize`). `probe:liveresize=steps,dx[,bracket]`
+steps the window at 60Hz and reports main-thread ms per step: the throttle
+took p50 from ~4.5 to ~3ms. The remaining cost is SwiftTerm's CPU renderer —
+every draw re-shapes every row with CoreText (a sample of an unthrottled drag:
+draw ~900, layout ~360, scrollback reflow ~120) — so a drawn frame still runs
+20–40ms; a per-row line cache in the vendored renderer, or its Metal path, is
+the next lever. Claude repaints on SIGWINCH were *not* the cost (the agent
+wrote identical bytes throttled or not). **Interrupts:** `Stop` never fires on
+Esc/⌃C, so the dot stayed blue. The 2s transcript poll now also notes when the
+conversation's last turn record is Claude's marker (`[Request interrupted by
+user]` / `… for tool use]`, a user record whose sole content is that text — a
+tool result quoting it doesn't count), and a working or peach session goes to
+green, unringing, once per interrupt. Local sessions only; remote transcripts
+live on the host.
+
 ## Commands
 
 - `make build` — compile all targets via SwiftPM.

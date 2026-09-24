@@ -1039,14 +1039,24 @@ final class ProjectController: NSObject, BottomBarDelegate {
         // transcripts run to 50 MB, and reading them whole every 2 s here
         // was the ¼–½ s judder the owner saw scrolling the Claude pane.
         let targets = sessions.filter { !$0.isRemote }.map { (id: $0.claudeSessionId, cwd: $0.cwd) }
-        TranscriptTitle.titles(for: targets) { [weak self] titles in
+        TranscriptTitle.titles(for: targets) { [weak self] readings in
             guard let self else { return }
             var changed = false
             for session in self.sessions where !session.isRemote {
+                let reading = readings[session.claudeSessionId]
                 let seed = (session.cwd as NSString).lastPathComponent
-                let resolved = titles[session.claudeSessionId] ?? seed
+                let resolved = reading?.title ?? seed
                 if session.title != resolved {
                     session.title = resolved
+                    changed = true
+                }
+                // Interrupted (2026-09-23, owner report: Esc left the dot blue
+                // until a relaunch). No hook fires for it; the transcript's
+                // marker is the word. Your move — green, never ringing: you
+                // pressed the key. A peach the Esc dismissed clears too.
+                if reading?.interrupted == true,
+                   [.working, .needsInput, .needsInputUnseen].contains(session.attention) {
+                    session.attention = .waiting
                     changed = true
                 }
             }
