@@ -31,15 +31,35 @@ final class HoverPadButton: NSButton {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// A tip that opens above the button (`BarTip`) — for controls low on
+    /// the screen, where the system's tip would drop off its edge. Set this
+    /// *instead of* `toolTip`.
+    var tip: String? {
+        didSet { setAccessibilityHelp(tip?.components(separatedBy: "  ").first) }
+    }
+
     private var hovered = false
     /// Told when the pointer arrives and leaves — for hosts that answer hover
     /// with more than the pad (the strip's `+` glyphs rise out of a whisper).
     var onHoverChange: ((Bool) -> Void)?
     override var isEnabled: Bool { didSet { refreshPad() } }
-    override func mouseEntered(with event: NSEvent) { hovered = true; refreshPad(); onHoverChange?(true) }
-    override func mouseExited(with event: NSEvent) { hovered = false; refreshPad(); onHoverChange?(false) }
+    override func mouseEntered(with event: NSEvent) {
+        hovered = true; refreshPad(); onHoverChange?(true)
+        if let tip, !isHidden, alphaValue > 0 { BarTip.shared.schedule(tip, above: self) }
+    }
+    override func mouseExited(with event: NSEvent) {
+        hovered = false; refreshPad(); onHoverChange?(false)
+        BarTip.shared.cancel(for: self)
+    }
+    override func mouseDown(with event: NSEvent) {
+        BarTip.shared.cancel(for: self)
+        super.mouseDown(with: event)
+    }
     override func highlight(_ flag: Bool) { super.highlight(flag); refreshPad() }
-    override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); hovered = false; refreshPad() }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow(); hovered = false; refreshPad()
+        if window == nil { BarTip.shared.cancel(for: self) }
+    }
     private func refreshPad() {
         layer?.backgroundColor = isEnabled && (hovered || isHighlighted)
             ? hoverFill.withAlphaComponent(isHighlighted ? 0.26 : 0.16).cgColor : nil

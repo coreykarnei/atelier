@@ -280,7 +280,7 @@ final class BottomBar: NSView {
         addButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 12, weight: .medium))
         addButton.contentTintColor = Theme.chromeText
-        addButton.toolTip = "New Session Here  ⌥⌘T"
+        addButton.tip = "New Session Here  ⌥⌘T"
         addButton.setAccessibilityLabel("New session here")
         tabsArea.addSubview(addButton)
 
@@ -295,12 +295,12 @@ final class BottomBar: NSView {
         worktreeAddButton.alphaValue = 1
         worktreeAddButton.target = self
         worktreeAddButton.action = #selector(worktreeAddTapped)
-        worktreeAddButton.toolTip = "New Session in a Worktree…  ⇧⌥⌘T"
+        worktreeAddButton.tip = "New Session in a Worktree…  ⇧⌥⌘T"
         worktreeAddButton.setAccessibilityLabel("New session in a worktree")
         worktreeAddButton.isHidden = true
         tabsArea.addSubview(worktreeAddButton)
         configureIconButton(overflowButton, symbol: "chevron.right.2", action: nil)
-        overflowButton.toolTip = "More sessions"
+        overflowButton.tip = "More sessions"
         overflowButton.setAccessibilityLabel("More sessions")
         overflowButton.isHidden = true
         tabsArea.addSubview(overflowButton)
@@ -317,12 +317,12 @@ final class BottomBar: NSView {
         configureIconButton(layoutButton, symbol: "rectangle.split.3x1", action: #selector(layoutTapped))
         // The toggle and gear are constraint-anchored (unlike the flow-placed
         // buttons, which are positioned by frame inside tabsArea).
-        layoutButton.toolTip = "Switch Layout  ⌘\\"
+        layoutButton.tip = "Switch Layout  ⌘\\"
         layoutButton.setAccessibilityLabel("Switch layout")
         layoutButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(layoutButton)
         configureIconButton(settingsButton, symbol: "gearshape", action: #selector(settingsTapped))
-        settingsButton.toolTip = "Settings…  ⌘,"
+        settingsButton.tip = "Settings…  ⌘,"
         settingsButton.setAccessibilityLabel("Settings")
         settingsButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(settingsButton)
@@ -902,7 +902,7 @@ final class BottomBar: NSView {
                         // Only on change: reassigning a tooltip resets its
                         // hover timer, and layout runs every bar refresh.
                         let tip = "New session in \(FolderView.plainLabel(segment.label))"
-                        if add.toolTip != tip { add.toolTip = tip }
+                        if add.tip != tip { add.tip = tip }
                         if !folderDragged {
                             let slotX = x + width - Self.addTrail - Self.addSlotWidth
                             placeTrailingRule(groupKey: segment.groupKey, last: segment.tabs.last,
@@ -1383,25 +1383,34 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    /// Estimated width for the flow: full label + glyphs + padding, plus the
-    /// leading close `×` on the active tab. Titles are uncapped — the two-row
-    /// wrap and the `»` overflow absorb long ones.
+    /// Estimated width for the flow: full label + the leading mark slot +
+    /// padding. Titles are uncapped — the two-row wrap and the `»` overflow
+    /// absorb long ones.
     static func desiredWidth(for info: SessionTabInfo, isActive: Bool) -> CGFloat {
         // Measure at the active (semibold) weight — a hair wider than regular
         // at this size, and the estimate must never come in under the truth.
         let font = Theme.Typography.mono(Theme.Typography.body, weight: .semibold)
         let textWidth = (label(for: info) as NSString).size(withAttributes: [.font: font]).width
-        let badge: CGFloat = info.attention == .none ? 0 : 11
+        let slot: CGFloat = hasMarkSlot(attention: info.attention, isActive: isActive) ? markSlot : 0
         // +4: NSTextFieldCell pads 2pt each side beyond the glyph width.
-        return ceil(textWidth) + badge + 8 + (isActive ? closeSlot : 8) + 4
+        return ceil(textWidth) + slot + 8 + 8 + 4
     }
 
-    /// The `×` sits close: 3pt off the title, 4pt off the edge (owner call
-    /// 2026-09-10 — the old 8/6 read as dead space).
-    static let closeMargin: CGFloat = 4
-    static let closeGap: CGFloat = 0   // the 16pt pad already insets its 8pt glyph
+    /// One leading slot, two tenants (2026-09-23, owner call): the status
+    /// dot, or — on the selected tab — the close `×` in its place. The
+    /// selected tab's dot was the least useful one in the bar (you're
+    /// looking at that session's panes) and the least legible (green on the
+    /// green chip, blue muddied by it), and the `×` used to bring a slot of
+    /// its own, so every selection reflowed the row. Now selecting a tab
+    /// that has a dot changes no width at all. The slot exists only while it
+    /// holds something, so a tab with nothing to say starts at its title.
+    static let markSlot: CGFloat = 11
+    static func hasMarkSlot(attention: Session.Attention, isActive: Bool) -> Bool {
+        isActive || attention != .none
+    }
+
+    /// The `×`'s pad: 16pt around an 8pt glyph, centred where the dot sits.
     static let closeWidth: CGFloat = 16
-    static let closeSlot: CGFloat = closeGap + closeWidth + closeMargin
     /// The `×` at rest and with the pointer over its tab (its own pad then
     /// marks it under the pointer).
     static let closeRestAlpha: CGFloat = 0.35
@@ -1426,7 +1435,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         setAccessibilityRole(.radioButton)
         setAccessibilityLabel(Self.label(for: info))
         setAccessibilityValue(isActive ? 1 : 0)
-        closeButton.toolTip = "Close Session  ⌘W"
+        closeButton.tip = "Close Session  ⌘W"
         let text = Self.label(for: info)
         if titleLabel.stringValue != text { titleLabel.stringValue = text }
 
@@ -1455,21 +1464,18 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
 
     override func layout() {
         super.layout()
-        // The close `×` sits at the trailing edge (owner call 2026-09-08); its
-        // slot is reserved by activeness, not visibility, so the hover reveal
-        // never shifts text.
         let closeWidth = Self.closeWidth
         let leading: CGFloat = 8
-        let trailingSlot: CGFloat = isActive ? Self.closeSlot : 8
-        let hasBadge = badgeView != nil
+        let trailingSlot: CGFloat = 8
+        let hasSlot = Self.hasMarkSlot(attention: attention, isActive: isActive)
+        // The selected tab's `×` takes the dot's place (see `markSlot`); the
+        // dot stays alive underneath, hidden, so its motion and state are
+        // intact the moment another tab is selected.
+        badgeView?.isHidden = isActive
         if !closeButton.isHidden {
-            // Hug the title's real end, not the tab's edge: the width estimate
-            // carries a few points of slack, and that slack belongs outside
-            // the ×, not between it and the text (owner call 2026-09-10).
-            let titleEnd = leading + (hasBadge ? 11 : 0) + ceil(titleLabel.fittingSize.width)
-            let x = min(titleEnd + Self.closeGap, bounds.width - Self.closeMargin - closeWidth)
+            let dotCenterX = leading + 3 // the 6pt dot's centre
             closeButton.frame = CGRect(
-                x: x,
+                x: round(dotCenterX - closeWidth / 2),
                 y: (bounds.height - closeWidth) / 2,
                 width: closeWidth,
                 height: closeWidth
@@ -1489,7 +1495,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         // owner callback so it's never stale. Rebuild the tip region only when
         // it moves — layout() runs every bar refresh, and tearing the tip down
         // each pass perpetually resets the hover timer (it would never show).
-        let tipRect = badgeView.map { $0.frame.insetBy(dx: -4, dy: -4) } ?? .null
+        let tipRect = isActive ? .null : (badgeView.map { $0.frame.insetBy(dx: -4, dy: -4) } ?? .null)
         if tipRect != toolTipRect {
             toolTipRect = tipRect
             removeAllToolTips()
@@ -1497,7 +1503,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
                 addToolTip(tipRect, owner: self, userData: nil)
             }
         }
-        let titleX: CGFloat = leading + (hasBadge ? 11 : 0)
+        let titleX: CGFloat = leading + (hasSlot ? Self.markSlot : 0)
         let titleHeight = titleLabel.fittingSize.height
         titleLabel.frame = CGRect(
             x: titleX,

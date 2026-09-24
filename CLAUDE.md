@@ -43,7 +43,7 @@ Milestone 1 (built; see `docs/MILESTONE_1.md`):
   chip, each tab carrying its sessions' attention marks; `ProjectController`
   owns everything below the row),
   **sessions as bottom-bar tabs** (`⌥⌘T` sibling on the same root; `⌘⇧T` reopens
-  the last-closed session; the active tab carries a leading close `×`), each hosting
+  the last-closed session; the active tab's close `×` sits in its status dot's slot), each hosting
   its own pinned `claude --session-id` whose transcript `ai-title` labels the tab.
 - **The Landing** (§2.1): sessions start as an opener-over-terminal and promote
   in place (pick a repo, or `⌘↩` on the landing terminal's cwd); Claude spawns
@@ -353,6 +353,21 @@ line), the helpers forward it as `NotifyMessage.tab`, and
 adopted (`Session.adoptConversation`), so title, dots, banner clicks and
 relaunch's `--resume` all move with the conversation. Agents spawned
 before this build carry no tab and still match by id only.
+
+**The selected tab's `×` takes its dot's place; bar tips open upward**
+(2026-09-23, owner call). A session tab has one leading slot
+(`SessionTabView.markSlot`, 11pt) held by the status dot — or, on the
+selected tab, the close `×`, centred where the dot sits; the dot stays
+alive underneath, hidden. The selected dot was the least useful (you're
+in those panes) and least legible (green on the green chip), and the old
+trailing `×` brought a slot of its own, so every selection reflowed the
+row; measured after: selecting a dotted tab moves no frame. The slot
+exists only while it holds something. Bottom-bar controls set
+`HoverPadButton.tip` instead of `toolTip`: `BarTip` opens a child panel
+*above* the control (the system tip drops below the pointer — off the
+screen's edge down there), SF Pro sentence + dim mono chord split on the
+double space, the system's delay, warm hand-off between neighbours.
+`probe:tip=<fragment>` raises one without a hover.
 
 ## Commands
 

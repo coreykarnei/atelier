@@ -601,6 +601,23 @@ final class EditorPane: NSView, WorkspacePane {
             (NSApp.delegate as? AppDelegate)?.newWorktreeSession(nil)
             return
         }
+        if query.hasPrefix("probe:tip=") {
+            // `probe:tip=<text fragment>` — raise the above-tip of the first
+            // visible bar button whose tip contains it, without a hover
+            // (posted moves don't drive tracking areas).
+            let needle = String(query.dropFirst("probe:tip=".count))
+            // The workspace window, not this pane's: a Landing's editor
+            // isn't in one.
+            guard let root = (window ?? NSApp.windows.first { $0 is AtelierWindow })?.contentView else { return }
+            func find(_ view: NSView) -> HoverPadButton? {
+                if let button = view as? HoverPadButton, !button.isHiddenOrHasHiddenAncestor,
+                   button.tip?.contains(needle) == true { return button }
+                for sub in view.subviews { if let hit = find(sub) { return hit } }
+                return nil
+            }
+            if let button = find(root), let tip = button.tip { BarTip.shared.schedule(tip, above: button) }
+            return
+        }
         if query == "probe:overlay" {
             // Where a raised overlay's card actually sits, in window points.
             guard let window, let root = window.contentView else { return }
@@ -634,7 +651,7 @@ final class EditorPane: NSView, WorkspacePane {
             if let area = find(root) {
                 for sub in area.subviews {
                     let f = sub.convert(sub.bounds, to: nil)
-                    let extra = (sub as? NSButton).map { " tip='\($0.toolTip ?? "")'" } ?? ""
+                    let extra = (sub as? NSButton).map { " tip='\(($0 as? HoverPadButton)?.tip ?? $0.toolTip ?? "")'" } ?? ""
                     lines.append("\(type(of: sub)) x=\(Int(f.minX)) y=\(Int(f.minY)) w=\(Int(f.width)) h=\(Int(f.height)) alpha=\(String(format: "%.2f", sub.alphaValue)) hidden=\(sub.isHidden)\(extra)")
                 }
             } else {
