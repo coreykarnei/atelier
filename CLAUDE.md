@@ -397,6 +397,25 @@ wasn't pinned down — the next lever if it still feels slow. Probes:
 times and row hits/misses), `probe:rowcache=0|1`, `probe:type=<text>` (types
 into the agent pane, then a kitty-encoded Return).
 
+**Releases are Developer ID-signed and notarized** (2026-09-24, from v1.3.0).
+`make release` (`Scripts/release.sh`) builds release, signs the helpers then
+the app with the `Developer ID Application: Corey Karnei (R98H69VF6S)`
+identity (hardened runtime, secure timestamp), notarizes through the
+`atelier-notary` keychain profile (an App Store Connect API key), staples,
+and writes `.build/dist/Atelier-<version>.zip` plus its sha256. A release is:
+bump `CFBundleShortVersionString`/`CFBundleVersion` in `Resources/Info.plist`
+and the README, write `docs/releases/vX.md`, commit, tag, `make release`,
+`gh release create vX .build/dist/Atelier-X.zip --notes-file docs/releases/vX.md`,
+then bump `version`/`sha256` in `~/repositories/homebrew-tap/Casks/atelier.rb`
+(GitHub `coreykarnei/homebrew-tap`) and push. The cask carries no quarantine
+caveat any more — `brew install --cask coreykarnei/tap/atelier` opens clean
+(verified: `spctl` on a quarantined download says *Notarized Developer ID*).
+Dev builds keep the self-signed identity; after a release `.build/Atelier.app`
+is the Developer ID build until `make bundle`. Setup and failure modes (the
+403 "agreement missing" lag) are in `docs/SETUP.md` → Releasing. Homebrew's
+own clone of the tap lives at `/opt/homebrew/Library/Taps/coreykarnei/homebrew-tap`
+— never commit there; it rebases onto GitHub on `brew update`.
+
 ## Commands
 
 - `make build` — compile all targets via SwiftPM.
@@ -404,6 +423,8 @@ into the agent pane, then a kitty-encoded Return).
   `dev.sterlingcore.atelier`, ad-hoc signed; bundles `atelier-notify` too).
 - `make run` — build, bundle, and `open` the app.
 - `make clean` — `swift package clean` + remove the app bundle.
+- `make release` — Developer ID-signed, notarized, stapled zip in `.build/dist`
+  (see *Releases are Developer ID-signed* above).
 
 Notifications need a real `.app` launch (`make run`/`open`) for the bundle identity
 UNUserNotification requires — and a one-time permission grant. To enable agent
