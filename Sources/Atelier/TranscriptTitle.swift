@@ -23,7 +23,19 @@ enum TranscriptTitle {
         var offset: UInt64 = 0
         var aiTitle: String?
         var lastPrompt: String?
-        var title: String? { aiTitle ?? lastPrompt.map(firstLine) }
+        /// When the prompt may stand in for a missing `ai-title`. Claude
+        /// writes `last-prompt` the moment a message is sent and the summary
+        /// a few seconds after, so a prompt shown at once would stretch the
+        /// tab to the whole message and snap back (owner report 2026-09-25).
+        /// A fresh prompt waits `promptGrace` for its summary; one already on
+        /// disk before we looked (a restored conversation that never got a
+        /// summary) stands in at once.
+        var promptUsableAt: Date?
+        var title: String? {
+            if let aiTitle { return aiTitle }
+            guard let lastPrompt, let at = promptUsableAt, Date() >= at else { return nil }
+            return firstLine(lastPrompt)
+        }
         /// The conversation's last turn record is Claude's interrupt marker:
         /// Esc/⌃C ended the turn. No hook reports that — `Stop` is documented
         /// not to fire on a user interrupt — so this is the only word of it.
@@ -86,10 +98,17 @@ enum TranscriptTitle {
             let complete = data.lastIndex(of: 0x0A).map { data.prefix(through: $0) } ?? Data()
             scan(complete, into: &state)
             state.offset += UInt64(complete.count)
+            if state.lastPrompt != nil, state.promptUsableAt == nil {
+                let modified = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
+                let settled = modified.map { Date().timeIntervalSince($0) > promptGrace } ?? false
+                state.promptUsableAt = settled ? .distantPast : Date().addingTimeInterval(promptGrace)
+            }
         }
         progress[sessionId] = state
         return Reading(title: state.title, interrupted: state.endsInterrupted && !wasInterrupted)
     }
+
+    private static let promptGrace: TimeInterval = 30
 
     private static let aiTitleKey = Data("\"ai-title\"".utf8)
     private static let lastPromptKey = Data("\"last-prompt\"".utf8)
