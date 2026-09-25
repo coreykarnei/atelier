@@ -396,14 +396,6 @@ final class LandingView: NSView, WorkspacePane {
         }
 
         let text = NSMutableAttributedString()
-        // A shelved row's session dots already say you've been here.
-        if entry.isRecent, entry.shelved.isEmpty {
-            text.append(NSAttributedString(string: "● ", attributes: [
-                .font: NSFont.systemFont(ofSize: 7),
-                .foregroundColor: Theme.accentGreen,
-                .baselineOffset: 2,
-            ]))
-        }
         // Repo names and paths are things you could paste into a terminal: mono.
         text.append(NSAttributedString(string: entry.name, attributes: [
             .font: Theme.Typography.mono(Theme.Typography.body, weight: .medium),
