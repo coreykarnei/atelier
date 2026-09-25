@@ -12,7 +12,7 @@ Built with AppKit, with a keyboard-first workflow, Catppuccin Mocha colors,
 and native translucency. Claude Code runs as its own process, with its tools
 and permissions intact.
 
-Atelier is the author's daily driver. Version **1.4.0** is available in the
+Atelier is the author's daily driver. Version **1.4.1** is available in the
 source history; the instructions below build the app locally.
 
 ## A place to work
