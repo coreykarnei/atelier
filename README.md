@@ -66,8 +66,9 @@ This creates a symlink to the build in this checkout, rather than copying the
 app. Keep the checkout in place. See the [setup guide](docs/SETUP.md) for
 notification hooks, the optional CLI, language servers, and remote sessions.
 
-Local builds use ad-hoc signing or a local development certificate. The build
-script does not produce a Developer ID-signed, notarized distribution.
+Local builds use ad-hoc signing or a local development certificate. Release
+zips (`make release`, the build the Homebrew cask ships) are Developer
+ID-signed and notarized; the setup guide covers the one-time setup.
 
 ## A few useful shortcuts
 
