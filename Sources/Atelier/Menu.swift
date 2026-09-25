@@ -33,6 +33,9 @@ enum Menu {
         fileItem.submenu = fileMenu
         fileMenu.addItem(withTitle: "New Project Tab", action: #selector(AppDelegate.newProject(_:)), keyEquivalent: "t")
         fileMenu.addItem(chord("Close Project", #selector(AppDelegate.closeProject(_:)), "w", [.command, .option]))
+        // The close that keeps nothing (plain Close Project shelves).
+        fileMenu.addItem(chord("Close Project and End Sessions", #selector(AppDelegate.closeProjectForgetting(_:)),
+                               "w", [.command, .option, .shift]))
         fileMenu.addItem(chord("New Session", #selector(AppDelegate.newSession(_:)), "t", [.command, .option]))
         fileMenu.addItem(chord("New Session in Worktree…", #selector(AppDelegate.newWorktreeSession(_:)),
                                "t", [.command, .option, .shift]))

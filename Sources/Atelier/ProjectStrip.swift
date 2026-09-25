@@ -27,7 +27,8 @@ struct ProjectMark: Equatable {
 /// sessions' attention marks after the title (blue working, green done,
 /// ringing green unseen completion, peach blocked), so a project you're not
 /// looking at still says where its agents stand. `+` opens a new project
-/// tab; the active tab's leading `×` closes it. Gaps pass clicks through to the
+/// tab; the active tab's leading `×` closes it — onto the shelf, or with `⌥`
+/// held (the `×` goes peach to say so) for good. Gaps pass clicks through to the
 /// wash (drag to move, double-click to zoom). Each dot is a way to its
 /// session (2026-09-23, owner call): click one and the project comes
 /// forward on that session's tab.
@@ -41,7 +42,8 @@ struct ProjectMark: Equatable {
 /// made ⌃⇥ land on tabs you couldn't see.
 final class ProjectStripView: NSView {
     var onSelect: ((ObjectIdentifier) -> Void)?
-    var onClose: ((ObjectIdentifier) -> Void)?
+    /// The `×`: this project, and whether `⌥` was held (forget, not shelve).
+    var onClose: ((ObjectIdentifier, Bool) -> Void)?
     var onNew: (() -> Void)?
     /// A dot was clicked: this project, this session.
     var onSelectSession: ((ObjectIdentifier, UUID) -> Void)?
@@ -132,7 +134,7 @@ final class ProjectStripView: NSView {
     private func makeTab(id: ObjectIdentifier) -> ProjectTabView {
         let tab = ProjectTabView(id: id)
         tab.onSelect = { [weak self] in self?.onSelect?(id) }
-        tab.onClose = { [weak self] in self?.onClose?(id) }
+        tab.onClose = { [weak self] forget in self?.onClose?(id, forget) }
         tab.onSelectSession = { [weak self] session in self?.onSelectSession?(id, session) }
         tabsHost.addSubview(tab)
         return tab
@@ -255,7 +257,7 @@ private final class TabRowScrollView: NSScrollView {
 private final class ProjectTabView: NSView {
     let id: ObjectIdentifier
     var onSelect: (() -> Void)?
-    var onClose: (() -> Void)?
+    var onClose: ((_ forget: Bool) -> Void)?
     var onSelectSession: ((UUID) -> Void)?
 
     private let titleLabel = NSTextField(labelWithString: "")
@@ -265,6 +267,9 @@ private final class ProjectTabView: NSView {
     private var isActive = false
     private var hovered = false
     private var tracking: NSTrackingArea?
+    /// `⌥` held over the tab: the `×` becomes the close that keeps nothing.
+    private var optionHeld = false
+    private var flagsMonitor: Any?
 
     private static let closeWidth: CGFloat = 16
     private static let closeSlot: CGFloat = 6 + 16 + 6
@@ -313,7 +318,7 @@ private final class ProjectTabView: NSView {
         setAccessibilityRole(.radioButton)
         setAccessibilityLabel(info.title)
         setAccessibilityValue(isActive ? 1 : 0)
-        closeButton.toolTip = "Close Project  ⌥⌘W"
+        closeButton.toolTip = "Close Project  ⌥⌘W\n⌥-click ends its sessions"
         closeButton.isHidden = !isActive
         toolTip = info.title
         let identity = { (marks: [ProjectMark]) in marks.map { "\($0.sessionId)\($0.attention)" } }
@@ -347,6 +352,16 @@ private final class ProjectTabView: NSView {
         // Invisible until the pointer is over the tab (the session tabs'
         // rule); the slot stays reserved so the title never shifts.
         closeButton.alphaValue = hovered ? HoverPadButton.restingAlpha : 0
+        closeButton.contentTintColor = optionHeld ? Theme.accentPeach : Theme.chromeText
+        closeButton.setAccessibilityLabel(optionHeld ? "Close project and end sessions" : "Close project")
+    }
+
+    /// Watch `⌥` only while the pointer is over the tab — the one place the
+    /// modifier changes what a click does.
+    private func setOptionHeld(_ held: Bool) {
+        guard held != optionHeld else { return }
+        optionHeld = held
+        restyle()
     }
 
     override func layout() {
@@ -394,12 +409,30 @@ private final class ProjectTabView: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         hovered = true
+        optionHeld = event.modifierFlags.contains(.option)
         restyle()
+        if flagsMonitor == nil {
+            flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+                self?.setOptionHeld(event.modifierFlags.contains(.option))
+                return event
+            }
+        }
     }
 
     override func mouseExited(with event: NSEvent) {
         hovered = false
+        optionHeld = false
+        if let flagsMonitor { NSEvent.removeMonitor(flagsMonitor) }
+        flagsMonitor = nil
         restyle()
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil, let flagsMonitor {
+            NSEvent.removeMonitor(flagsMonitor)
+            self.flagsMonitor = nil
+        }
+        super.viewWillMove(toWindow: newWindow)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -408,7 +441,9 @@ private final class ProjectTabView: NSView {
 
     override func accessibilityPerformPress() -> Bool { onSelect?(); return true }
 
-    @objc private func closeTapped() { onClose?() }
+    @objc private func closeTapped() {
+        onClose?(NSApp.currentEvent?.modifierFlags.contains(.option) ?? false)
+    }
 }
 
 /// A project tab's attention dot as a target (2026-09-23, owner call): the

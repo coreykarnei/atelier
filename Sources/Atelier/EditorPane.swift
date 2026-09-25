@@ -630,7 +630,9 @@ final class EditorPane: NSView, WorkspacePane {
             // posted to the queue (menus and modal alerts included). `\r`
             // for ↩, `\e` for esc.
             let parts = query.dropFirst("probe:key=".count).split(separator: ",").map(String.init)
-            guard let first = parts.first, let window else { return }
+            // A Landing's editor isn't in the window; its keys go to the workspace.
+            guard let first = parts.first,
+                  let window = window ?? NSApp.windows.first(where: { $0 is AtelierWindow }) else { return }
             var mods: NSEvent.ModifierFlags = []
             if parts.contains("cmd") { mods.insert(.command) }
             if parts.contains("shift") { mods.insert(.shift) }
@@ -641,8 +643,12 @@ final class EditorPane: NSView, WorkspacePane {
                 "down": ("\u{F701}", 125), "up": ("\u{F700}", 126),
                 "tab": ("\t", 48), "space": (" ", 49),
             ]
+            // ANSI key codes for letters: AppKit resolves shifted menu
+            // chords (⇧⌥⌘W) from the key code, so code 0 (`a`) never matches.
+            let letters = Array("asdfhgzxcv" + "\u{0}" + "bqweryt")
             let chars = named[first]?.0 ?? first
-            let code: UInt16 = named[first]?.1 ?? 0
+            let code: UInt16 = named[first]?.1
+                ?? first.lowercased().first.flatMap { c in letters.firstIndex(of: c).map(UInt16.init) } ?? 0
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
             for type in [NSEvent.EventType.keyDown, .keyUp] {
@@ -650,6 +656,27 @@ final class EditorPane: NSView, WorkspacePane {
                     with: type, location: .zero, modifierFlags: mods, timestamp: ProcessInfo.processInfo.systemUptime,
                     windowNumber: window.windowNumber, context: nil, characters: chars, charactersIgnoringModifiers: chars,
                     isARepeat: false, keyCode: code
+                ) { NSApp.postEvent(event, atStart: false) }
+            }
+            return
+        }
+        if query.hasPrefix("probe:click=") {
+            // `probe:click=x,y[,opt][,cmd][,shift]` — one click in window
+            // points (origin bottom-left), modifiers held, posted to the queue.
+            let parts = query.dropFirst("probe:click=".count).split(separator: ",").map(String.init)
+            guard parts.count >= 2, let x = Double(parts[0]), let y = Double(parts[1]),
+                  let window = window ?? NSApp.windows.first(where: { $0 is AtelierWindow }) else { return }
+            var mods: NSEvent.ModifierFlags = []
+            if parts.contains("opt") { mods.insert(.option) }
+            if parts.contains("cmd") { mods.insert(.command) }
+            if parts.contains("shift") { mods.insert(.shift) }
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                if let event = NSEvent.mouseEvent(
+                    with: type, location: NSPoint(x: x, y: y), modifierFlags: mods,
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 0, clickCount: 1, pressure: 1
                 ) { NSApp.postEvent(event, atStart: false) }
             }
             return

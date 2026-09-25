@@ -38,6 +38,9 @@ struct LandingEntry {
     let isRecent: Bool
     /// Set for remote entries: the ssh host they open on.
     var host: String? = nil
+    /// Sessions waiting on the shelf here (`ProjectShelf`): opening this row
+    /// brings them back rather than starting one fresh.
+    var shelved: Int = 0
 }
 
 /// The landing pane (MILESTONE_1 §2.1). Rebuilt on the summon idiom
@@ -370,6 +373,11 @@ final class LandingView: NSView, WorkspacePane {
             guard seen.insert(target.id).inserted else { continue }
             out.append(LandingEntry(name: host, path: target.id, isRecent: false, host: host))
         }
+
+        let shelf = ProjectShelf.sessionCounts()
+        if !shelf.isEmpty {
+            for i in out.indices { out[i].shelved = shelf[out[i].path] ?? 0 }
+        }
         return out
     }
 
@@ -397,6 +405,17 @@ final class LandingView: NSView, WorkspacePane {
             .font: Theme.Typography.mono(Theme.Typography.body, weight: .medium),
             .foregroundColor: Theme.chromeText,
         ]))
+        if entry.shelved > 0 {
+            // Said in the chrome voice, not the path's: this is Atelier
+            // telling you what opening the row will do.
+            text.append(NSAttributedString(
+                string: "  \(entry.shelved) session\(entry.shelved == 1 ? "" : "s")",
+                attributes: [
+                    .font: Theme.Typography.ui(Theme.Typography.small),
+                    .foregroundColor: Theme.chromeText,
+                ]
+            ))
+        }
         text.append(NSAttributedString(string: "  \(detail)", attributes: [
             .font: Theme.Typography.mono(Theme.Typography.small),
             .foregroundColor: Theme.chromeMutedText,

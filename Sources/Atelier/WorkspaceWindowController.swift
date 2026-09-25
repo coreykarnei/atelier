@@ -178,9 +178,9 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, Pro
             guard let self, let index = self.projects.firstIndex(where: { ObjectIdentifier($0) == id }) else { return }
             self.activate(index: index)
         }
-        strip.onClose = { [weak self] id in
+        strip.onClose = { [weak self] id, forget in
             guard let self, let project = self.projects.first(where: { ObjectIdentifier($0) == id }) else { return }
-            self.close(project)
+            self.close(project, forget: forget)
         }
         strip.onNew = { (NSApp.delegate as? AppDelegate)?.newProject(nil) }
         strip.onSelectSession = { [weak self] id, session in
@@ -286,21 +286,26 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, Pro
     /// with nothing left to snapshot — no gesture for "I'm done with
     /// these": in a single-window app the red button is how you leave, and
     /// leaving keeps your place, the same as ⌘Q. Ending sessions stays a
-    /// per-tab act (⌘W, Close Project); the last project closing still
+    /// per-tab act (⌘W, ⌥-close on a project); the last project closing still
     /// closes the window directly (`close()` never asks this).
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         NSApp.terminate(sender)
         return false // reached only if the quit was cancelled
     }
 
-    /// Close a project: its sessions die (remote ones included — this is a
-    /// deliberate "I'm done with this project"). Unsaved buffers get the
-    /// informative refusal first (§5), naming the files. The last project
-    /// closing closes the window, and with it the app.
-    func close(_ project: ProjectController) {
+    /// Close a project. Plainly, it goes on the shelf (2026-09-24, owner
+    /// call): its session tree is kept and its processes stop the way quit
+    /// stops them — remote work keeps running on its host — so opening the
+    /// same place from a Landing brings every session back. `forget` (⌥ on
+    /// the `×`, ⇧⌥⌘W) is the old deliberate "I'm done with this project":
+    /// every session dies, remote ones included, and nothing is kept.
+    /// Unsaved buffers get the informative refusal first (§5), naming the
+    /// files — a shelf keeps which file was open, not its edits. The last
+    /// project closing closes the window, and with it the app.
+    func close(_ project: ProjectController, forget: Bool = false) {
         let dirty = project.dirtyBufferPaths
         guard !dirty.isEmpty, let window else {
-            remove(project)
+            remove(project, forget: forget)
             return
         }
         let alert = NSAlert()
@@ -321,7 +326,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, Pro
             case .alertFirstButtonReturn:
                 do {
                     try project.saveAllDirtyBuffers()
-                    self?.remove(project)
+                    self?.remove(project, forget: forget)
                 } catch {
                     let failure = NSAlert()
                     failure.alertStyle = .warning
@@ -330,16 +335,22 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, Pro
                     failure.beginSheetModal(for: window)
                 }
             case .alertSecondButtonReturn:
-                self?.remove(project)
+                self?.remove(project, forget: forget)
             default:
                 break
             }
         }
     }
 
-    private func remove(_ project: ProjectController) {
+    private func remove(_ project: ProjectController, forget: Bool) {
         guard let index = projects.firstIndex(where: { $0 === project }) else { return }
-        project.terminateAllSessions()
+        if forget {
+            if let key = project.shelfKey { ProjectShelf.forget(key) }
+            project.terminateAllSessions()
+        } else {
+            project.shelve()
+            project.terminateAllSessions(killRemote: false)
+        }
         project.isActive = false
         project.view.removeFromSuperview()
         project.host = nil

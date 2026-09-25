@@ -75,7 +75,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
     convenience init(root: String? = nil) {
         self.init(chrome: ())
         if let root {
-            adopt(Session(ideRoot: root))
+            if !restoreShelved(key: root, replacing: nil) { adopt(Session(ideRoot: root)) }
         } else {
             addSession()
         }
@@ -139,6 +139,67 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// Snapshot for the session store.
     func persisted() -> PersistedWindow {
         PersistedWindow(sessions: sessions.map { $0.persisted() }, activeIndex: activeIndex)
+    }
+
+    // MARK: Shelf
+
+    /// Where this project lives, as the Landing names it: the folder it was
+    /// opened on, or a remote project's `ssh://host:dir`. Nil for a project
+    /// that never became one (still a Landing) — nothing to come back to.
+    var shelfKey: String? {
+        if let projectRoot { return projectRoot }
+        if let remote = sessions.first(where: { $0.isRemote && $0.state == .ide }),
+           case .remote(let host) = remote.location {
+            return RemoteTarget(host: host, dir: remote.cwd).id
+        }
+        return nil
+    }
+
+    /// Closing by hand keeps the session tree to come back to (the caller
+    /// then tears the processes down the way quit does).
+    func shelve() {
+        guard let key = shelfKey else { return }
+        let snapshot = persisted()
+        guard snapshot.sessions.contains(where: \.isIDE) else { return }
+        ProjectShelf.put(key, snapshot)
+    }
+
+    /// Opening a place with a shelved project brings the tree back, the way a
+    /// relaunch would — but only into a project that is nothing yet: an empty
+    /// one (the CLI's `atelier <path>`) or a lone Landing (⌘T, then a pick),
+    /// which the tree replaces. A Landing beside other sessions is just one
+    /// more session. Roots gone since the close are dropped, as at launch.
+    private func restoreShelved(key: String, replacing landing: Session?) -> Bool {
+        let isFresh = landing.map { sessions.count == 1 && sessions[0] === $0 } ?? sessions.isEmpty
+        guard isFresh, let entry = ProjectShelf.take(key) else { return false }
+        let restorable = entry.window.sessions.filter { persisted in
+            if persisted.remoteHost != nil { return true }
+            var isDir: ObjCBool = false
+            return FileManager.default.fileExists(atPath: persisted.cwd, isDirectory: &isDir) && isDir.boolValue
+        }
+        guard restorable.contains(where: \.isIDE) else { return false }
+        let window = entry.window
+        let activeId = window.sessions.indices.contains(window.activeIndex)
+            ? window.sessions[window.activeIndex].claudeSessionId : nil
+
+        RecentsStore.record(key)
+        if let landing {
+            landing.terminate()
+            landing.container.removeFromSuperview()
+            sessions.removeAll()
+            landingFromRevert = nil
+        }
+        // Anchor on the folder that was opened, not on whichever session
+        // happens to come back first (a worktree's, say).
+        if RemoteTarget.parse(key) == nil {
+            projectRoot = key
+            projectRepoRoot = WorktreeManager.repoRoot(for: key)
+            refreshMainBranch()
+        }
+        for persisted in restorable { adopt(Session(restored: persisted)) }
+        showSession(at: restorable.firstIndex { $0.claudeSessionId == activeId } ?? 0)
+        updateBottomBar()
+        return true
     }
 
     /// Dev-only (snapshot debug dump): the active session's shell wash
@@ -253,6 +314,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// landing shell's PTY is local).
     private func replaceLanding(_ landing: Session, withRemote host: String, dir: String) {
         guard let index = sessions.firstIndex(where: { $0 === landing }) else { return }
+        if restoreShelved(key: RemoteTarget(host: host, dir: dir).id, replacing: landing) { return }
         RecentsStore.record(RemoteTarget(host: host, dir: dir).id)
         landing.terminate()
         landing.container.removeFromSuperview()
@@ -283,6 +345,10 @@ final class ProjectController: NSObject, BottomBarDelegate {
         session.onRemoteRequested = { [weak self, weak session] host, dir in
             guard let self, let session else { return }
             self.replaceLanding(session, withRemote: host, dir: dir)
+        }
+        session.onPromoteRequested = { [weak self, weak session] root in
+            guard let self, let session else { return false }
+            return self.restoreShelved(key: root, replacing: session)
         }
         session.onPromoted = { [weak self, weak session] in
             guard let self else { return }
@@ -1467,6 +1533,12 @@ final class ProjectController: NSObject, BottomBarDelegate {
 
         commands.append(PaletteCommand(id: "project.new", title: "Project: New Tab", key: "⌘T") {
             (NSApp.delegate as? AppDelegate)?.newProject(nil)
+        })
+        commands.append(PaletteCommand(id: "project.close", title: "Project: Close", key: "⌥⌘W") {
+            (NSApp.delegate as? AppDelegate)?.closeProject(nil)
+        })
+        commands.append(PaletteCommand(id: "project.closeForget", title: "Project: Close and End Sessions", key: "⇧⌥⌘W") {
+            (NSApp.delegate as? AppDelegate)?.closeProjectForgetting(nil)
         })
         for (n, project) in ((NSApp.delegate as? AppDelegate)?.otherProjects(excluding: self) ?? []).enumerated() {
             commands.append(PaletteCommand(id: "project.switch.\(n)", title: "Project: Switch to \(project.title)", key: nil) {

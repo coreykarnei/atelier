@@ -55,3 +55,70 @@ enum SessionStore {
         try? data.write(to: URL(fileURLWithPath: path))
     }
 }
+
+/// Projects closed by hand, kept to come back to (2026-09-24, owner call):
+/// closing a project shelves its session tree under the folder it was opened
+/// on — the project's `projectRoot`, or a remote project's `ssh://host:dir`,
+/// the same strings the Landing offers — and opening that place again from a
+/// Landing restores the tree the way a relaunch would. `⌥`-close forgets
+/// instead: the old "I'm done with this project". Its own file beside the
+/// quit snapshot, so a quit neither drops the shelf nor restores it as tabs.
+/// No expiry: an entry is a few hundred bytes, and the Landing says when one
+/// is waiting.
+enum ProjectShelf {
+    struct Entry: Codable {
+        var window: PersistedWindow
+        var shelvedAt: Date
+    }
+
+    static var path: String {
+        "\(AtelierIPC.stateDirectory())/shelf.json"
+    }
+
+    private static func load() -> [String: Entry] {
+        guard let data = FileManager.default.contents(atPath: path) else { return [:] }
+        return (try? decoder.decode([String: Entry].self, from: data)) ?? [:]
+    }
+
+    private static func save(_ shelf: [String: Entry]) {
+        let dir = (path as NSString).deletingLastPathComponent
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(shelf) else { return }
+        try? data.write(to: URL(fileURLWithPath: path))
+    }
+
+    private static var decoder: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+
+    static func put(_ key: String, _ window: PersistedWindow) {
+        var shelf = load()
+        shelf[key] = Entry(window: window, shelvedAt: Date())
+        save(shelf)
+    }
+
+    /// Remove and return the entry — a shelved project comes back once.
+    static func take(_ key: String) -> Entry? {
+        var shelf = load()
+        guard let entry = shelf.removeValue(forKey: key) else { return nil }
+        save(shelf)
+        return entry
+    }
+
+    static func forget(_ key: String) {
+        var shelf = load()
+        guard shelf.removeValue(forKey: key) != nil else { return }
+        save(shelf)
+    }
+
+    /// How many IDE sessions wait under each key — the Landing row's
+    /// `· 3 sessions`. One read per Landing refresh.
+    static func sessionCounts() -> [String: Int] {
+        load().mapValues { $0.window.sessions.filter(\.isIDE).count }
+    }
+}

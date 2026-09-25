@@ -306,9 +306,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func windowWillClose(_ note: Notification) {
         guard let window = note.object as? NSWindow, window === workspace?.window else { return }
         NotificationCenter.default.removeObserver(self, name: NSWindow.willCloseNotification, object: window)
-        // Outside quit this is the last project closing by hand ("I closed
-        // my projects"), which kills remote work too; during quit the snapshot already promised
-        // these sessions back, so their remote side must survive.
+        // Outside quit the last project closing by hand has already torn
+        // itself down (shelved or forgotten) before the window goes, so this
+        // finds nothing; during quit the snapshot already promised these
+        // sessions back, so their remote side must survive.
         for project in projects { project.terminateAllSessions(killRemote: !isTerminating) }
         workspace = nil
     }
@@ -319,6 +320,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func closeProject(_ sender: Any?) {
         guard let workspace, let project = workspace.activeProject else { return }
         workspace.close(project)
+    }
+    /// ⇧⌥⌘W — close without shelving: every session ends, remote included.
+    @objc func closeProjectForgetting(_ sender: Any?) {
+        guard let workspace, let project = workspace.activeProject else { return }
+        workspace.close(project, forget: true)
     }
     @objc func nextProject(_ sender: Any?) { workspace?.activateNext() }
     @objc func prevProject(_ sender: Any?) { workspace?.activatePrevious() }

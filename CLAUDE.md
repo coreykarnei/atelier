@@ -416,6 +416,22 @@ is the Developer ID build until `make bundle`. Setup and failure modes (the
 own clone of the tap lives at `/opt/homebrew/Library/Taps/coreykarnei/homebrew-tap`
 — never commit there; it rebases onto GitHub on `brew update`.
 
+**Closing a project shelves it** (2026-09-24, owner call). Close Project
+(⌥⌘W, the project tab's `×`, palette) now keeps the project's session tree
+in `shelf.json` beside `session.json` (`ProjectShelf` in `SessionStore.swift`),
+keyed by the place it was opened — `projectRoot`, or `ssh://host:dir` for a
+remote project — and tears the processes down the way quit does (remote
+tmux keeps running). Opening that place again into a project that is
+nothing yet — a lone Landing's pick or ⌘↩ (`Session.onPromoteRequested`),
+a remote pick, or `atelier <path>` — restores the tree in its place with
+`--resume`, anchored on the key; the Landing row says `N sessions` first.
+The old close is **⌥-click on the `×`** (the `×` goes peach while ⌥ is held
+over the tab), **⇧⌥⌘W** / File → Close Project and End Sessions, or the
+palette: every session dies, remote included, and the entry is forgotten.
+No expiry. Test note: posted key events can't express ⇧ menu chords (they
+fall through to the unshifted item); `probe:click=x,y[,opt]` clicks with
+modifiers held, and `probe:key` now carries real letter key codes.
+
 ## Commands
 
 - `make build` — compile all targets via SwiftPM.

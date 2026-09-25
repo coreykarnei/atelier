@@ -118,6 +118,12 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// replaces this Landing with a fresh remote session in the same tab slot.
     var onRemoteRequested: ((_ host: String, _ dir: String) -> Void)?
 
+    /// Asked before a Landing promotes onto `root`; returning true means the
+    /// window controller took the pick itself (a shelved project on that
+    /// root came back in this Landing's place) and this Landing must not
+    /// promote.
+    var onPromoteRequested: ((_ root: String) -> Bool)?
+
     /// Attention changed from inside the session (the agent exited), not
     /// from a hook event — the tab strip must re-read it.
     var onAttentionChanged: (() -> Void)?
@@ -289,6 +295,7 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// spawn Claude there, switch to the Triptych. One-way; no-op if already an IDE.
     func promote(to root: String) {
         guard state == .landing else { return }
+        if onPromoteRequested?(root) == true { return }
         state = .ide
         cwd = root
         title = (root as NSString).lastPathComponent
