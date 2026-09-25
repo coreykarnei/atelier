@@ -107,3 +107,30 @@ For repeated development builds, `Scripts/make-signing-cert.sh` creates and
 trusts a self-signed code-signing identity in your login keychain. It is optional
 and intended to help permissions persist across rebuilds. Read the script before
 running it. It is not Developer ID signing or Apple notarization.
+
+## Releasing
+
+`make release` builds the zip the Homebrew cask downloads: a release build
+signed with the Developer ID (hardened runtime, secure timestamp), notarized
+by Apple and stapled, so it opens without the quarantine prompt. It writes
+`.build/dist/Atelier-<version>.zip` and prints the sha256 for the cask.
+
+One-time setup, on an Apple Developer Program account:
+
+1. A **Developer ID Application** certificate in the login keychain — Xcode →
+   Settings → Accounts → Manage Certificates → **+**.
+2. Notary credentials as a keychain profile, from an App Store Connect API key
+   (Users and Access → Integrations → Team Keys, Developer access):
+
+   ```sh
+   xcrun notarytool store-credentials atelier-notary \
+     --key ~/.appstoreconnect/AuthKey_<KEYID>.p8 --key-id <KEYID> --issuer <ISSUER-UUID>
+   ```
+
+   A 403 "required agreement is missing" means the Program License Agreement
+   needs accepting at developer.apple.com — and can take a while to take
+   effect once it has been.
+
+`DEVELOPER_ID` and `NOTARY_PROFILE` override the identity and the profile.
+Dev builds (`make bundle`) keep the self-signed identity above; after a
+release, `make bundle` returns `.build/Atelier.app` to one.

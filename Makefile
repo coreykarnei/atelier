@@ -21,6 +21,10 @@ run: bundle ## Build, bundle, and launch the app
 run-states: bundle ## Launch with one session per attention state (icon review)
 	ATELIER_DEBUG_ATTENTION=1 $(APP)/Contents/MacOS/Atelier &
 
+.PHONY: release
+release: ## Developer ID-signed, notarized, stapled zip in .build/dist (Scripts/release.sh)
+	./Scripts/release.sh
+
 .PHONY: install
 install: bundle ## Symlink Atelier.app into /Applications (Spotlight / Dock launch)
 	ln -sfn $(CURDIR)/$(APP) /Applications/Atelier.app
