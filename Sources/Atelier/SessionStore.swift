@@ -116,9 +116,19 @@ enum ProjectShelf {
         save(shelf)
     }
 
-    /// How many IDE sessions wait under each key — the Landing row's
-    /// `· 3 sessions`. One read per Landing refresh.
-    static func sessionCounts() -> [String: Int] {
-        load().mapValues { $0.window.sessions.filter(\.isIDE).count }
+    /// The IDE sessions waiting under each key, as the state each will come
+    /// back in (what `Session(restored:)` makes of it: an unseen completion
+    /// stays unseen, any other turn is your move) — the Landing row's dots.
+    /// Most recently shelved first; one read per Landing refresh.
+    static func marks() -> [(key: String, marks: [Session.Attention])] {
+        load().sorted { $0.value.shelvedAt > $1.value.shelvedAt }.map { key, entry in
+            (key, entry.window.sessions.filter(\.isIDE).map { persisted in
+                switch persisted.attention.flatMap(Session.Attention.init(rawValue:)) ?? .none {
+                case .none: return .none
+                case .doneUnseen: return .doneUnseen
+                default: return .waiting
+                }
+            })
+        }
     }
 }

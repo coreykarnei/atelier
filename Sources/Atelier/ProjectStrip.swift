@@ -31,7 +31,10 @@ struct ProjectMark: Equatable {
 /// held (the `×` goes peach to say so) for good. Gaps pass clicks through to the
 /// wash (drag to move, double-click to zoom). Each dot is a way to its
 /// session (2026-09-23, owner call): click one and the project comes
-/// forward on that session's tab.
+/// forward on that session's tab. A tab drags to reorder (2026-09-24,
+/// owner call) the way session tabs do: it rides the pointer, and trades
+/// places with a neighbour once its leading edge is a little past the
+/// neighbour's midpoint.
 ///
 /// Crowding (2026-09-16, owner call): tabs never shrink below `minTabWidth`.
 /// Past that the row keeps every tab at that width and runs off the edge —
@@ -47,6 +50,8 @@ final class ProjectStripView: NSView {
     var onNew: (() -> Void)?
     /// A dot was clicked: this project, this session.
     var onSelectSession: ((ObjectIdentifier, UUID) -> Void)?
+    /// A tab was dragged to a new place: the full row order.
+    var onReorder: (([ObjectIdentifier]) -> Void)?
 
     static let rowHeight: CGFloat = 32
     static let tabHeight: CGFloat = 26
@@ -68,6 +73,13 @@ final class ProjectStripView: NSView {
     /// Set while a selection change should scroll the active tab into view
     /// once the next layout has placed it.
     private var revealActiveAfterLayout = false
+    /// The tab under the pointer and where on it the press landed.
+    private var drag: (id: ObjectIdentifier, grabOffset: CGFloat)?
+    /// Each tab's width at the last layout — the slots a drag moves between.
+    private var tabWidth: CGFloat = 0
+    /// Past a neighbour's midpoint by this much before the two swap — the
+    /// session strip's value, so both rows feel the same under the hand.
+    private static let swapOvershoot: CGFloat = 6
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -112,6 +124,13 @@ final class ProjectStripView: NSView {
     }
 
     func update(tabs infos: [ProjectTabInfo]) {
+        var infos = infos
+        if drag != nil {
+            // Mid-drag the row's order is the pointer's, not the owner's
+            // (attention changes refresh the strip at any moment).
+            let rank = Dictionary(uniqueKeysWithValues: tabs.enumerated().map { ($1.id, $0) })
+            infos.sort { (rank[$0.id] ?? .max) < (rank[$1.id] ?? .max) }
+        }
         self.infos = infos
         var existing: [ObjectIdentifier: ProjectTabView] = [:]
         for tab in tabs { existing[tab.id] = tab }
@@ -136,6 +155,9 @@ final class ProjectStripView: NSView {
         tab.onSelect = { [weak self] in self?.onSelect?(id) }
         tab.onClose = { [weak self] forget in self?.onClose?(id, forget) }
         tab.onSelectSession = { [weak self] session in self?.onSelectSession?(id, session) }
+        tab.onDragBegan = { [weak self] tab, event in self?.dragBegan(tab, event) }
+        tab.onDragMoved = { [weak self] tab, event in self?.dragMoved(tab, event) }
+        tab.onDragEnded = { [weak self] tab in self?.dragEnded(tab) }
         tabsHost.addSubview(tab)
         return tab
     }
@@ -152,16 +174,10 @@ final class ProjectStripView: NSView {
         let count = CGFloat(tabs.count)
         let available = viewport.width - 2 * Self.inset - Self.gap * max(0, count - 1)
         let share = count > 0 ? floor(available / count) : 0
-        let tabWidth = max(Self.minTabWidth, share)
+        tabWidth = max(Self.minTabWidth, share)
         let contentWidth = count > 0 ? 2 * Self.inset + count * tabWidth + Self.gap * (count - 1) : 0
         tabsHost.frame = CGRect(x: 0, y: 0, width: max(viewport.width, contentWidth), height: viewport.height)
-
-        let y = (viewport.height - Self.tabHeight) / 2
-        var x = Self.inset
-        for tab in tabs {
-            tab.frame = CGRect(x: x, y: y, width: tabWidth, height: Self.tabHeight)
-            x += tabWidth + Self.gap
-        }
+        placeTabs(animated: false)
 
         // Layout can shrink the content under a scrolled clip; keep the
         // origin inside the document.
@@ -175,6 +191,65 @@ final class ProjectStripView: NSView {
             revealActive()
         }
         updateEdgeFade()
+    }
+
+    /// The frame of the `index`th slot in the row.
+    private func slot(_ index: Int) -> CGRect {
+        CGRect(
+            x: Self.inset + CGFloat(index) * (tabWidth + Self.gap),
+            y: (tabsHost.bounds.height - Self.tabHeight) / 2,
+            width: tabWidth,
+            height: Self.tabHeight
+        )
+    }
+
+    /// Every tab to its slot — except the one riding the pointer.
+    private func placeTabs(animated: Bool) {
+        let moving = tabs.enumerated().filter { $0.element.id != drag?.id }
+        guard animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            for (index, tab) in moving { tab.frame = slot(index) }
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.16
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            for (index, tab) in moving { tab.animator().frame = slot(index) }
+        }
+    }
+
+    // MARK: Drag to reorder
+
+    private func dragBegan(_ tab: ProjectTabView, _ event: NSEvent) {
+        let point = tabsHost.convert(event.locationInWindow, from: nil)
+        drag = (tab.id, point.x - tab.frame.minX)
+        // Above its neighbours while it travels.
+        tabsHost.addSubview(tab)
+        tab.shadow = Theme.Elevation.raisedShadow
+    }
+
+    private func dragMoved(_ tab: ProjectTabView, _ event: NSEvent) {
+        guard let drag, drag.id == tab.id, let index = tabs.firstIndex(where: { $0 === tab }) else { return }
+        let point = tabsHost.convert(event.locationInWindow, from: nil)
+        tab.frame.origin.x = min(max(point.x - drag.grabOffset, 0), tabsHost.bounds.width - tab.frame.width)
+        // One step at a time, measured against the neighbours' *slots* (their
+        // frames may still be gliding from the last swap).
+        var target = index
+        if index > 0, tab.frame.minX < slot(index - 1).midX - Self.swapOvershoot {
+            target = index - 1
+        } else if index + 1 < tabs.count, tab.frame.maxX > slot(index + 1).midX + Self.swapOvershoot {
+            target = index + 1
+        }
+        guard target != index else { return }
+        tabs.swapAt(index, target)
+        placeTabs(animated: true)
+    }
+
+    private func dragEnded(_ tab: ProjectTabView) {
+        guard drag?.id == tab.id else { return }
+        drag = nil
+        tab.shadow = nil
+        placeTabs(animated: true)
+        onReorder?(tabs.map(\.id))
     }
 
     /// Scroll the active tab fully into the viewport (nearest edge), with a
@@ -259,6 +334,11 @@ private final class ProjectTabView: NSView {
     var onSelect: (() -> Void)?
     var onClose: ((_ forget: Bool) -> Void)?
     var onSelectSession: ((UUID) -> Void)?
+    var onDragBegan: ((ProjectTabView, NSEvent) -> Void)?
+    var onDragMoved: ((ProjectTabView, NSEvent) -> Void)?
+    var onDragEnded: ((ProjectTabView) -> Void)?
+    private var pressLocation: NSPoint?
+    private var isDragging = false
 
     private let titleLabel = NSTextField(labelWithString: "")
     private let closeButton = HoverPadButton()
@@ -437,6 +517,27 @@ private final class ProjectTabView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         onSelect?()
+        pressLocation = event.locationInWindow
+        isDragging = false
+    }
+
+    /// A few points of travel turns the press into a drag, as on a session tab.
+    override func mouseDragged(with event: NSEvent) {
+        guard let press = pressLocation else { return }
+        if !isDragging {
+            guard hypot(event.locationInWindow.x - press.x, event.locationInWindow.y - press.y) > 4 else { return }
+            isDragging = true
+            onDragBegan?(self, event)
+        }
+        onDragMoved?(self, event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        pressLocation = nil
+        if isDragging {
+            isDragging = false
+            onDragEnded?(self)
+        }
     }
 
     override func accessibilityPerformPress() -> Bool { onSelect?(); return true }

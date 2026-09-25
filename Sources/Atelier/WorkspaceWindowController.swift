@@ -183,6 +183,7 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, Pro
             self.close(project, forget: forget)
         }
         strip.onNew = { (NSApp.delegate as? AppDelegate)?.newProject(nil) }
+        strip.onReorder = { [weak self] order in self?.reorder(order) }
         strip.onSelectSession = { [weak self] id, session in
             self?.projects.first(where: { ObjectIdentifier($0) == id })?.focusSession(id: session)
         }
@@ -268,6 +269,19 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, Pro
         window?.makeFirstResponder(incoming.preferredFocusView)
         incoming.didBecomeVisible()
         incoming.refreshFocusArticulation()
+        refreshStrip()
+    }
+
+    /// A project tab was dragged: take the row's order, keeping the active
+    /// project active (and so `⌘1..9` and relaunch follow the new order).
+    private func reorder(_ order: [ObjectIdentifier]) {
+        let active = activeProject
+        let rank = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
+        projects = projects.enumerated().sorted { a, b in
+            (rank[ObjectIdentifier(a.element)] ?? order.count + a.offset)
+                < (rank[ObjectIdentifier(b.element)] ?? order.count + b.offset)
+        }.map(\.element)
+        if let active, let index = projects.firstIndex(where: { $0 === active }) { activeIndex = index }
         refreshStrip()
     }
 

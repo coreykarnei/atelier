@@ -38,9 +38,9 @@ struct LandingEntry {
     let isRecent: Bool
     /// Set for remote entries: the ssh host they open on.
     var host: String? = nil
-    /// Sessions waiting on the shelf here (`ProjectShelf`): opening this row
-    /// brings them back rather than starting one fresh.
-    var shelved: Int = 0
+    /// Sessions waiting on the shelf here (`ProjectShelf`), one mark each:
+    /// opening this row brings them back rather than starting one fresh.
+    var shelved: [Session.Attention] = []
 }
 
 /// The landing pane (MILESTONE_1 §2.1). Rebuilt on the summon idiom
@@ -337,14 +337,17 @@ final class LandingView: NSView, WorkspacePane {
         onOpen?(path)
     }
 
-    /// Recents (that still exist) first, then git repos in the default folder,
+    /// Shelved projects, then recents (that still exist), then git repos in the default folder,
     /// then ssh hosts (§remote): every place you can start is one list.
     static func entries(defaultFolder: String, hosts: [String] = []) -> [LandingEntry] {
         let fm = FileManager.default
         var seen = Set<String>()
         var out: [LandingEntry] = []
 
-        for path in RecentsStore.all() {
+        // Shelved projects lead: something is waiting there, whether or not
+        // the place was ever a recent (a CLI open never records one).
+        let shelf = ProjectShelf.marks()
+        for path in shelf.map(\.key) + RecentsStore.all() {
             guard seen.insert(path).inserted else { continue }
             if let target = RemoteTarget.parse(path) {
                 // A recent on a host that left ssh config can't be opened.
@@ -374,9 +377,9 @@ final class LandingView: NSView, WorkspacePane {
             out.append(LandingEntry(name: host, path: target.id, isRecent: false, host: host))
         }
 
-        let shelf = ProjectShelf.sessionCounts()
         if !shelf.isEmpty {
-            for i in out.indices { out[i].shelved = shelf[out[i].path] ?? 0 }
+            let marks = Dictionary(shelf.map { ($0.key, $0.marks) }, uniquingKeysWith: { a, _ in a })
+            for i in out.indices { out[i].shelved = marks[out[i].path] ?? [] }
         }
         return out
     }
@@ -393,7 +396,8 @@ final class LandingView: NSView, WorkspacePane {
         }
 
         let text = NSMutableAttributedString()
-        if entry.isRecent {
+        // A shelved row's session dots already say you've been here.
+        if entry.isRecent, entry.shelved.isEmpty {
             text.append(NSAttributedString(string: "● ", attributes: [
                 .font: NSFont.systemFont(ofSize: 7),
                 .foregroundColor: Theme.accentGreen,
@@ -405,16 +409,22 @@ final class LandingView: NSView, WorkspacePane {
             .font: Theme.Typography.mono(Theme.Typography.body, weight: .medium),
             .foregroundColor: Theme.chromeText,
         ]))
-        if entry.shelved > 0 {
-            // Said in the chrome voice, not the path's: this is Atelier
-            // telling you what opening the row will do.
-            text.append(NSAttributedString(
-                string: "  \(entry.shelved) session\(entry.shelved == 1 ? "" : "s")",
-                attributes: [
-                    .font: Theme.Typography.ui(Theme.Typography.small),
-                    .foregroundColor: Theme.chromeText,
-                ]
-            ))
+        if !entry.shelved.isEmpty {
+            // The sessions opening this row brings back, one dot each in the
+            // state it returns in — the project tab's marks, before the tab
+            // exists. A session that never ran a turn has no state: a dim dot.
+            text.append(NSAttributedString(string: " ", attributes: [
+                .font: Theme.Typography.mono(Theme.Typography.body),
+            ]))
+            for attention in entry.shelved {
+                text.append(NSAttributedString(string: " ●", attributes: [
+                    .font: NSFont.systemFont(ofSize: 8),
+                    .foregroundColor: attention == .none
+                        ? Theme.chromeMutedText
+                        : Theme.attentionColor(attention),
+                    .baselineOffset: 1.5,
+                ]))
+            }
         }
         text.append(NSAttributedString(string: "  \(detail)", attributes: [
             .font: Theme.Typography.mono(Theme.Typography.small),

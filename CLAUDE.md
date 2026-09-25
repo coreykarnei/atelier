@@ -424,13 +424,21 @@ remote project — and tears the processes down the way quit does (remote
 tmux keeps running). Opening that place again into a project that is
 nothing yet — a lone Landing's pick or ⌘↩ (`Session.onPromoteRequested`),
 a remote pick, or `atelier <path>` — restores the tree in its place with
-`--resume`, anchored on the key; the Landing row says `N sessions` first.
+`--resume`, anchored on the key; shelved places lead the Landing offer
+(recent or not — a CLI open never records a recent), each row wearing one
+dot per waiting session in the state it returns in (dim: never ran a turn).
 The old close is **⌥-click on the `×`** (the `×` goes peach while ⌥ is held
 over the tab), **⇧⌥⌘W** / File → Close Project and End Sessions, or the
 palette: every session dies, remote included, and the entry is forgotten.
 No expiry. Test note: posted key events can't express ⇧ menu chords (they
 fall through to the unshifted item); `probe:click=x,y[,opt]` clicks with
 modifiers held, and `probe:key` now carries real letter key codes.
+
+**Project tabs drag to reorder** (2026-09-24, owner call), the session
+strip's feel: 4pt of travel lifts the tab (raised shadow, above its
+neighbours), it trades slots once its edge is 6pt past a neighbour's
+slot midpoint, and the drop hands the order to
+`WorkspaceWindowController.reorder` — `⌘1..9` and relaunch follow it.
 
 ## Commands
 
