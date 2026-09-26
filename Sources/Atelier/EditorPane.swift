@@ -661,23 +661,27 @@ final class EditorPane: NSView, WorkspacePane {
             return
         }
         if query.hasPrefix("probe:click=") {
-            // `probe:click=x,y[,opt][,cmd][,shift]` — one click in window
-            // points (origin bottom-left), modifiers held, posted to the queue.
+            // `probe:click=x,y[,2][,opt][,cmd][,shift]` — a click (a trailing
+            // count makes it a double-click) in window points (origin
+            // bottom-left), modifiers held, posted to the queue.
             let parts = query.dropFirst("probe:click=".count).split(separator: ",").map(String.init)
             guard parts.count >= 2, let x = Double(parts[0]), let y = Double(parts[1]),
                   let window = window ?? NSApp.windows.first(where: { $0 is AtelierWindow }) else { return }
+            let clicks = parts.dropFirst(2).compactMap { Int($0) }.first ?? 1
             var mods: NSEvent.ModifierFlags = []
             if parts.contains("opt") { mods.insert(.option) }
             if parts.contains("cmd") { mods.insert(.command) }
             if parts.contains("shift") { mods.insert(.shift) }
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
-            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-                if let event = NSEvent.mouseEvent(
-                    with: type, location: NSPoint(x: x, y: y), modifierFlags: mods,
-                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                    context: nil, eventNumber: 0, clickCount: 1, pressure: 1
-                ) { NSApp.postEvent(event, atStart: false) }
+            for count in 1...max(1, clicks) {
+                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                    if let event = NSEvent.mouseEvent(
+                        with: type, location: NSPoint(x: x, y: y), modifierFlags: mods,
+                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                        context: nil, eventNumber: 0, clickCount: count, pressure: 1
+                    ) { NSApp.postEvent(event, atStart: false) }
+                }
             }
             return
         }

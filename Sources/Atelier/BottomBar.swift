@@ -482,7 +482,9 @@ final class BottomBar: NSView {
     private func colorIndex(for groupKey: String) -> Int { tintIndex[groupKey] ?? 0 }
 
     private func tabWidth(_ info: SessionTabInfo) -> CGFloat {
-        SessionTabView.desiredWidth(for: info, isActive: info.index == activeIndex)
+        let natural = SessionTabView.desiredWidth(for: info, isActive: info.index == activeIndex)
+        guard let growth = renameGrowth, growth.id == info.id else { return natural }
+        return max(natural, growth.width)
     }
 
     /// A folder cell hugs its tabs — but never narrower than its own label
@@ -549,17 +551,7 @@ final class BottomBar: NSView {
     private func flowTabs(animated: Bool) {
         lastFlowWidth = tabsArea.bounds.width
         lastFlowHeight = tabsArea.bounds.height
-        let rowWidth = max(240, tabsArea.bounds.width)
-
-        // Group chunks: runs of consecutive tabs sharing a root.
-        var chunks: [[SessionTabInfo]] = []
-        for tab in tabs {
-            if let last = chunks.last, last.first?.groupKey == tab.groupKey {
-                chunks[chunks.count - 1].append(tab)
-            } else {
-                chunks.append([tab])
-            }
-        }
+        let chunks = groupChunks()
 
         // Folder chrome earns its place by saying where you are: the main
         // checkout alone draws bare tabs (owner call 2026-09-08), but a
@@ -572,15 +564,7 @@ final class BottomBar: NSView {
         }
         refreshTintIndex()
 
-        // Pack, reserving room on the last row for the `⎇+` — and, if
-        // anything overflowed, for the `»` too (a second pass with the wider
-        // reserve). Every group carries its own `+` inside its cell, bare or
-        // foldered, so nothing else trails the row.
-        let addReserve: CGFloat = showsWorktreeAdd ? 26 + Self.buttonGap : 0
-        var packed = pack(chunks: chunks, rowWidth: rowWidth, reserve: addReserve)
-        if !packed.overflow.isEmpty {
-            packed = pack(chunks: chunks, rowWidth: rowWidth, reserve: addReserve + 26 + Self.buttonGap)
-        }
+        let packed = packStrip(chunks)
         var rows = packed.rows
         let overflow = packed.overflow
 
@@ -617,6 +601,31 @@ final class BottomBar: NSView {
             backdropHeight?.constant = newHeight
             onDesiredHeightChange?(newHeight)
         }
+    }
+
+    /// Group chunks: runs of consecutive tabs sharing a root.
+    private func groupChunks() -> [[SessionTabInfo]] {
+        var chunks: [[SessionTabInfo]] = []
+        for tab in tabs {
+            if let last = chunks.last, last.first?.groupKey == tab.groupKey {
+                chunks[chunks.count - 1].append(tab)
+            } else {
+                chunks.append([tab])
+            }
+        }
+        return chunks
+    }
+
+    /// Pack, reserving room on the last row for the `⎇+` — and, if anything
+    /// overflowed, for the `»` too (a second pass with the wider reserve).
+    /// Every group carries its own `+` inside its cell, bare or foldered, so
+    /// nothing else trails the row.
+    private func packStrip(_ chunks: [[SessionTabInfo]]) -> (rows: [[FlowItem]], overflow: [SessionTabInfo]) {
+        let rowWidth = max(240, tabsArea.bounds.width)
+        let addReserve: CGFloat = showsWorktreeAdd ? 26 + Self.buttonGap : 0
+        let packed = pack(chunks: chunks, rowWidth: rowWidth, reserve: addReserve)
+        guard !packed.overflow.isEmpty else { return packed }
+        return pack(chunks: chunks, rowWidth: rowWidth, reserve: addReserve + 26 + Self.buttonGap)
     }
 
     /// The packing itself: whole groups jump to a fresh row rather than split;
@@ -1032,6 +1041,7 @@ final class BottomBar: NSView {
         view.onSelect = { [weak self] idx in self?.delegate?.bottomBarDidSelectSession(at: idx) }
         view.onClose = { [weak self] idx in self?.delegate?.bottomBarDidRequestCloseSession(at: idx) }
         view.onRenameCommit = { [weak self] idx, title in self?.delegate?.bottomBarDidRenameSession(at: idx, title: title) }
+        view.onRenameDraft = { [weak self] tab, text in self?.renameDraftChanged(tab, text) }
         view.onRenameEnd = { [weak self] in self?.renameDidEnd() }
         view.onDragBegan = { [weak self] tab, event in self?.dragBegan(tab, event) }
         view.onDragMoved = { [weak self] tab, event in self?.dragMoved(tab, event) }
@@ -1203,7 +1213,40 @@ final class BottomBar: NSView {
     /// Fired after an inline rename ends however it ends — the owner restores
     /// keyboard focus to the session.
     var onRenameDidEnd: (() -> Void)?
-    private func renameDidEnd() { onRenameDidEnd?() }
+    private func renameDidEnd() {
+        if renameGrowth != nil {
+            renameGrowth = nil
+            flowTabs(animated: true)
+        }
+        onRenameDidEnd?()
+    }
+
+    /// The tab being renamed and the width it holds while you type. It only
+    /// grows (owner call 2026-09-26): the first keystroke replaces the
+    /// select-all seed, and a pill that followed the draft down would yank
+    /// every neighbour left and then creep them back right a character at a
+    /// time. A shorter name settles on commit, once; Esc has nothing to undo.
+    private var renameGrowth: (id: UUID, width: CGFloat)?
+
+    private func renameDraftChanged(_ view: SessionTabView, _ text: String) {
+        guard let info = tabs.first(where: { $0.id == view.sessionId }) else { return }
+        let draft = SessionTabInfo(
+            id: info.id, index: info.index, title: text, isWorktree: info.isWorktree,
+            remoteHost: info.remoteHost, groupKey: info.groupKey, groupLabel: info.groupLabel,
+            attention: info.attention, attentionSince: info.attentionSince
+        )
+        let wanted = SessionTabView.desiredWidth(for: draft, isActive: info.index == activeIndex)
+        guard wanted > tabWidth(info) else { return }
+        let held = renameGrowth
+        renameGrowth = (info.id, wanted)
+        // Never grow the tab into the `»` menu — its view (and the field in
+        // it) would leave the row. Past the room there is, the field scrolls.
+        if packStrip(groupChunks()).overflow.contains(where: { $0.id == info.id }) {
+            renameGrowth = held
+            return
+        }
+        flowTabs(animated: true)
+    }
 
     /// §7.1 — the agent's exact state, always visible: overflowed tabs keep
     /// their ⎇ and attention marks inside the `»` menu.
@@ -1351,6 +1394,8 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
     var onRenameCommit: ((Int, String?) -> Void)?
+    /// Every keystroke of an inline rename, so the bar can widen the tab.
+    var onRenameDraft: ((SessionTabView, String) -> Void)?
     var onRenameEnd: (() -> Void)?
     var onDragBegan: ((SessionTabView, NSEvent) -> Void)?
     var onDragMoved: ((SessionTabView, NSEvent) -> Void)?
@@ -1567,6 +1612,11 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         field.removeFromSuperview()
         titleLabel.isHidden = false
         onRenameEnd?()
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        guard let field = editField else { return }
+        onRenameDraft?(self, field.stringValue)
     }
 
     func controlTextDidEndEditing(_ obj: Notification) {
