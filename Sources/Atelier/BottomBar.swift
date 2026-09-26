@@ -488,12 +488,26 @@ final class BottomBar: NSView {
     /// A folder cell hugs its tabs — but never narrower than its own label
     /// tab, so a one-tab folder still says its whole name.
     private func segmentWidth(_ tabs: [SessionTabInfo]) -> CGFloat {
-        let tabsWidth = Self.folderPadX
+        let labelWidth = tabs.first.map { FolderView.labelWidth(for: $0.groupLabel) } ?? 0
+        return max(hugWidth(tabs), labelWidth + Theme.Elevation.radiusSmall * 2)
+    }
+
+    /// The cell's width if it hugged its tabs alone.
+    private func hugWidth(_ tabs: [SessionTabInfo]) -> CGFloat {
+        Self.folderPadX
             + tabs.reduce(0) { $0 + tabWidth($1) }
             + Self.tabGap * CGFloat(max(0, tabs.count - 1))
             + Self.addLead + Self.addSlotWidth + Self.addTrail
-        let labelWidth = tabs.first.map { FolderView.labelWidth(for: $0.groupLabel) } ?? 0
-        return max(tabsWidth, labelWidth + Theme.Elevation.radiusSmall * 2)
+    }
+
+    /// Each tab's width inside a folder cell. When the label tab holds the
+    /// cell wider than its tabs, the tabs share the slack, so a short title
+    /// under a long worktree name still reaches its `+` instead of leaving
+    /// a hole in the cell.
+    private func folderTabWidths(_ tabs: [SessionTabInfo]) -> [CGFloat] {
+        let slack = segmentWidth(tabs) - hugWidth(tabs)
+        let share = tabs.isEmpty ? 0 : floor(slack / CGFloat(tabs.count))
+        return tabs.map { tabWidth($0) + share }
     }
 
     private func itemWidth(_ item: FlowItem) -> CGFloat {
@@ -866,7 +880,8 @@ final class BottomBar: NSView {
                     }
                     var tabX = x + Self.folderPadX
                     var previousTab: SessionTabInfo?
-                    for info in segment.tabs {
+                    let tabWidths = folderTabWidths(segment.tabs)
+                    for (info, tabW) in zip(segment.tabs, tabWidths) {
                         seenTabs.insert(info.id)
                         let view: SessionTabView
                         if let existing = tabViews[info.id] {
@@ -879,7 +894,6 @@ final class BottomBar: NSView {
                             arrivals.append(view)
                         }
                         view.apply(info: info, isActive: info.index == activeIndex)
-                        let tabW = tabWidth(info)
                         // The tab under the pointer follows the pointer, not the flow.
                         if drag?.id != info.id, !folderDragged {
                             placements.append((view, CGRect(x: tabX, y: tabY, width: tabW, height: Self.tabHeight)))
