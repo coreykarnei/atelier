@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17; v1.2.0 (the worktree door below) 2026-09-21; v1.3.0 (the 2026-09-23 work below — close-is-quit through drawn-row caching; `docs/releases/v1.3.0.md`) 2026-09-23; v1.4.0 (the project shelf + project-tab drag below; `docs/releases/v1.4.0.md`) 2026-09-24; v1.4.1 (a fresh prompt never titles a tab; the Landing's recent dot is gone) 2026-09-25; v1.4.2 (a folder's tabs share the width its label sets, so a short title reaches its `+`) 2026-09-26. Milestones 0, 1 and 2 built (M1.1–M1.6,
+**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17; v1.2.0 (the worktree door below) 2026-09-21; v1.3.0 (the 2026-09-23 work below — close-is-quit through drawn-row caching; `docs/releases/v1.3.0.md`) 2026-09-23; v1.4.0 (the project shelf + project-tab drag below; `docs/releases/v1.4.0.md`) 2026-09-24; v1.4.1 (a fresh prompt never titles a tab; the Landing's recent dot is gone) 2026-09-25; v1.4.2 (a folder's tabs share the width its label sets, so a short title reaches its `+`) 2026-09-26; v1.4.3 (Atelier brings its own hooks, SessionStart, Settings → Sounds — below) 2026-09-26. Milestones 0, 1 and 2 built (M1.1–M1.6,
 M2.1–M2.6 landed); polish pass (docs/POLISH_PLAN.md) built through all
 phases — 0 (foundation tokens), 1 (cockpit), 2 (distances), 3 (arrivals),
 4 (overlay physiology).** Read `VISION.md` (the
