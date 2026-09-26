@@ -460,10 +460,11 @@ a user-merged entry naming a *different* helper path fires as well, so old
 `atelier-notify` entries in `~/.claude/settings.json` must go.
 `Resources/hooks/atelier-hooks.json` is deleted; remote hosts still
 provision (`provisioned-v3` adds `SessionStart`). **Sounds:** Settings →
-Sounds (default on); `AgentHooks.userSoundHooks()` scans the user's
+Sounds (default on) is app-level — Blow/Tink and every terminal BEL
+(`FreezableTerminalView.bell`) — never a hook; `AgentHooks.userSoundHooks()` scans the user's
 Stop/Notification hooks for afplay/bell/say commands that don't mention
-`ATELIER_TAB`, and while any exist Atelier plays nothing and Settings says
-why. The dotfiles fragment now guards its afplay with
+`ATELIER_TAB`, and while any exist Atelier skips Blow/Tink (bells still
+follow the toggle) and Settings says why. The dotfiles fragment now guards its afplay with
 `[ -n "$ATELIER_TAB" ] || { …; }`. Test-harness note: a test instance
 launched from a Claude shell inherits `CLAUDE_CODE_CHILD_SESSION` (its
 agents then save no transcripts) and `ATELIER_TAB` — `env -u` them; extra

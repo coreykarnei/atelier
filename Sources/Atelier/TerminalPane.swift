@@ -30,6 +30,13 @@ class FreezableTerminalView: LocalProcessTerminalView {
         copyOnSelect = true // Ghostty parity: highlight is copy (owner call 2026-09-10)
     }
 
+    /// A BEL from either pane (a shell's bell, a `printf '\a'` hook) is one
+    /// of Atelier's sounds: Settings → Sounds off silences it with the rest.
+    override func bell(source: Terminal) {
+        guard Settings.sounds else { return }
+        super.bell(source: source)
+    }
+
     /// SwiftTerm wears the text I-beam over the whole grid; these panes are
     /// consoles, not documents — the pointer stays the arrow (owner call
     /// 2026-09-07). `resetCursorRects` is `open` in the vendored copy.

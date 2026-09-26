@@ -42,7 +42,8 @@ merged into `~/.claude/settings.json`. If they name a different helper path
 than the running app, every event arrives twice.
 
 **Sounds.** Atelier plays Blow when a turn finishes and Tink when Claude
-needs you; **Settings → Sounds** turns them off. If your own Claude settings
+needs you; **Settings → Sounds** turns them off, along with terminal bells
+in both panes. If your own Claude settings
 play a sound on `Stop` or `Notification` (an `afplay` hook, say), Atelier
 stays quiet rather than ring twice, and Settings says so. To keep that hook
 for Claude in a plain terminal and let Atelier sound inside the app, make it

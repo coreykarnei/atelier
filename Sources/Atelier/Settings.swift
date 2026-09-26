@@ -282,10 +282,9 @@ final class SettingsWindowController: NSWindowController {
     private func refreshSounds() {
         soundsToggle.state = Settings.sounds ? .on : .off
         let theirs = !AgentHooks.userSoundHooks().isEmpty
-        soundsToggle.isEnabled = !theirs
         soundsHint.stringValue = theirs
-            ? "Your Claude settings already play a sound when a turn ends, so Atelier stays quiet. To hear Atelier's, have that hook skip when ATELIER_TAB is set."
-            : "Blow when a turn finishes, Tink when Claude needs you."
+            ? "Your Claude settings already play a sound when a turn ends, so Atelier doesn't add its own. To hear Atelier's, have that hook skip when ATELIER_TAB is set. Off silences terminal bells."
+            : "Blow when a turn finishes, Tink when Claude needs you. Off also silences terminal bells."
         soundsHint.textColor = theirs ? Theme.accentPeach : Theme.chromeMutedText
     }
 
