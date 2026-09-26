@@ -28,31 +28,32 @@ open .build/Atelier.app
 `make install CONFIG=release` builds and links an optimized version. Moving or
 removing the checkout breaks that link; rebuilding updates the app it points to.
 
-## Notification hooks
+## Notifications and sounds
 
-Hooks let Claude Code report working, waiting, blocked, and completed states to
-Atelier. Launch the bundled `.app` and allow notifications when macOS asks.
+Atelier passes its Claude Code hooks to every agent it starts (`claude
+--settings`), so there is nothing to merge into `~/.claude/settings.json`.
+They report working, waiting, blocked and finished states, and follow a
+conversation through `/resume` and `/clear`. A `claude` started outside
+Atelier fires none of them. Launch the bundled `.app` and allow
+notifications when macOS asks.
 
-1. Run `make install` so `/Applications/Atelier.app` points to your build.
-2. Back up `~/.claude/settings.json` if it already exists.
-3. Merge the `hooks` entries from
-   [atelier-hooks.json](../Resources/hooks/atelier-hooks.json) into that file.
-   Preserve existing settings and hooks; do not replace the entire file or
-   create a second top-level `hooks` key.
-4. If the app is installed elsewhere, update each helper command path in the
-   example to match it. Start a new Claude session to check the setup.
+**Upgrading from 1.4.2 or earlier:** remove the `atelier-notify` entries you
+merged into `~/.claude/settings.json`. If they name a different helper path
+than the running app, every event arrives twice.
 
-The helper used by the example is
-`/Applications/Atelier.app/Contents/MacOS/atelier-notify`.
+**Sounds.** Atelier plays Blow when a turn finishes and Tink when Claude
+needs you; **Settings → Sounds** turns them off. If your own Claude settings
+play a sound on `Stop` or `Notification` (an `afplay` hook, say), Atelier
+stays quiet rather than ring twice, and Settings says so. To keep that hook
+for Claude in a plain terminal and let Atelier sound inside the app, make it
+step aside when `ATELIER_TAB` is set:
 
-Upgrading from before 2026-09-23: the `PostToolUse` / `PostToolUseFailure`
-entries call the helper with `tool`, which older helpers read as `stop` (a
-"Claude finished" banner after every tool call). Build and install the new
-app *before* merging those two entries.
+```sh
+[ -n "$ATELIER_TAB" ] || afplay /System/Library/Sounds/Blow.aiff
+```
 
 If banners are missing, check Atelier's permissions in macOS System Settings
-→ Notifications. If session indicators do not update, check that the helper
-path exists and that the hook entries are in Claude's settings.
+→ Notifications.
 
 ## Worktrees and the CLI
 

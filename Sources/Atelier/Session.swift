@@ -359,12 +359,13 @@ final class Session: NSObject, NSSplitViewDelegate {
         // Resume whenever Claude already has a transcript under this id (a
         // restored session, or a reopened one); `--session-id` on a known id
         // is refused as "already in use". Otherwise start fresh under the id.
-        let args: [String]
+        // Atelier's hooks ride the launch (`AgentHooks`), never the user's config.
+        var args = AgentHooks.launchArguments
         if Self.transcriptExists(sessionId: claudeSessionId, cwd: cwd) {
-            args = ["--resume", claudeSessionId]
+            args += ["--resume", claudeSessionId]
             agentPane.showResumingPlacard(title: displayTitle)
         } else {
-            args = ["--session-id", claudeSessionId]
+            args += ["--session-id", claudeSessionId]
         }
         agentPane.start(executable: claude, args: args, cwd: cwd, loginEnvironment: true,
                         extraEnvironment: [tabEnvironment])

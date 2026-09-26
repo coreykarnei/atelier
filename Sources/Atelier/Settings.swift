@@ -12,6 +12,7 @@ enum Settings {
     private static let worktreesKey = "worktrees.enabled"
     private static let confirmCloseKey = "close.confirm"
     private static let autosaveKey = "editor.autosave"
+    private static let soundsKey = "sessions.sounds"
 
     /// Field opacity over the behind-window blur (Theme.fieldAlpha). 0.75 is
     /// the owner's Ghostty parity value. `ATELIER_FIELD_ALPHA` still wins for
@@ -55,6 +56,16 @@ enum Settings {
         }
     }
 
+    /// Blow when a turn finishes, Tink when Claude needs you (default on).
+    static var sounds: Bool {
+        get { UserDefaults.standard.object(forKey: soundsKey) as? Bool ?? true }
+        set {
+            guard newValue != sounds else { return }
+            UserDefaults.standard.set(newValue, forKey: soundsKey)
+            NotificationCenter.default.post(name: didChange, object: nil)
+        }
+    }
+
     /// Off: `+` starts a session on the main checkout, no question asked.
     /// On: the worktree chooser appears first (MILESTONE_1 §6, revised).
     static var worktreesEnabled: Bool {
@@ -77,10 +88,12 @@ final class SettingsWindowController: NSWindowController {
     private let worktreesToggle = NSButton(checkboxWithTitle: "Enable worktrees", target: nil, action: nil)
     private let confirmCloseToggle = NSButton(checkboxWithTitle: "Ask before closing a session", target: nil, action: nil)
     private let autosaveToggle = NSButton(checkboxWithTitle: "Autosave", target: nil, action: nil)
+    private let soundsToggle = NSButton(checkboxWithTitle: "Sounds", target: nil, action: nil)
+    private let soundsHint = NSTextField(labelWithString: "")
 
     private init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 440, height: 370),
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 430),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -170,6 +183,17 @@ final class SettingsWindowController: NSWindowController {
         autosaveHint.lineBreakMode = .byWordWrapping
         autosaveHint.maximumNumberOfLines = 2
 
+        soundsToggle.attributedTitle = NSAttributedString(string: "Sounds", attributes: [
+            .font: Theme.Typography.ui(Theme.Typography.body),
+            .foregroundColor: Theme.chromeText,
+        ])
+        soundsToggle.target = self
+        soundsToggle.action = #selector(soundsChanged)
+        soundsHint.font = Theme.Typography.ui(Theme.Typography.small)
+        soundsHint.lineBreakMode = .byWordWrapping
+        soundsHint.maximumNumberOfLines = 3
+        refreshSounds()
+
         func heading(_ title: String) -> NSTextField {
             let label = NSTextField(labelWithString: title)
             label.font = Theme.Typography.ui(Theme.Typography.small, weight: .semibold)
@@ -189,7 +213,7 @@ final class SettingsWindowController: NSWindowController {
         let appearance = heading("Appearance"), editing = heading("Editing"), sessions = heading("Sessions")
         let views: [NSView] = [appearance, alphaRow, alphaSlider, alphaHint, rule1,
             editing, autosaveToggle, autosaveHint, rule2,
-            sessions, worktreesToggle, worktreesHint, confirmCloseToggle, confirmHint]
+            sessions, worktreesToggle, worktreesHint, confirmCloseToggle, confirmHint, soundsToggle, soundsHint]
         let stack = NSStackView(views: views)
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -202,12 +226,13 @@ final class SettingsWindowController: NSWindowController {
         stack.setCustomSpacing(12, after: rule1)
         stack.setCustomSpacing(12, after: rule2)
         stack.setCustomSpacing(12, after: worktreesHint)
+        stack.setCustomSpacing(12, after: confirmHint)
         stack.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(stack)
-        for view in [alphaRow, alphaSlider, alphaHint, autosaveHint, worktreesHint, confirmHint, rule1, rule2] {
+        for view in [alphaRow, alphaSlider, alphaHint, autosaveHint, worktreesHint, confirmHint, soundsHint, rule1, rule2] {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
-        for hint in [alphaHint, autosaveHint, worktreesHint, confirmHint] {
+        for hint in [alphaHint, autosaveHint, worktreesHint, confirmHint, soundsHint] {
             hint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
         NSLayoutConstraint.activate([
@@ -225,6 +250,7 @@ final class SettingsWindowController: NSWindowController {
         worktreesToggle.state = Settings.worktreesEnabled ? .on : .off
         confirmCloseToggle.state = Settings.confirmClose ? .on : .off
         refreshAlphaValue()
+        refreshSounds()
         window?.center()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
@@ -247,6 +273,22 @@ final class SettingsWindowController: NSWindowController {
         Settings.worktreesEnabled = worktreesToggle.state == .on
     }
 
+    @objc private func soundsChanged() {
+        Settings.sounds = soundsToggle.state == .on
+    }
+
+    /// The toggle, and a hint that says when Claude's own settings already
+    /// make the sound — Atelier stays quiet then rather than ring twice.
+    private func refreshSounds() {
+        soundsToggle.state = Settings.sounds ? .on : .off
+        let theirs = !AgentHooks.userSoundHooks().isEmpty
+        soundsToggle.isEnabled = !theirs
+        soundsHint.stringValue = theirs
+            ? "Your Claude settings already play a sound when a turn ends, so Atelier stays quiet. To hear Atelier's, have that hook skip when ATELIER_TAB is set."
+            : "Blow when a turn finishes, Tink when Claude needs you."
+        soundsHint.textColor = theirs ? Theme.accentPeach : Theme.chromeMutedText
+    }
+
     @objc private func autosaveChanged() {
         Settings.autosave = autosaveToggle.state == .on
     }
@@ -258,5 +300,6 @@ final class SettingsWindowController: NSWindowController {
         autosaveToggle.state = Settings.autosave ? .on : .off
         worktreesToggle.state = Settings.worktreesEnabled ? .on : .off
         confirmCloseToggle.state = Settings.confirmClose ? .on : .off
+        refreshSounds()
     }
 }

@@ -28,7 +28,7 @@ source history; the instructions below build the app locally.
   command brings the same workflow to your shell.
 - **Copy you can use.** Agent selections use Claude's saved transcript to
   recover Markdown without terminal wrapping and gutter indentation.
-- **Know when to come back.** Notification hooks update session indicators
+- **Know when to come back.** Claude's hooks, wired in by Atelier, update session indicators
   and the Dock badge. Click a notification to return to its session.
 - **Continue where you left off.** Atelier restores projects and sessions on
   relaunch and resumes Claude conversations. Remote shell and agent sessions
@@ -64,7 +64,7 @@ make install
 
 This creates a symlink to the build in this checkout, rather than copying the
 app. Keep the checkout in place. See the [setup guide](docs/SETUP.md) for
-notification hooks, the optional CLI, language servers, and remote sessions.
+notifications and sounds, the optional CLI, language servers, and remote sessions.
 
 Local builds use ad-hoc signing or a local development certificate. Release
 zips (`make release`, the build the Homebrew cask ships) are Developer

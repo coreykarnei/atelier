@@ -37,6 +37,9 @@ KINDS = {
     # (the one signal after an approved permission prompt). Main agent only.
     "tool": ("working", "", ""),
     "prompt": ("working", "", ""),
+    # SessionStart — launch, /resume, /clear: the tab follows the new
+    # conversation id. Tab state only.
+    "session": ("session", "", ""),
     "stop": ("stop", "Claude finished", "The agent completed its turn."),
 }
 

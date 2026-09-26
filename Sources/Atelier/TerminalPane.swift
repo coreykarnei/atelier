@@ -412,6 +412,11 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
                extraEnvironment: [String] = []) {
         let terminalEnv = Terminal.getEnvironmentVariables(termName: "xterm-256color")
         var env = loginEnvironment ? LoginEnvironment.entries(overriding: terminalEnv) : terminalEnv
+        // Extras replace, never duplicate: an app launched from inside
+        // another Atelier's pane inherits that pane's ATELIER_TAB, and a
+        // second copy leaves getenv reading the first.
+        let overridden = Set(extraEnvironment.compactMap { $0.split(separator: "=", maxSplits: 1).first })
+        env.removeAll { $0.split(separator: "=", maxSplits: 1).first.map(overridden.contains) ?? false }
         env.append(contentsOf: extraEnvironment)
         if let cwd {
             // The spawned child inherits the parent's working directory; set it here

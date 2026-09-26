@@ -448,6 +448,29 @@ once if the transcript was already that old when first read (a restored
 conversation that never got a summary). The Landing's green recent dot is
 gone too — a dot means a session's state, nothing else.
 
+**Atelier brings its own hooks; one sound per event** (2026-09-26, owner
+call: a host shouldn't need its guest's config edited). Every local agent is
+spawned with `claude --settings <json>` (`AgentHooks.launchArguments`) naming
+this bundle's `atelier-notify` for Stop, both Notification matchers,
+UserPromptSubmit, PostToolUse(Failure) — and the new `SessionStart` →
+`session` verb, so `/resume` and `/clear` move the tab (title included) the
+moment they happen, not at the next prompt. Verified: `--settings` hooks
+merge with the user's own, and an identical command string runs once — but
+a user-merged entry naming a *different* helper path fires as well, so old
+`atelier-notify` entries in `~/.claude/settings.json` must go.
+`Resources/hooks/atelier-hooks.json` is deleted; remote hosts still
+provision (`provisioned-v3` adds `SessionStart`). **Sounds:** Settings →
+Sounds (default on); `AgentHooks.userSoundHooks()` scans the user's
+Stop/Notification hooks for afplay/bell/say commands that don't mention
+`ATELIER_TAB`, and while any exist Atelier plays nothing and Settings says
+why. The dotfiles fragment now guards its afplay with
+`[ -n "$ATELIER_TAB" ] || { …; }`. Test-harness note: a test instance
+launched from a Claude shell inherits `CLAUDE_CODE_CHILD_SESSION` (its
+agents then save no transcripts) and `ATELIER_TAB` — `env -u` them; extra
+env entries now replace, not duplicate (`TerminalPane.start`). A new folder
+shows Claude's trust prompt before any hook fires: `probe:type=\u001b[B`
+picks "Yes". `probe:key=comma,cmd` opens Settings.
+
 ## Commands
 
 - `make build` — compile all targets via SwiftPM.
@@ -459,9 +482,8 @@ gone too — a dot means a session's state, nothing else.
   (see *Releases are Developer ID-signed* above).
 
 Notifications need a real `.app` launch (`make run`/`open`) for the bundle identity
-UNUserNotification requires — and a one-time permission grant. To enable agent
-notifications, merge `Resources/hooks/atelier-hooks.json` into
-`~/.claude/settings.json` (same manual-merge pattern as the dotfiles fragment).
+UNUserNotification requires — and a one-time permission grant. Agent hooks
+need no setup: Atelier passes them to every agent it spawns (`AgentHooks`).
 
 ## What Atelier is
 

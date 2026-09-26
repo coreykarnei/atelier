@@ -45,6 +45,7 @@ public struct NotifyMessage: Codable {
         case inputNeeded   // agent idles for the next prompt (waiting — your move)
         case blocked       // agent explicitly blocked: permission or question (the `!`)
         case working       // agent began a turn (tab state only, no banner)
+        case session       // a conversation began under the agent: launch, /resume, /clear (tab state only)
     }
 
     public let kind: Kind

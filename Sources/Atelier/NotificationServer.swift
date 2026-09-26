@@ -127,14 +127,20 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
         NSLog("Atelier: notify received kind=\(msg.kind.rawValue) session=\(msg.sessionId ?? "-")")
         onAgentEvent?(msg)
 
-        // `working` is tab-state only — no banner for "you pressed Enter."
-        guard msg.kind != .working else { return }
+        // `working` and `session` are tab state only — no banner for "you
+        // pressed Enter" or "a conversation opened."
+        guard msg.kind != .working, msg.kind != .session else { return }
 
         // The sound vocabulary the dotfiles IDE used (POLISH_PLAN §7, resolved
         // 2026-09-16): Blow = finished, Tink = needs you. One audio path — the
         // app plays it, the banner stays silent — so it's heard whether or not
         // banners are authorised, and for remote sessions it sounds *here*.
-        Self.sound(for: msg.kind)?.play()
+        // Settings → Sounds turns it off; a sound hook of the user's own
+        // that still fires under Atelier turns it off too, so a turn never
+        // rings twice (`AgentHooks.userSoundHooks`).
+        if Settings.sounds, AgentHooks.userSoundHooks().isEmpty {
+            Self.sound(for: msg.kind)?.play()
+        }
 
         let content = UNMutableNotificationContent()
         content.title = msg.title
@@ -153,7 +159,7 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
         switch kind {
         case .stop: return NSSound(named: "Blow")
         case .blocked, .inputNeeded: return NSSound(named: "Tink")
-        case .working: return nil
+        case .working, .session: return nil
         }
     }
 

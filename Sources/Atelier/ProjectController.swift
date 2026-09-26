@@ -1055,6 +1055,12 @@ final class ProjectController: NSObject, BottomBarDelegate {
         if byTab != nil { sessions[index].adoptConversation(sessionId) }
         let onScreen = index == activeIndex && isActive && (window?.isKeyWindow ?? false)
         switch message.kind {
+        case .session:
+            // The conversation changed under the tab (adopted above) or began;
+            // the dot is untouched. Read the new transcript's title now, not
+            // on the next beat.
+            refreshTitles()
+            return true
         case .working:
             sessions[index].attention = .working
         case .blocked:

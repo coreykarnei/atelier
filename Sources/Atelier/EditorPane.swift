@@ -641,7 +641,7 @@ final class EditorPane: NSView, WorkspacePane {
             let named: [String: (String, UInt16)] = [
                 "\\r": ("\r", 36), "\\e": ("\u{1b}", 53),
                 "down": ("\u{F701}", 125), "up": ("\u{F700}", 126),
-                "tab": ("\t", 48), "space": (" ", 49),
+                "tab": ("\t", 48), "space": (" ", 49), "comma": (",", 43),
             ]
             // ANSI key codes for letters: AppKit resolves shifted menu
             // chords (⇧⌥⌘W) from the key code, so code 0 (`a`) never matches.
