@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17; v1.2.0 (the worktree door below) 2026-09-21; v1.3.0 (the 2026-09-23 work below — close-is-quit through drawn-row caching; `docs/releases/v1.3.0.md`) 2026-09-23; v1.4.0 (the project shelf + project-tab drag below; `docs/releases/v1.4.0.md`) 2026-09-24; v1.4.1 (a fresh prompt never titles a tab; the Landing's recent dot is gone) 2026-09-25; v1.4.2 (a folder's tabs share the width its label sets, so a short title reaches its `+`) 2026-09-26; v1.4.3 (Atelier brings its own hooks, SessionStart, Settings → Sounds — below) 2026-09-26; v1.4.4 (an inline rename widens its tab as you type, grow-only) 2026-09-26. Milestones 0, 1 and 2 built (M1.1–M1.6,
+**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17; v1.2.0 (the worktree door below) 2026-09-21; v1.3.0 (the 2026-09-23 work below — close-is-quit through drawn-row caching; `docs/releases/v1.3.0.md`) 2026-09-23; v1.4.0 (the project shelf + project-tab drag below; `docs/releases/v1.4.0.md`) 2026-09-24; v1.4.1 (a fresh prompt never titles a tab; the Landing's recent dot is gone) 2026-09-25; v1.4.2 (a folder's tabs share the width its label sets, so a short title reaches its `+`) 2026-09-26; v1.4.3 (Atelier brings its own hooks, SessionStart, Settings → Sounds — below) 2026-09-26; v1.4.4 (an inline rename widens its tab as you type, grow-only) 2026-09-26; v1.4.5 (⌘-clicking a path opens the file — below) 2026-09-30. Milestones 0, 1 and 2 built (M1.1–M1.6,
 M2.1–M2.6 landed); polish pass (docs/POLISH_PLAN.md) built through all
 phases — 0 (foundation tokens), 1 (cockpit), 2 (distances), 3 (arrivals),
 4 (overlay physiology).** Read `VISION.md` (the
@@ -471,6 +471,23 @@ agents then save no transcripts) and `ATELIER_TAB` — `env -u` them; extra
 env entries now replace, not duplicate (`TerminalPane.start`). A new folder
 shows Claude's trust prompt before any hook fires: `probe:type=\u001b[B`
 picks "Yes". `probe:key=comma,cmd` opens Settings.
+
+**⌘-clicking a path opens the file** (2026-09-30, v1.4.5, owner report:
+"The application can't be opened. -50"). SwiftTerm's implicit links match
+bare paths, and its default opener made them scheme-less URLs that
+LaunchServices refuses. SwiftTerm patch 11: `TerminalView.openLink` opens
+a URL some app claims as itself, else `fileURL(forLink:)` resolves a path
+— `~`, relative against `linkBaseDirectory` (OSC 7, else the pane
+process's cwd via `proc_pidinfo`, so the shell's links follow `cd`),
+shedding `:line[:col]`/trailing punctuation — and opens it in its default
+app only if it exists. Remote panes set `opensPathLinks = false`. Probes:
+`probe:shell=<text>` types into the shell pane;
+`probe:link=<agent|shell>,row,col[,click]` writes the link at a cell and
+its resolved file to probe.txt, and can ⌘-click it — activate the window
+with a plain `probe:click` first, or the posted click is spent on
+activation. Test-harness note: `osascript` to another app from a shell
+inside Atelier raises an Automation prompt billed to Atelier — check
+processes with `pgrep`/`lsof`, not AppleScript.
 
 ## Commands
 
