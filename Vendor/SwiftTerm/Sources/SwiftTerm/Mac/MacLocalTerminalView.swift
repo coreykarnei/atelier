@@ -122,7 +122,21 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate, LocalPr
     public func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
         processDelegate?.hostCurrentDirectoryUpdate(source: source, directory: directory)
     }
-    
+
+    /// Most shells send no OSC 7 unless configured to, so the child's own
+    /// working directory stands in — for a shell, wherever it last `cd`'d.
+    open override var linkBaseDirectory: String? {
+        if let reported = super.linkBaseDirectory { return reported }
+        guard let process, process.running, process.shellPid > 0 else { return nil }
+        var info = proc_vnodepathinfo()
+        let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
+        guard proc_pidinfo(process.shellPid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
+        let path = withUnsafeBytes(of: info.pvi_cdir.vip_path) { raw in
+            String(decoding: raw.prefix(while: { $0 != 0 }), as: UTF8.self)
+        }
+        return path.isEmpty ? nil : path
+    }
+
 
     /**
      * This method is invoked when input from the user needs to be sent to the client

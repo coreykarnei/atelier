@@ -510,6 +510,44 @@ final class EditorPane: NSView, WorkspacePane {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { agent.send(txt: "\u{1b}[13u") }
             return
         }
+        if query.hasPrefix("probe:shell=") {
+            // `probe:shell=<text>` — the text, then a Return, into the shell
+            // pane (the leftmost visible terminal).
+            guard let shell = Self.probeTerminals(in: window).filter({ !$0.isHiddenOrHasHiddenAncestor })
+                .min(by: { Self.probeX($0) < Self.probeX($1) }) else { return }
+            shell.send(txt: String(query.dropFirst("probe:shell=".count)) + "\r")
+            return
+        }
+        if query.hasPrefix("probe:link=") {
+            // `probe:link=<agent|shell>,row,col[,click]` — writes the link at
+            // that screen cell and the file it resolves to to probe.txt;
+            // `click` then ⌘-clicks the cell, posted like `probe:click`.
+            let parts = query.dropFirst("probe:link=".count).split(separator: ",").map(String.init)
+            guard parts.count >= 3, let row = Int(parts[1]), let col = Int(parts[2]),
+                  let window = window ?? NSApp.windows.first(where: { $0 is AtelierWindow }) else { return }
+            let panes = Self.probeTerminals(in: window).filter { !$0.isHiddenOrHasHiddenAncestor }
+                .sorted { Self.probeX($0) < Self.probeX($1) }
+            guard let pane = parts[0] == "agent" ? panes.last : panes.first else { return }
+            let link = pane.getTerminal().link(at: .screen(Position(col: col, row: row)), mode: .explicitAndImplicit)
+            let resolved = link.flatMap { pane.fileURL(forLink: $0) }
+            let report = "link=\(link ?? "nil") file=\(resolved?.path ?? "nil") base=\(pane.linkBaseDirectory ?? "nil")\n"
+            try? report.write(toFile: NSHomeDirectory() + "/.local/state/atelier/probe.txt", atomically: true, encoding: .utf8)
+            guard parts.contains("click") else { return }
+            let grid = pane.getOptimalFrameSize()
+            let cell = CGSize(width: grid.width / CGFloat(pane.getTerminal().cols),
+                              height: grid.height / CGFloat(pane.getTerminal().rows))
+            let point = pane.convert(NSPoint(x: (CGFloat(col) + 0.5) * cell.width,
+                                             y: pane.frame.height - (CGFloat(row) + 0.5) * cell.height), to: nil)
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                if let event = NSEvent.mouseEvent(
+                    with: type, location: point, modifierFlags: .command, timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+                ) { NSApp.postEvent(event, atStart: false) }
+            }
+            return
+        }
         if query.hasPrefix("probe:scroll=") {
             // `probe:scroll=<agent|shell>,ticks,dy` — `ticks` real wheel events
             // (continuous, `dy` pixels each) posted to this process at 60Hz over

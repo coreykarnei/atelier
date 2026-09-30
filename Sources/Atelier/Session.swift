@@ -458,6 +458,8 @@ final class Session: NSObject, NSSplitViewDelegate {
             guard let self, let pane else { return }
             self.remotePaneExited(pane, host: host, argv: argv, code: code)
         }
+        // A path printed here names a file on the host, not this Mac.
+        pane.terminal.opensPathLinks = false
         pane.start(executable: RemoteCommand.sshPath, args: argv, cwd: nil)
     }
 

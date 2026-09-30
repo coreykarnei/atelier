@@ -77,3 +77,18 @@ a PR; when one lands, drop it here and note the version.
     placeholders bypass it. Measured scrolling Claude's pane: ~22ms → 12–15ms
     per draw. `RowRenderCache.isEnabled` switches it (A/B), and
     `TerminalView.drawObserver` reports each draw's duration.
+11. **Path links open as files** (`Mac/MacTerminalView.swift`,
+    `Mac/MacLocalTerminalView.swift`; owner report 2026-09-27: ⌘-clicking a
+    file or image path raised "The application can't be opened. -50").
+    Implicit link detection matches bare paths — `/tmp/x.png`,
+    `src/main.rs:12:4`, `~/notes.md` — and the default `requestOpenLink` fed
+    every link to `URL(string:)`, which makes a scheme-less URL that
+    LaunchServices refuses with paramErr. `TerminalView.openLink(_:)` is the
+    default now: a URL some app can open opens as itself; anything else goes
+    through `fileURL(forLink:)`, which expands `~`, resolves a relative path
+    against `linkBaseDirectory`, sheds a trailing `:line[:col]` or prose
+    punctuation when the whole text names nothing, and opens only a path
+    that exists. `linkBaseDirectory` is the OSC 7 directory; the local-process
+    view falls back to its child's cwd (`proc_pidinfo`), so a shell's
+    relative paths follow its `cd`. `opensPathLinks` lets a host whose
+    process runs elsewhere (ssh) keep paths from resolving on this machine.

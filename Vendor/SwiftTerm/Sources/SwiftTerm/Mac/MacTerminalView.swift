@@ -2028,7 +2028,20 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     /// When set, finishing a mouse selection (drag, double- or triple-click)
     /// copies it via `copy(_:)` — Ghostty's `copy-on-select = clipboard`.
     public var copyOnSelect: Bool = false
-    
+
+    /// Where a relative path link (`src/main.rs`) is looked up: the directory
+    /// the host last reported with OSC 7. `LocalProcessTerminalView` falls
+    /// back to its child's working directory.
+    open var linkBaseDirectory: String? {
+        guard let reported = terminal.hostCurrentDirectory else { return nil }
+        if let url = URL(string: reported), url.isFileURL { return url.path }
+        return reported.hasPrefix("/") ? reported : nil
+    }
+
+    /// Whether path links name files on this machine. A host whose process
+    /// runs elsewhere (ssh) turns this off; links with a scheme still open.
+    public var opensPathLinks: Bool = true
+
     public override func mouseUp(with event: NSEvent) {
         let hit = calculateMouseHit(with: event).grid
         updateHoverLink(at: hit, commandOverride: commandActive || event.modifierFlags.contains(.command))
@@ -2506,14 +2519,58 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
 }
 
 
+extension TerminalView {
+    /// The file a path link names, if it exists: absolute, `~`-rooted, or
+    /// relative to `linkBaseDirectory`. Implicit detection keeps what compiler
+    /// and prose output put after a path — `:line[:col]`, a closing `.` — so
+    /// those come off when the whole text names nothing.
+    public func fileURL(forLink link: String) -> URL? {
+        guard opensPathLinks else { return nil }
+        var candidates = [link.trimmingCharacters(in: .whitespaces)]
+        for suffix in [#"[.,;:]+$"#, #"(:\d+){1,2}$"#] {
+            let last = candidates[candidates.count - 1]
+            if let range = last.range(of: suffix, options: .regularExpression), range.lowerBound > last.startIndex {
+                candidates.append(String(last[..<range.lowerBound]))
+            }
+        }
+        let base = linkBaseDirectory
+        for candidate in candidates where !candidate.isEmpty {
+            var path = (candidate as NSString).expandingTildeInPath
+            if !path.hasPrefix("/") {
+                guard let base else { return nil }
+                path = (base as NSString).appendingPathComponent(path)
+            }
+            if FileManager.default.fileExists(atPath: path) {
+                return URL(fileURLWithPath: path).standardizedFileURL
+            }
+        }
+        return nil
+    }
+
+    /// What a link click does unless the delegate decides otherwise: a URL
+    /// some app can open opens as itself, and anything else is a path, opened
+    /// if `fileURL(forLink:)` finds it. (A bare path used to go straight to
+    /// `URL(string:)` — a scheme-less URL LaunchServices refuses with -50.)
+    public func openLink(_ link: String) {
+        if let url = URL(string: link), url.scheme != nil {
+            let target = url.isFileURL ? URL(fileURLWithPath: url.path) : url
+            if NSWorkspace.shared.urlForApplication(toOpen: target) != nil {
+                NSWorkspace.shared.open(target)
+                return
+            }
+        }
+        if let url = fileURL(forLink: link) {
+            NSWorkspace.shared.open(url)
+        }
+    }
+}
+
 // Default implementations for TerminalViewDelegate
 
 extension TerminalViewDelegate {
     public func requestOpenLink (source: TerminalView, link: String, params: [String:String])
     {
-        if let url = URL(string: link) {
-            NSWorkspace.shared.open(url)
-        }
+        source.openLink(link)
     }
     
     public func bell (source: TerminalView)
