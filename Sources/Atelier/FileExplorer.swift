@@ -259,8 +259,12 @@ final class FileExplorerView: NSView {
             guard let self else { return }
             let row = self.outline.row(forItem: node)
             guard row >= 0 else { return }
+            // Land the folder in its slot, just under its pinned parents,
+            // where its own row takes over from the pinned one.
             let rect = self.outline.rect(ofRow: row)
-            self.scroll.contentView.scroll(to: NSPoint(x: 0, y: rect.minY - self.scroll.contentInsets.top))
+            let level = CGFloat(self.outline.level(forItem: node))
+            let y = level == 0 ? rect.minY - self.scroll.contentInsets.top : rect.minY - level * self.outline.rowHeight
+            self.scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
             self.scroll.reflectScrolledClipView(self.scroll.contentView)
         }
         addSubview(scroll)
@@ -462,7 +466,8 @@ final class FileExplorerView: NSView {
             + "header=\(header.frame) host=\(searchHost.frame) search=\(search.frame) rows=\(fileRows.count)+\(textRows.count) "
             + "tree=\(scroll.frame) treeHidden=\(scroll.isHidden) sticky=\(sticky.frame) stickyHidden=\(sticky.isHidden) "
             + "clipY=\(scroll.contentView.bounds.minY) topRow=\(outline.row(at: NSPoint(x: 1, y: scroll.contentView.bounds.minY + 1))) "
-            + "chain=\(stickyAncestors(under: 0).map(\.name)) insetTop=\(scroll.contentInsets.top)"
+            + "chain=\(stickyChain().map { "\($0.node.name)@\($0.top - scroll.contentView.bounds.minY)" }) "
+            + "insetTop=\(scroll.contentInsets.top)"
     }
 
     /// Dev-only (snapshots): open the panel and type `query`; trailing `↓`
@@ -630,40 +635,65 @@ final class FileExplorerView: NSView {
 
     @objc private func treeScrolled() { updateSticky() }
 
-    /// The ancestors of the row under the sticky stack, root-most first.
-    /// Two passes: the stack's own height changes which row is "under" it.
-    /// Ancestors of the row at `stackHeight` below the clip's top, root-most
-    /// first, keeping only those whose own row has scrolled above that point.
-    private func stickyAncestors(under stackHeight: CGFloat) -> [FileNode] {
-        let y = scroll.contentView.bounds.minY + stackHeight + 1
-        let row = outline.row(at: NSPoint(x: 1, y: y))
-        guard row >= 0, let item = outline.item(atRow: row) else { return [] }
-        var chain: [FileNode] = []
-        var node: Any? = outline.parent(forItem: item)
-        while let parent = node as? FileNode {
-            chain.insert(parent, at: 0)
-            node = outline.parent(forItem: parent)
+    /// The pinned folders, root-most first, each with the top it's drawn at
+    /// (tree coordinates) — CSS `position: sticky` within the folder's own
+    /// subtree. An open folder's row stops at its slot (the top edge, or just
+    /// under its pinned parent) the moment it reaches it, so it never pops
+    /// in; it leaves pushed up by its own last visible row, sliding under
+    /// its parent.
+    private func stickyChain() -> [(node: FileNode, top: CGFloat)] {
+        let rowHeight = outline.rowHeight
+        var chain: [(node: FileNode, top: CGFloat)] = []
+        var slot = scroll.contentView.bounds.minY
+        while true {
+            // The row under the slot, and its path from the top level down.
+            let row = outline.row(at: NSPoint(x: 1, y: slot + 0.5))
+            guard row >= 0, let item = outline.item(atRow: row) as? FileNode else { break }
+            var path = [item]
+            while let parent = outline.parent(forItem: path[0]) as? FileNode { path.insert(parent, at: 0) }
+            guard chain.count < path.count else { break }
+            // Past the last pinned folder's subtree: nothing deeper sticks.
+            if let last = chain.last, path[chain.count - 1] !== last.node { break }
+            let folder = path[chain.count]
+            guard folder.isDirectory, outline.isItemExpanded(folder) else { break }
+            let rowTop = outline.rect(ofRow: outline.row(forItem: folder)).minY
+            let top = min(slot, subtreeBottom(of: folder) - rowHeight)
+            // Still at or below its slot: the tree's own row shows it.
+            guard top > rowTop else { break }
+            chain.append((folder, top))
+            slot = top + rowHeight
         }
-        return chain.filter { outline.rect(ofRow: outline.row(forItem: $0)).minY < y }
+        return chain
+    }
+
+    /// The bottom edge of a folder's last visible row — where its subtree ends.
+    private func subtreeBottom(of folder: FileNode) -> CGFloat {
+        var last: Any = folder
+        while outline.isItemExpanded(last) {
+            let count = outline.numberOfChildren(ofItem: last)
+            guard count > 0, let child = outline.child(count - 1, ofItem: last) else { break }
+            last = child
+        }
+        return outline.rect(ofRow: outline.row(forItem: last)).maxY
     }
 
     private func updateSticky() {
         guard !scroll.isHidden, !isCollapsed, !isSearchOpen, rootNode != nil else { sticky.isHidden = true; return }
         measureChevronBase()
         let rowHeight = outline.rowHeight
-        let ancestors = stickyAncestors(under:)
-        var chain = ancestors(0)
-        chain = ancestors(CGFloat(chain.count) * rowHeight)
-        guard !chain.isEmpty, scroll.contentView.bounds.minY > -scroll.contentInsets.top + 1 else {
+        let clipTop = scroll.contentView.bounds.minY
+        let chain = stickyChain()
+        // Tops only grow down the chain, so the last row's bottom is the stack's.
+        guard let last = chain.last, last.top + rowHeight - clipTop > 0 else {
             sticky.isHidden = true
             return
         }
         sticky.isHidden = false
-        let stackHeight = sticky.show(chain.map { node in
-            (node, outline.level(forItem: node), isIgnored(node.path))
+        // NSScrollView is flipped (unlike NSView): its top edge is y = 0.
+        sticky.frame = NSRect(x: 0, y: 0, width: scroll.bounds.width, height: last.top + rowHeight - clipTop + 1)
+        sticky.show(chain.map { entry in
+            (entry.node, outline.level(forItem: entry.node), isIgnored(entry.node.path), entry.top - clipTop)
         }, rowHeight: rowHeight, step: outline.indentationPerLevel, chevronBaseX: chevronBaseX)
-        // NSScrollView isn't flipped: the top edge is at bounds.maxY.
-        sticky.frame = NSRect(x: 0, y: scroll.bounds.height - stackHeight, width: scroll.bounds.width, height: stackHeight)
     }
 
     // MARK: Context menu (M2.6: new file / folder, rename, trash, reveal, copy path)
@@ -1314,11 +1344,13 @@ private final class StickyFolderStack: NSView {
     /// Opaque crust: the rows scroll on underneath, and a translucent strip
     /// would show their text through the pinned names. The one place the
     /// sidebar gives up its blur, on purpose.
-    private static var fill: CGColor { Theme.Elevation.crust.withAlphaComponent(1).cgColor }
+    fileprivate static var fill: CGColor { Theme.Elevation.crust.withAlphaComponent(1).cgColor }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        // A row being pushed out runs past the top edge.
+        clipsToBounds = true
         layer?.backgroundColor = Self.fill
         hairline.wantsLayer = true
         hairline.layer?.backgroundColor = Theme.Elevation.hairline.cgColor
@@ -1332,27 +1364,26 @@ private final class StickyFolderStack: NSView {
         layer?.backgroundColor = Self.fill
     }
 
-    /// Lay the chain out top-down; returns the stack's height (rows + hairline).
-    @discardableResult
-    func show(_ chain: [(node: FileNode, level: Int, dimmed: Bool)], rowHeight: CGFloat, step: CGFloat, chevronBaseX: CGFloat) -> CGFloat {
+    /// Lay the chain out at each row's own `y`; the hairline follows the last.
+    func show(_ chain: [(node: FileNode, level: Int, dimmed: Bool, y: CGFloat)], rowHeight: CGFloat, step: CGFloat, chevronBaseX: CGFloat) {
         while rows.count < chain.count {
             let row = StickyRow(frame: .zero)
             row.onClick = { [weak self] node in self?.onJump?(node) }
-            addSubview(row, positioned: .below, relativeTo: hairline)
+            // Each deeper row beneath the one before: a pushed child slides
+            // under its parent.
+            addSubview(row, positioned: .below, relativeTo: rows.last ?? hairline)
             rows.append(row)
         }
-        let height = rowHeight * CGFloat(chain.count) + 1
         for (index, row) in rows.enumerated() {
             guard index < chain.count else { row.isHidden = true; continue }
             row.isHidden = false
             let entry = chain[index]
-            row.frame = NSRect(x: 0, y: rowHeight * CGFloat(index), width: bounds.width, height: rowHeight)
+            row.frame = NSRect(x: 0, y: entry.y, width: bounds.width, height: rowHeight)
             row.autoresizingMask = [.width]
             row.configure(node: entry.node, level: entry.level, step: step, base: chevronBaseX, dimmed: entry.dimmed)
         }
-        hairline.frame = NSRect(x: 0, y: height - 1, width: bounds.width, height: 1)
+        hairline.frame = NSRect(x: 0, y: (chain.last?.y ?? 0) + rowHeight, width: bounds.width, height: 1)
         hairline.autoresizingMask = [.width]
-        return height
     }
 }
 
@@ -1391,6 +1422,10 @@ private final class StickyRow: NSView {
         self.step = step
         self.base = base
         needsDisplay = true
+        // Its own crust, not just the stack's: a child pushed out slides
+        // beneath this row and must not read through it.
+        wantsLayer = true
+        layer?.backgroundColor = StickyFolderStack.fill
         let muted = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
             .applying(.init(paletteColors: [Theme.chromeMutedText]))
         chevron.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?.withSymbolConfiguration(muted)
