@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17; v1.2.0 (the worktree door below) 2026-09-21; v1.3.0 (the 2026-09-23 work below — close-is-quit through drawn-row caching; `docs/releases/v1.3.0.md`) 2026-09-23; v1.4.0 (the project shelf + project-tab drag below; `docs/releases/v1.4.0.md`) 2026-09-24; v1.4.1 (a fresh prompt never titles a tab; the Landing's recent dot is gone) 2026-09-25; v1.4.2 (a folder's tabs share the width its label sets, so a short title reaches its `+`) 2026-09-26; v1.4.3 (Atelier brings its own hooks, SessionStart, Settings → Sounds — below) 2026-09-26; v1.4.4 (an inline rename widens its tab as you type, grow-only) 2026-09-26; v1.4.5 (⌘-clicking a path opens the file — below) 2026-09-30; v1.4.6 (pinned folders sit at the top and slide — below) 2026-10-01. Milestones 0, 1 and 2 built (M1.1–M1.6,
+**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17; v1.2.0 (the worktree door below) 2026-09-21; v1.3.0 (the 2026-09-23 work below — close-is-quit through drawn-row caching; `docs/releases/v1.3.0.md`) 2026-09-23; v1.4.0 (the project shelf + project-tab drag below; `docs/releases/v1.4.0.md`) 2026-09-24; v1.4.1 (a fresh prompt never titles a tab; the Landing's recent dot is gone) 2026-09-25; v1.4.2 (a folder's tabs share the width its label sets, so a short title reaches its `+`) 2026-09-26; v1.4.3 (Atelier brings its own hooks, SessionStart, Settings → Sounds — below) 2026-09-26; v1.4.4 (an inline rename widens its tab as you type, grow-only) 2026-09-26; v1.4.5 (⌘-clicking a path opens the file — below) 2026-09-30; v1.4.6 (pinned folders sit at the top and slide — below) 2026-10-01; v1.4.7 (a project tab's dots follow the bar — below) 2026-10-07. Milestones 0, 1 and 2 built (M1.1–M1.6,
 M2.1–M2.6 landed); polish pass (docs/POLISH_PLAN.md) built through all
 phases — 0 (foundation tokens), 1 (cockpit), 2 (distances), 3 (arrivals),
 4 (overlay physiology).** Read `VISION.md` (the
@@ -502,6 +502,15 @@ opaque, stacked deepest-first) and the stack clips at its top edge.
 Clicking a pinned folder lands it in its slot. Verify with
 `tree:expand=a/b;scroll=<y>` through `explorerSearch` and the snapshot's
 `chain=name@offset` dump.
+
+**A project tab's dots follow the bar** (2026-10-07, v1.4.7, owner
+report). The bar groups sessions by root — main, each worktree, each
+host — in first-appearance order (`groupedTabs`), but `attentionMarks`
+and `⌥⌘1..9` walked the raw `sessions` array, so a worktree session
+opened before a main one led on top and trailed below. One
+`ProjectController.barOrder` (session indices in the bar's order) now
+feeds all three. Verified in a test instance seeded with
+[main, other root, main] + `seedAttention`: the dots read the bar's order.
 
 ## Commands
 
