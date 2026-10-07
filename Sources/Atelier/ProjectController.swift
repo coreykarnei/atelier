@@ -819,10 +819,11 @@ final class ProjectController: NSObject, BottomBarDelegate {
 
     var sessionCount: Int { sessions.count }
 
-    /// ⌥⌘1…9: the Nth tab in the bar (which draws `sessions` in order).
+    /// ⌥⌘1…9: the Nth tab in the bar, left to right.
     func selectSession(number: Int) {
-        let index = number - 1
-        guard sessions.indices.contains(index) else { return }
+        let order = barOrder
+        guard order.indices.contains(number - 1) else { return }
+        let index = order[number - 1]
         if index != activeIndex { showSession(at: index) }
     }
 
@@ -852,10 +853,10 @@ final class ProjectController: NSObject, BottomBarDelegate {
         updateBottomBar()
     }
 
-    /// The project tab's marks: every session's attention, tab order, the
+    /// The project tab's marks: every session's attention, bar order, the
     /// silent ones dropped. Each names its session, so a dot is a way there.
     var attentionMarks: [ProjectMark] {
-        sessions.filter { $0.attention != .none }.map {
+        barOrder.map { sessions[$0] }.filter { $0.attention != .none }.map {
             ProjectMark(sessionId: $0.id, attention: $0.attention, title: $0.displayTitle, since: $0.attentionSince)
         }
     }
@@ -991,34 +992,44 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// first-appearance order — which is the sessions' array order, so a
     /// dragged arrangement (tabs within a folder, folders past each other)
     /// is exactly what persists (MILESTONE_1 §7).
-    private func groupedTabs() -> [SessionTabInfo] {
+    /// Session indices in the bar's order — grouped by root, groups in
+    /// first-appearance order. The project tab's dots and ⌥⌘1…9 read the
+    /// same order, so the top tracks the bar left to right.
+    private var barOrder: [Int] {
         var groupOrder: [String] = []
         var groups: [String: [Int]] = [:]
         for (index, session) in sessions.enumerated() {
-            // Remote sessions group by host — every jarvis tab sits together
-            // regardless of remote dir, like worktree tabs share their root.
-            let key = session.location.host.map { "ssh://\($0)" } ?? session.cwd
+            let key = groupKey(for: session)
             if groups[key] == nil {
                 groups[key] = []
                 groupOrder.append(key)
             }
             groups[key]?.append(index)
         }
-        return groupOrder.flatMap { key in
-            (groups[key] ?? []).map { index in
-                let session = sessions[index]
-                return SessionTabInfo(
-                    id: session.id,
-                    index: index,
-                    title: session.displayTitle,
-                    isWorktree: session.isWorktree,
-                    remoteHost: session.location.host,
-                    groupKey: key,
-                    groupLabel: folderLabel(for: session, key: key),
-                    attention: session.attention,
-                    attentionSince: session.attentionSince
-                )
-            }
+        return groupOrder.flatMap { groups[$0] ?? [] }
+    }
+
+    /// Remote sessions group by host — every jarvis tab sits together
+    /// regardless of remote dir, like worktree tabs share their root.
+    private func groupKey(for session: Session) -> String {
+        session.location.host.map { "ssh://\($0)" } ?? session.cwd
+    }
+
+    private func groupedTabs() -> [SessionTabInfo] {
+        barOrder.map { index in
+            let session = sessions[index]
+            let key = groupKey(for: session)
+            return SessionTabInfo(
+                id: session.id,
+                index: index,
+                title: session.displayTitle,
+                isWorktree: session.isWorktree,
+                remoteHost: session.location.host,
+                groupKey: key,
+                groupLabel: folderLabel(for: session, key: key),
+                attention: session.attention,
+                attentionSince: session.attentionSince
+            )
         }
     }
 
