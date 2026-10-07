@@ -26,7 +26,9 @@ case "blocked", "input-blocked", "permission":
     defaultTitle = "Claude needs you"
     defaultBody = "Permission or a question is blocking the agent."
 case "waiting", "input-waiting", "idle":
-    // Notification hook, matcher `idle_prompt` — done, your move.
+    // Notification hook, matcher `idle_prompt` — sent a minute after every
+    // Stop: the turn's end is old news by then, so the app only corrects a
+    // mark that missed it, silently.
     kind = .inputNeeded
     defaultTitle = "Claude is waiting"
     defaultBody = "The agent is waiting on your next prompt."
@@ -47,7 +49,8 @@ case "working", "prompt", "tool":
 case "session":
     // SessionStart: launch, `/resume`, `/clear`, compaction. The payload's
     // session_id is the conversation the agent is in now; the tab follows
-    // it before a word is typed.
+    // it before a word is typed, and its `source` says whether that
+    // conversation is empty (grey) or resumed (your move).
     kind = .session
     defaultTitle = ""
     defaultBody = ""
@@ -60,10 +63,12 @@ default:
 // Best-effort session id from the hook's stdin payload. Never block: only read
 // when stdin is a pipe (hooks always pipe; a stray manual run from a TTY skips).
 var sessionId: String?
+var source: String?
 if isatty(0) == 0 {
     let stdinData = FileHandle.standardInput.readDataToEndOfFile()
     if let payload = try? JSONSerialization.jsonObject(with: stdinData) as? [String: Any] {
         sessionId = payload["session_id"] as? String
+        source = payload["source"] as? String
         // A subagent's tool calls carry `agent_id` under the parent's
         // session id — and a background one keeps calling after the
         // parent's Stop, which would repaint a finished session blue with
@@ -75,7 +80,10 @@ if isatty(0) == 0 {
 let override = args.dropFirst().joined(separator: " ")
 let body = override.isEmpty ? defaultBody : override
 let tab = ProcessInfo.processInfo.environment[NotifyMessage.tabEnvironmentKey]
-let message = NotifyMessage(kind: kind, title: defaultTitle, body: body, sessionId: sessionId, tab: tab)
+let message = NotifyMessage(
+    kind: kind, title: defaultTitle, body: body, sessionId: sessionId, tab: tab,
+    source: kind == .session ? source : nil
+)
 
 // Connect to the unix domain socket.
 let path = AtelierIPC.socketPath()

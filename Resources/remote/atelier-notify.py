@@ -23,7 +23,8 @@ KINDS = {
     "blocked": ("blocked", "Claude needs you", "Permission or a question is blocking the agent."),
     "input-blocked": ("blocked", "Claude needs you", "Permission or a question is blocking the agent."),
     "permission": ("blocked", "Claude needs you", "Permission or a question is blocking the agent."),
-    # Notification hook, matcher `idle_prompt` — done, your move.
+    # Notification hook, matcher `idle_prompt` — a minute after every Stop;
+    # the app only uses it to correct a mark that missed the turn's end.
     "waiting": ("inputNeeded", "Claude is waiting", "The agent is waiting on your next prompt."),
     "input-waiting": ("inputNeeded", "Claude is waiting", "The agent is waiting on your next prompt."),
     "idle": ("inputNeeded", "Claude is waiting", "The agent is waiting on your next prompt."),
@@ -38,7 +39,7 @@ KINDS = {
     "tool": ("working", "", ""),
     "prompt": ("working", "", ""),
     # SessionStart — launch, /resume, /clear: the tab follows the new
-    # conversation id. Tab state only.
+    # conversation id, and `source` says empty (grey) or resumed. Tab state only.
     "session": ("session", "", ""),
     "stop": ("stop", "Claude finished", "The agent completed its turn."),
 }
@@ -55,10 +56,12 @@ def main():
     # Best-effort session id from the hook's stdin payload. Only read when
     # stdin is a pipe (hooks always pipe; a stray manual TTY run skips).
     session_id = None
+    source = None
     if not sys.stdin.isatty():
         try:
             payload = json.load(sys.stdin)
             session_id = payload.get("session_id")
+            source = payload.get("source")
             # A subagent's tools report under the parent's session id, even
             # after the parent's Stop — only the main agent's tools speak.
             if verb == "tool" and payload.get("agent_id") is not None:
@@ -73,6 +76,8 @@ def main():
     tab = os.environ.get("ATELIER_TAB")
     if tab:
         message["tab"] = tab
+    if kind == "session" and source:
+        message["source"] = source
 
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(2)

@@ -1273,7 +1273,7 @@ final class BottomBar: NSView {
             switch attention {
             case .none:
                 break
-            case .working, .waiting, .doneUnseen, .needsInput, .needsInputUnseen:
+            case .empty, .working, .waiting, .doneUnseen, .needsInput, .needsInputUnseen:
                 Theme.attentionColor(attention).setFill()
                 NSBezierPath(ovalIn: NSRect(x: 2, y: 2, width: 6, height: 6)).fill()
             }
@@ -1641,8 +1641,8 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     // MARK: Attention badge (MILESTONE_1 §7.1 + POLISH_PLAN §3)
 
     /// No escalation (§1.3, rule standing): states swap by ~250 ms cross-fade;
-    /// the other motions live in `AttentionDotView` (working's subliminal
-    /// pulse, unseen-done's ring) plus the green arrival's single
+    /// the other motions live in `AttentionDotView` (working's breath,
+    /// the unseen marks' ring) plus the green arrival's single
     /// scale-in here. Nothing raises its voice with age; peach and plain green
     /// are deliberately still.
     private func setAttention(_ newAttention: Session.Attention, animated: Bool) {

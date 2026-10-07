@@ -128,8 +128,10 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
         onAgentEvent?(msg)
 
         // `working` and `session` are tab state only — no banner for "you
-        // pressed Enter" or "a conversation opened."
-        guard msg.kind != .working, msg.kind != .session else { return }
+        // pressed Enter" or "a conversation opened." Nor `inputNeeded`: it is
+        // `idle_prompt`, a minute after the Stop that already rang — a second
+        // chime would re-notify (§1.3).
+        guard msg.kind != .working, msg.kind != .session, msg.kind != .inputNeeded else { return }
 
         // The sound vocabulary the dotfiles IDE used (POLISH_PLAN §7, resolved
         // 2026-09-16): Blow = finished, Tink = needs you. One audio path — the
@@ -158,8 +160,8 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
     private static func sound(for kind: NotifyMessage.Kind) -> NSSound? {
         switch kind {
         case .stop: return NSSound(named: "Blow")
-        case .blocked, .inputNeeded: return NSSound(named: "Tink")
-        case .working, .session: return nil
+        case .blocked: return NSSound(named: "Tink")
+        case .inputNeeded, .working, .session: return nil
         }
     }
 

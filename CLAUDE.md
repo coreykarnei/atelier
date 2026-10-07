@@ -512,6 +512,29 @@ opened before a main one led on top and trailed below. One
 feeds all three. Verified in a test instance seeded with
 [main, other root, main] + `seedAttention`: the dots read the bar's order.
 
+**Every live agent wears a dot; rings outlast the minute; blue breathes**
+(2026-10-07, owner reports). A fresh session and a reloaded one had no dot
+until the first message: `SessionStart` arrived but left the dot alone.
+Its `source` now decides (`NotifyMessage.source`, forwarded by both
+helpers; remote hosts re-provision, `provisioned-v4`): `startup`/`clear`
+→ the new grey **`empty`** state (a live agent with nothing in it —
+`chromeMutedText`, the Landing's never-ran dot too, tip `empty · 2m`),
+`resume` → waiting unless a ring is still unseen, `compact` → nothing.
+`none` now means no agent at all. **The ring died after a minute:** Claude
+sends `Notification(idle_prompt)` exactly 60s after every `Stop`, and we
+read it as *waiting* — the seen state — and chimed Tink with a second
+banner. It now only corrects a mark that missed the turn's end (working /
+peach → waiting, unseen peach → unseen green), silently; it never fires
+over an open permission prompt (84s measured). **Working breathes:** the
+old ±10% pulse was invisible; the blue dot now eases to half brightness
+and back on a 4s beat, in place, phase-locked app-wide (POLISH_PLAN §1.1
+item 4 — the ring stays the only outward motion). Verified in a test
+instance: fresh → empty, prompt → working + breath, unseen Stop → ring
+still running after the idle_prompt, `/clear` → empty, `/resume` →
+waiting, a relaunch with a dotless saved tab → green on `SessionStart`.
+`probe:attention` dumps each session's state in bar order and every dot's
+running motions.
+
 ## Commands
 
 - `make build` — compile all targets via SwiftPM.

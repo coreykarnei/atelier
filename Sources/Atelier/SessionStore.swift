@@ -125,6 +125,7 @@ enum ProjectShelf {
             (key, entry.window.sessions.filter(\.isIDE).map { persisted in
                 switch persisted.attention.flatMap(Session.Attention.init(rawValue:)) ?? .none {
                 case .none: return .none
+                case .empty: return .empty
                 case .doneUnseen: return .doneUnseen
                 default: return .waiting
                 }

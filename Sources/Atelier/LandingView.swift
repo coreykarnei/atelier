@@ -404,16 +404,14 @@ final class LandingView: NSView, WorkspacePane {
         if !entry.shelved.isEmpty {
             // The sessions opening this row brings back, one dot each in the
             // state it returns in — the project tab's marks, before the tab
-            // exists. A session that never ran a turn has no state: a dim dot.
+            // exists. One that never ran a turn is grey, as its tab will be.
             text.append(NSAttributedString(string: " ", attributes: [
                 .font: Theme.Typography.mono(Theme.Typography.body),
             ]))
             for attention in entry.shelved {
                 text.append(NSAttributedString(string: " ●", attributes: [
                     .font: NSFont.systemFont(ofSize: 8),
-                    .foregroundColor: attention == .none
-                        ? Theme.chromeMutedText
-                        : Theme.attentionColor(attention),
+                    .foregroundColor: Theme.attentionColor(attention),
                     .baselineOffset: 1.5,
                 ]))
             }

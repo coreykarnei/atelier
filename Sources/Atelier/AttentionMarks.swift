@@ -7,12 +7,15 @@ import AppKit
 /// "everyone finished". Whether you've looked yet never changes the hue:
 /// the *unseen* green and peach ring instead (2026-09-23). With one meaning
 /// per hue every mark is a plain dot; the `!` went (owner call 2026-09-15).
+/// Grey (2026-10-07) is no colour at all: a live agent with nothing in it
+/// yet — the chrome's muted ink, the Landing's never-ran dot too.
 extension Theme {
     static func attentionColor(_ attention: Session.Attention) -> NSColor {
         switch attention {
         case .working: return accentBlue
         case .waiting, .doneUnseen: return accentGreen
-        case .needsInput, .needsInputUnseen, .none: return accentPeach
+        case .needsInput, .needsInputUnseen: return accentPeach
+        case .empty, .none: return chromeMutedText
         }
     }
 }
@@ -27,6 +30,7 @@ enum AttentionTip {
         case .waiting: word = "waiting"
         case .needsInput, .needsInputUnseen: word = "blocked"
         case .doneUnseen: word = "done"
+        case .empty: word = "empty"
         case .none: return ""
         }
         guard let since else { return word }
@@ -44,7 +48,11 @@ enum AttentionTip {
 /// A round attention dot drawn as a centered sublayer (so scale animations
 /// grow from the middle), with its state's motion installed once the layer
 /// joins a window — animations added earlier are dropped by AppKit.
-/// Working: the ~4 s subliminal pulse (§1.1 item 4). Unseen — a completion
+/// Working breathes (§1.1 item 4; owner call 2026-10-07 — the old ±10%
+/// pulse was subliminal enough to go unseen): the dot's own brightness
+/// eases down to half and back on a 4 s beat, in place, never outward — so
+/// a busy dot reads as alive without borrowing the ring's "come look", and
+/// every working dot breathes on one app-wide clock. Unseen — a completion
 /// or a block that landed while you were elsewhere — is what wants your eye,
 /// so it moves (owner calls 2026-09-15, 2026-09-23): the dot holds steady
 /// and a hairline ring in its colour leaves it, widening and fading, once
@@ -63,6 +71,9 @@ final class AttentionDotView: NSView {
     /// One ring per beat: it spreads over `ringTravel`, then the dot rests.
     private static let ringBeat: CFTimeInterval = 2.0
     private static let ringTravel: CFTimeInterval = 1.3
+    /// One breath: down to `breathDepth` and back over `breathBeat`.
+    private static let breathBeat: CFTimeInterval = 4.0
+    private static let breathDepth: Float = 0.5
 
     init(attention: Session.Attention, diameter: CGFloat) {
         self.attention = attention
@@ -97,19 +108,31 @@ final class AttentionDotView: NSView {
 
     override var fittingSize: NSSize { NSSize(width: diameter, height: diameter) }
 
+    /// `probe:attention`: the state, the motions running, and visibility.
+    var debugLine: String {
+        let motions = (dotLayer.animationKeys() ?? []) + (ringLayer.animationKeys() ?? [])
+        return "\(attention.rawValue) d=\(diameter) motions=\(motions) hidden=\(isHiddenOrHasHiddenAncestor)"
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard window != nil else { return }
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         switch attention {
         case .working:
-            guard !reduceMotion, dotLayer.animation(forKey: "pulse") == nil else { return }
-            let pulse = CABasicAnimation(keyPath: "opacity")
-            pulse.fromValue = 1.0; pulse.toValue = 0.8; pulse.duration = 2.0
-            pulse.autoreverses = true
-            pulse.repeatCount = .infinity
-            pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            dotLayer.add(pulse, forKey: "pulse")
+            guard !reduceMotion, dotLayer.animation(forKey: "breath") == nil else { return }
+            let breath = CABasicAnimation(keyPath: "opacity")
+            breath.fromValue = 1.0; breath.toValue = Self.breathDepth
+            breath.duration = Self.breathBeat / 2
+            breath.autoreverses = true
+            breath.repeatCount = .infinity
+            breath.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            // Phase-locked like the ring: a dot that turns blue joins the
+            // breath already under way, so a row of them rises and falls
+            // together.
+            let now = CACurrentMediaTime()
+            breath.beginTime = dotLayer.convertTime(now - fmod(now, Self.breathBeat), from: nil)
+            dotLayer.add(breath, forKey: "breath")
         case .doneUnseen, .needsInputUnseen:
             if reduceMotion {
                 // The ring held still, halfway out — the state stays
@@ -128,7 +151,7 @@ final class AttentionDotView: NSView {
             let now = CACurrentMediaTime()
             ring.beginTime = ringLayer.convertTime(now - fmod(now, Self.ringBeat), from: nil)
             ringLayer.add(ring, forKey: "ring")
-        case .waiting, .needsInput, .none:
+        case .empty, .waiting, .needsInput, .none:
             return
         }
     }

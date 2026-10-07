@@ -625,6 +625,21 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// path in M2.2; the panel stays as the native fallback.)
     /// Dev-only: drive the explorer's search bar from the socket.
     func debugExplorerSearch(_ query: String) {
+        if query == "probe:attention" {
+            // Every session's state in bar order, then every dot drawn in the
+            // window with the motion it carries — the attention lifecycle,
+            // read back without watching it.
+            var lines = barOrder.map { "\(sessions[$0].displayTitle): \(sessions[$0].attention.rawValue)" }
+            func walk(_ view: NSView) {
+                if let dot = view as? AttentionDotView { lines.append("dot \(dot.debugLine)") }
+                view.subviews.forEach(walk)
+            }
+            window?.contentView.map(walk)
+            try? (lines.joined(separator: "\n") + "\n").write(
+                toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8
+            )
+            return
+        }
         activeSession?.editorPane.debugExplorer(query)
     }
 
@@ -1067,11 +1082,22 @@ final class ProjectController: NSObject, BottomBarDelegate {
         let onScreen = index == activeIndex && isActive && (window?.isKeyWindow ?? false)
         switch message.kind {
         case .session:
-            // The conversation changed under the tab (adopted above) or began;
-            // the dot is untouched. Read the new transcript's title now, not
-            // on the next beat.
+            // The conversation changed under the tab (adopted above) or began.
+            // Read the new transcript's title now, not on the next beat. The
+            // dot follows how it began (SessionStart's `source`, owner call
+            // 2026-10-07): nothing in it yet — a launch, or `/clear` — is
+            // grey; a resumed one is your move, unless a completion is still
+            // unseen (a relaunch keeps that ringing until you look); a
+            // compaction, or a helper too old to say, changes nothing.
             refreshTitles()
-            return true
+            switch message.source {
+            case "startup", "clear":
+                sessions[index].attention = .empty
+            case "resume" where !sessions[index].attention.isUnseen:
+                sessions[index].attention = .waiting
+            default:
+                return true
+            }
         case .working:
             sessions[index].attention = .working
         case .blocked:
@@ -1079,10 +1105,18 @@ final class ProjectController: NSObject, BottomBarDelegate {
             // fired. This is the `!`.
             sessions[index].attention = onScreen ? .needsInput : .needsInputUnseen
         case .inputNeeded:
-            // `idle_prompt`-matched hooks: done, your move. Blockers arrive
-            // structured as `.blocked` (the `permission_prompt` matcher), so
-            // nothing is classified by message copy any more.
-            sessions[index].attention = .waiting
+            // `idle_prompt`: Claude sends it a minute after every Stop, so the
+            // turn's end is old news by then — read as *waiting*, it settled
+            // every unseen ring a minute in, as though you'd looked (owner
+            // report 2026-10-07). It only corrects a mark that missed the
+            // end: a blue whose Stop never came (an interrupt on a remote
+            // host), a peach answered where we couldn't read it. Settled
+            // marks stay. (It never fires over an open permission prompt.)
+            switch sessions[index].attention {
+            case .working, .needsInput: sessions[index].attention = .waiting
+            case .needsInputUnseen: sessions[index].attention = .doneUnseen
+            case .none, .empty, .waiting, .doneUnseen: return true
+            }
         case .stop:
             sessions[index].attention = onScreen ? .waiting : .doneUnseen
         }

@@ -42,7 +42,7 @@ public enum AtelierIPC {
 public struct NotifyMessage: Codable {
     public enum Kind: String, Codable {
         case stop          // agent finished a turn
-        case inputNeeded   // agent idles for the next prompt (waiting — your move)
+        case inputNeeded   // `idle_prompt`: a minute after a turn ends, the agent still idles (never news)
         case blocked       // agent explicitly blocked: permission or question (the `!`)
         case working       // agent began a turn (tab state only, no banner)
         case session       // a conversation began under the agent: launch, /resume, /clear (tab state only)
@@ -58,16 +58,22 @@ public struct NotifyMessage: Codable {
     /// `sessionId`, never this. Absent from older helpers and from agents
     /// started outside Atelier.
     public let tab: String?
+    /// How a `.session` began — SessionStart's `source`: `startup`, `resume`,
+    /// `clear` or `compact`. It decides the tab's dot: an empty conversation
+    /// (startup, clear) is grey, a resumed one is your move, a compaction
+    /// changes nothing. Absent from older helpers.
+    public let source: String?
 
     /// The environment variable that carries `tab` from agent to hook.
     public static let tabEnvironmentKey = "ATELIER_TAB"
 
-    public init(kind: Kind, title: String, body: String, sessionId: String? = nil, tab: String? = nil) {
+    public init(kind: Kind, title: String, body: String, sessionId: String? = nil, tab: String? = nil, source: String? = nil) {
         self.kind = kind
         self.title = title
         self.body = body
         self.sessionId = sessionId
         self.tab = tab
+        self.source = source
     }
 
     /// Encode as a single newline-terminated JSON line for the stream protocol.

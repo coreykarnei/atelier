@@ -25,8 +25,9 @@ final class Session: NSObject, NSSplitViewDelegate {
     enum State { case landing, ide }
 
     /// Per-tab attention (MILESTONE_1 §7.1): the agent's exact state, always
-    /// visible on the tab. Once a session has run, it is essentially always
-    /// either working or waiting — `none` is the never-prompted state.
+    /// visible on the tab. A live agent always has one — `empty` from the
+    /// moment it starts (or `/clear`s) until the first prompt, then working
+    /// or waiting; `none` means no agent (a Landing, or one that exited).
     ///
     /// RULE — no escalation (POLISH_PLAN §1.3, same standing as the keymap):
     /// a waiting session never pulses harder, never re-notifies, never changes
@@ -36,6 +37,7 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// loudness-vary over time is wrong by rule, not by taste.
     enum Attention: String {
         case none
+        case empty        // a live agent with nothing in its conversation yet — launched, or /clear (grey dot)
         case working      // agent mid-turn (blue dot)
         case waiting      // turn done, your move (green dot)
         case needsInput   // agent explicitly blocked — permission/question (peach dot)
@@ -216,6 +218,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         switch restored.attention.flatMap(Attention.init(rawValue:)) ?? .none {
         case .doneUnseen: self.attention = .doneUnseen
         case .waiting, .working, .needsInput, .needsInputUnseen: self.attention = .waiting
+        case .empty: self.attention = .empty
         case .none: break
         }
         let restoredMode = LayoutMode(rawValue: restored.layoutMode) ?? .triptych

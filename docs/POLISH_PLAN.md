@@ -35,7 +35,12 @@ The complete list of things permitted to move while nothing is happening:
 1. Terminal content the user or agent is producing.
 2. The focused pane's cursor.
 3. The clock colon's sine breath (~1 Hz opacity ease — a breath, not a blink).
-4. The working-blue dot's subliminal pulse (~4 s period, ±10% opacity).
+4. The working-blue dot's breath (4 s period, opacity 1 ↔ 0.5, in place,
+   phase-locked app-wide). Revised 2026-10-07 from a subliminal ±10%, which
+   went unseen: busy should read as alive.
+5. The unseen marks' ring (2026-09-23): a hairline leaving a green or peach
+   dot on a 2 s app-wide beat, until you look. The only outward motion — the
+   one that means "come look".
 
 That is the whole inventory. Everything else moves only in response to an
 event, completes in ≤350 ms, and is then *still*. This forbids ambient shimmer,

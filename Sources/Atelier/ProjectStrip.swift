@@ -24,8 +24,8 @@ struct ProjectMark: Equatable {
 /// dividing it equally, shown once there are two), our material. The
 /// active tab is a rounded chip in the panes' base, flush with the content;
 /// the others sit darker in crust. Every tab carries its
-/// sessions' attention marks after the title (blue working, green done,
-/// ringing green unseen completion, peach blocked), so a project you're not
+/// sessions' attention marks after the title (grey empty, blue working,
+/// green done, ringing green unseen completion, peach blocked), so a project you're not
 /// looking at still says where its agents stand. `+` opens a new project
 /// tab; the active tab's leading `×` closes it — onto the shelf, or with `⌥`
 /// held (the `×` goes peach to say so) for good. Gaps pass clicks through to the
