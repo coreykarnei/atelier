@@ -12,8 +12,8 @@ Built with AppKit, with a keyboard-first workflow, Catppuccin Mocha colors,
 and native translucency. Claude Code runs as its own process, with its tools
 and permissions intact.
 
-Atelier is the author's daily driver. Version **1.4.8** is available in the
-source history; the instructions below build the app locally.
+Atelier is the author's daily driver. Version **1.4.8** installs with
+Homebrew, or you can build it from source.
 
 ## A place to work
 
@@ -39,7 +39,20 @@ It keeps that workflow in a deliberately small native app. It is opinionated
 about its layout and scope; there is no plugin marketplace or arbitrary pane
 system. If this way of working suits you, you are welcome here.
 
-## Build and run
+## Install
+
+On an Apple Silicon Mac running macOS 14 or later:
+
+```sh
+brew install --cask coreykarnei/tap/atelier
+```
+
+The app is signed and notarized, so it opens without a security prompt, and
+the cask puts the `atelier` command on your PATH. Install
+[Claude Code](https://claude.com/claude-code) and check that `claude` runs in
+your terminal first. `brew upgrade --cask atelier` picks up new releases.
+
+## Build from source
 
 The current bundle script targets **Apple Silicon Macs running macOS 14 or
 later**. You will need a Swift 6 toolchain, Xcode command-line tools, Git, and
