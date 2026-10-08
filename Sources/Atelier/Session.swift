@@ -111,10 +111,6 @@ final class Session: NSObject, NSSplitViewDelegate {
     var attentionCycleStart: Date { attentionSince ?? restoredCycleStart }
     private lazy var restoredCycleStart = Date(timeIntervalSinceNow: -.random(in: 0..<4))
 
-    /// A restored local agent's conversation gets one look on the first
-    /// transcript read: did its last turn end? (`ProjectController`'s poll.)
-    var checksCutOff = false
-
     /// The label the tab actually shows.
     var displayTitle: String { customTitle ?? title }
 
@@ -212,6 +208,34 @@ final class Session: NSObject, NSSplitViewDelegate {
         rebuildLayout()
     }
 
+    /// What a saved session comes back as — its tab on relaunch, its dot on
+    /// the Landing's shelf row before that. An unseen completion stays
+    /// unseen until you look (owner ask 2026-09-10). For a local agent the
+    /// transcript has the last word (owner report 2026-10-07), read as
+    /// Atelier left it, before the agent resumes: a last turn that never
+    /// ended was cut off — Atelier quit, crashed or lost power under it —
+    /// and one that ended is your move whatever the saved dot said, since a
+    /// lost hook can leave a dot behind. Without a transcript that can say,
+    /// the saved dot decides: blue or peach died with a local agent; a
+    /// remote one kept running on its host, unknown until a hook says, so
+    /// plain waiting.
+    static func restoredAttention(_ persisted: PersistedSession) -> Attention {
+        let saved = persisted.attention.flatMap(Attention.init(rawValue:)) ?? .none
+        let local = persisted.remoteHost == nil
+        if local, persisted.isIDE,
+           let open = TranscriptTitle.lastTurnOpen(sessionId: persisted.claudeSessionId, cwd: persisted.cwd) {
+            if open { return .cutOff }
+            return saved == .doneUnseen ? .doneUnseen : .waiting
+        }
+        switch saved {
+        case .doneUnseen: return .doneUnseen
+        case .working, .needsInput, .needsInputUnseen, .cutOff: return local ? .cutOff : .waiting
+        case .waiting: return .waiting
+        case .empty: return .empty
+        case .none: return .none
+        }
+    }
+
     /// A session restored from disk (MILESTONE_1 §9). IDE sessions come back on
     /// their root with their layout and dividers; the agent resumes its previous
     /// conversation. Landings come back as Landings.
@@ -224,21 +248,10 @@ final class Session: NSObject, NSSplitViewDelegate {
         self.isRestored = true
         self.location = restored.remoteHost.map { .remote(host: $0) } ?? .local
         self.state = restored.isIDE ? .ide : .landing
-        // What relaunch can honestly say: an unseen completion stays unseen
-        // until you look (owner ask 2026-09-10). A turn mid-flight or blocked
-        // at quit died with a local agent — cut off (2026-10-07); a remote
-        // one kept running on its host, unknown until a hook says, so plain
-        // waiting. A crash saves nothing, so the transcript gets the last
-        // word too (`checksCutOff`).
-        switch restored.attention.flatMap(Attention.init(rawValue:)) ?? .none {
-        case .doneUnseen: self.attention = .doneUnseen
-        case .working, .needsInput, .needsInputUnseen, .cutOff:
-            self.attention = restored.remoteHost == nil ? .cutOff : .waiting
-        case .waiting: self.attention = .waiting
-        case .empty: self.attention = .empty
-        case .none: break
+        self.attention = Session.restoredAttention(restored)
+        if attention == .cutOff {
+            NSLog("Atelier: tab \(id) comes back cut off — its last turn never ended")
         }
-        self.checksCutOff = restored.remoteHost == nil && restored.isIDE
         let restoredMode = LayoutMode(rawValue: restored.layoutMode) ?? .triptych
         self.layoutMode = restored.remoteHost == nil
             ? restoredMode

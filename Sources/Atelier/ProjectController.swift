@@ -1182,19 +1182,6 @@ final class ProjectController: NSObject, BottomBarDelegate {
                     session.attention = .waiting
                     changed = true
                 }
-                // Cut off (2026-10-07): a restored agent whose conversation
-                // stops mid-turn — Atelier crashed or lost power under it
-                // and saved nothing to say so (a quit already did, on
-                // restore). One look, the first read after relaunch, before
-                // the agent can start a turn of its own.
-                if session.checksCutOff {
-                    session.checksCutOff = false
-                    if reading?.turnOpen == true, [.none, .waiting].contains(session.attention) {
-                        NSLog("Atelier: tab \(session.id) came back cut off — its last turn never ended")
-                        session.attention = .cutOff
-                        changed = true
-                    }
-                }
             }
             if changed { self.updateBottomBar() }
         }

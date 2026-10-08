@@ -117,22 +117,12 @@ enum ProjectShelf {
     }
 
     /// The IDE sessions waiting under each key, as the state each will come
-    /// back in (what `Session(restored:)` makes of it: an unseen completion
-    /// stays unseen, a local turn shelved mid-flight is cut off, any other
-    /// turn is your move) — the Landing row's dots.
+    /// back in (`Session.restoredAttention`, what the tab will wear) — the
+    /// Landing row's dots.
     /// Most recently shelved first; one read per Landing refresh.
     static func marks() -> [(key: String, marks: [Session.Attention])] {
         load().sorted { $0.value.shelvedAt > $1.value.shelvedAt }.map { key, entry in
-            (key, entry.window.sessions.filter(\.isIDE).map { persisted in
-                switch persisted.attention.flatMap(Session.Attention.init(rawValue:)) ?? .none {
-                case .none: return .none
-                case .empty: return .empty
-                case .doneUnseen: return .doneUnseen
-                case .working, .needsInput, .needsInputUnseen, .cutOff:
-                    return persisted.remoteHost == nil ? .cutOff : .waiting
-                case .waiting: return .waiting
-                }
-            })
+            (key, entry.window.sessions.filter(\.isIDE).map(Session.restoredAttention))
         }
     }
 }

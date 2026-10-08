@@ -542,18 +542,28 @@ ever said its turn ended. Now it comes back **`cutOff`**: a hollow blue dot
 (1.5pt ring, the dot's footprint; `○` on the Landing's shelf rows; tip
 `cut off`), still, held through `SessionStart(resume)` and `idle_prompt`
 until the next prompt (blue) or `/clear` (grey). Remote sessions keep
-running on their host, so they still come back waiting. Two sources: the
-saved state (`Session(restored:)` maps working/peach to cutOff for local
-sessions; `ProjectShelf.marks` agrees), and — for a crash or power loss,
-which save nothing — the transcript, read once on the first poll after
-restore (`Session.checksCutOff`, `TranscriptTitle.Reading.turnOpen`).
-Measured: a killed mid-turn conversation ends on the user's prompt with no
-reply and no marker; a finished turn ends with Claude's `end_turn` record
-and Claude Code's `system/turn_duration`. The scan skips user records
-Claude Code writes for itself (slash commands and their output, `!` runs,
-`isMeta`, compaction summaries) and the synthetic `No response requested.`
-reply it patches in when resuming an unanswered prompt (`"model":"<synthetic>"`
-without `isApiErrorMessage` — an `API Error:` reply did end the turn).
+running on their host, so they still come back waiting. **The transcript
+decides** (`Session.restoredAttention`, which the tab and the Landing's
+shelf dot share): for a local agent, `TranscriptTitle.lastTurnOpen` reads
+the transcript's tail once at restore, *before* the agent resumes — open
+→ cutOff, ended → waiting (doneUnseen stays) whatever the saved dot said,
+so a lost hook can't leave a stale mark either; only when the transcript
+can't say does the saved dot decide. It must be before the resume (owner
+report 2026-10-07: a finished core-api turn came back hollow): a resuming
+Claude writes records of its own — a `<task-notification>` about the
+background shell the quit killed, a synthetic `No response requested.`
+after an unanswered prompt — and the first version, reading on the first
+poll ~9s after launch, took those for an open turn. Measured: a killed
+mid-turn conversation ends on the user's prompt (or a tool's result) with
+no reply and no marker; a finished turn ends with Claude's `end_turn`
+record and Claude Code's `system/turn_duration`. The read skips user
+records Claude Code writes for itself (slash commands and their output,
+`!` runs, `isMeta`, compaction summaries, task notifications) and
+synthetic replies (`"model":"<synthetic>"`) unless they're `API Error:`
+ones, which did end the turn. Checked by compiling `TranscriptTitle.swift`
+alone with a tiny driver over the last 3 days' 27 transcripts: every
+"open" was a live turn, a deliberately killed one, or a prompt that never
+got a reply.
 **Own clocks:** the breath and the ring begin at the moment their session
 entered the state (`Session.attentionCycleStart`, passed to
 `AttentionDotView` through `SessionTabInfo`/`ProjectMark`), so dots no
@@ -564,7 +574,9 @@ offset. Test-harness note: a restored test agent can miss
 (`LoginEnvironment`, 3.6–4.8s measured here) outruns its 5s wait and the
 agent gets a bare environment, so its hooks reach the live app's socket
 (dropped as strangers, but a `Stop` still chimes there). New siblings are
-fine. The first transcript poll after restore lands ~9s in, behind that wait.
+fine. A test `session.json` can be written by hand (`windows[].sessions[]`
+with `cwd`, `isIDE`, `layoutMode`, `title`, `claudeSessionId`, `dividers`,
+`attention`) to restore chosen conversations — never a live tab's.
 
 ## Commands
 

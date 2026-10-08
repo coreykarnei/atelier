@@ -40,21 +40,13 @@ enum TranscriptTitle {
         /// Esc/⌃C ended the turn. No hook reports that — `Stop` is documented
         /// not to fire on a user interrupt — so this is the only word of it.
         var endsInterrupted = false
-        /// The conversation's last turn never reached its end: a prompt or a
-        /// tool's result with no reply after it, or Claude asking for a tool.
-        /// True throughout any live turn; on a freshly resumed agent it means
-        /// the process died mid-turn — Claude writes no marker for that, and
-        /// resuming adds nothing (measured 2026-10-07).
-        var turnOpen = false
     }
 
-    /// One tick's news for a session: its title, whether the conversation
-    /// came to rest on an interrupt since the last read, and whether its
-    /// last turn is still open (a state, not news).
+    /// One tick's news for a session: its title, and whether the
+    /// conversation came to rest on an interrupt since the last read.
     struct Reading {
         var title: String?
         var interrupted = false
-        var turnOpen = false
     }
 
     nonisolated(unsafe) private static var progress: [String: Progress] = [:]
@@ -113,7 +105,7 @@ enum TranscriptTitle {
             }
         }
         progress[sessionId] = state
-        return Reading(title: state.title, interrupted: state.endsInterrupted && !wasInterrupted, turnOpen: state.turnOpen)
+        return Reading(title: state.title, interrupted: state.endsInterrupted && !wasInterrupted)
     }
 
     private static let promptGrace: TimeInterval = 30
@@ -134,10 +126,12 @@ enum TranscriptTitle {
     private static let apiErrorKey = Data("\"isApiErrorMessage\":true".utf8)
     /// User records Claude Code writes for itself — a slash command, its
     /// output, a `!` shell run, the meta caveat before them, a compaction
-    /// summary. No reply follows any of them, so none opens a turn.
+    /// summary, a background task's news (queued, and delivered when it
+    /// suits Claude Code — one about a shell a quit killed lands on resume
+    /// with no reply). None is a prompt, so none opens a turn.
     private static let localUserKeys = [
         "\"isMeta\":true", "\"isCompactSummary\":true", "\"content\":\"<command-name>",
-        "\"content\":\"<local-command-", "\"content\":\"<bash-",
+        "\"content\":\"<local-command-", "\"content\":\"<bash-", "\"content\":\"<task-notification>",
     ].map { Data($0.utf8) }
 
     /// Fold the title records in `data` (whole lines) into `state`. Lines are
@@ -147,11 +141,7 @@ enum TranscriptTitle {
     /// Claude's marker (`[Request interrupted by user]`, or `… for tool
     /// use]`), a user record whose whole content is that text. The marker is
     /// matched structurally: a tool result quoting it (a grep of a
-    /// transcript) is not one. And whether the last turn is open: a user
-    /// record (a prompt, a tool's result) opens or continues one unless it
-    /// is the marker; Claude's records keep it open only while they ask for
-    /// a tool; Claude Code's `turn_duration` closes it. A record without a
-    /// stop reason closes it too — when unsure, a turn ended.
+    /// transcript) is not one.
     private static func scan(_ data: Data, into state: inout Progress) {
         var start = data.startIndex
         while start < data.endIndex {
@@ -159,16 +149,8 @@ enum TranscriptTitle {
             let line = data[start..<end]
             start = end == data.endIndex ? end : data.index(after: end)
             let isUser = line.range(of: userKey) != nil
-            let mainThread = line.range(of: sidechainKey) == nil
-            if (isUser || line.range(of: assistantKey) != nil), mainThread {
-                if isUser, localUserKeys.contains(where: { line.range(of: $0) != nil }) { continue }
-                if !isUser, line.range(of: syntheticKey) != nil, line.range(of: apiErrorKey) == nil { continue }
+            if (isUser || line.range(of: assistantKey) != nil), line.range(of: sidechainKey) == nil {
                 state.endsInterrupted = isUser && line.range(of: interruptKey) != nil && isInterruptMarker(line)
-                state.turnOpen = isUser ? !state.endsInterrupted : line.range(of: toolUseStopKey) != nil
-                continue
-            }
-            if mainThread, line.range(of: turnDurationKey) != nil {
-                state.turnOpen = false
                 continue
             }
             let hasAiTitle = line.range(of: aiTitleKey) != nil
@@ -180,6 +162,67 @@ enum TranscriptTitle {
             default: break
             }
         }
+    }
+
+    // MARK: Did the last turn end?
+
+    /// Whether the conversation's last turn never reached its end — read
+    /// from the tail, once, before a restored agent resumes (2026-10-07).
+    /// It has to be before: a resuming Claude writes records of its own (a
+    /// synthetic `No response requested.`, news of a background shell the
+    /// quit killed), and read after, those made a finished turn look open.
+    /// Nil when the transcript can't say — none on disk, or nothing
+    /// decisive in the last 8 MB. Measured: a turn killed mid-flight ends on
+    /// the prompt or a tool's result with no reply and no marker; a finished
+    /// one on Claude's `end_turn` record and Claude Code's `turn_duration`.
+    static func lastTurnOpen(sessionId: String, cwd: String) -> Bool? {
+        guard let path = transcriptPath(sessionId: sessionId, cwd: cwd),
+              let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        var window: UInt64 = 256 * 1024
+        while true {
+            let start = size > window ? size - window : 0
+            try? handle.seek(toOffset: start)
+            var data = (try? handle.readToEnd()) ?? Data()
+            // A window opening mid-line drops that fragment.
+            if start > 0, let newline = data.firstIndex(of: 0x0A) { data = data[data.index(after: newline)...] }
+            if let open = lastTurnEffect(in: data) { return open }
+            if start == 0 || window >= 8 * 1024 * 1024 { return nil }
+            window *= 4
+        }
+    }
+
+    /// The last line in `data` that says anything about its turn, read
+    /// backward from the end.
+    private static func lastTurnEffect(in data: Data) -> Bool? {
+        var end = data.endIndex
+        while end > data.startIndex {
+            let newline = data[data.startIndex..<end].lastIndex(of: 0x0A)
+            let lineStart = newline.map { data.index(after: $0) } ?? data.startIndex
+            if lineStart < end, let effect = turnEffect(of: Data(data[lineStart..<end])) { return effect }
+            guard let newline else { return nil }
+            end = newline
+        }
+        return nil
+    }
+
+    /// What one main-thread record does to its turn: a user record (a
+    /// prompt, a tool's result) opens or continues one, unless it is the
+    /// interrupt marker or Claude Code's own; Claude's records keep it open
+    /// only while they ask for a tool — no stop reason counts as an end,
+    /// when unsure a turn ended; `turn_duration` closes it. Nil: no say.
+    private static func turnEffect(of line: Data) -> Bool? {
+        guard line.range(of: sidechainKey) == nil else { return nil }
+        if line.range(of: userKey) != nil {
+            if localUserKeys.contains(where: { line.range(of: $0) != nil }) { return nil }
+            return !(line.range(of: interruptKey) != nil && isInterruptMarker(line))
+        }
+        if line.range(of: assistantKey) != nil {
+            if line.range(of: syntheticKey) != nil, line.range(of: apiErrorKey) == nil { return nil }
+            return line.range(of: toolUseStopKey) != nil
+        }
+        return line.range(of: turnDurationKey) != nil ? false : nil
     }
 
     private static func isInterruptMarker(_ line: Data) -> Bool {
