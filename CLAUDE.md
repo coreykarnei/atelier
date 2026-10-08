@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17; v1.2.0 (the worktree door below) 2026-09-21; v1.3.0 (the 2026-09-23 work below — close-is-quit through drawn-row caching; `docs/releases/v1.3.0.md`) 2026-09-23; v1.4.0 (the project shelf + project-tab drag below; `docs/releases/v1.4.0.md`) 2026-09-24; v1.4.1 (a fresh prompt never titles a tab; the Landing's recent dot is gone) 2026-09-25; v1.4.2 (a folder's tabs share the width its label sets, so a short title reaches its `+`) 2026-09-26; v1.4.3 (Atelier brings its own hooks, SessionStart, Settings → Sounds — below) 2026-09-26; v1.4.4 (an inline rename widens its tab as you type, grow-only) 2026-09-26; v1.4.5 (⌘-clicking a path opens the file — below) 2026-09-30; v1.4.6 (pinned folders sit at the top and slide — below) 2026-10-01; v1.4.7 (a project tab's dots follow the bar — below) 2026-10-07; v1.4.8 (every live agent wears a dot, a cut-off turn comes back hollow, blue breathes — below; `docs/releases/v1.4.8.md`) 2026-10-07. Milestones 0, 1 and 2 built (M1.1–M1.6,
+**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17; v1.2.0 (the worktree door below) 2026-09-21; v1.3.0 (the 2026-09-23 work below — close-is-quit through drawn-row caching; `docs/releases/v1.3.0.md`) 2026-09-23; v1.4.0 (the project shelf + project-tab drag below; `docs/releases/v1.4.0.md`) 2026-09-24; v1.4.1 (a fresh prompt never titles a tab; the Landing's recent dot is gone) 2026-09-25; v1.4.2 (a folder's tabs share the width its label sets, so a short title reaches its `+`) 2026-09-26; v1.4.3 (Atelier brings its own hooks, SessionStart, Settings → Sounds — below) 2026-09-26; v1.4.4 (an inline rename widens its tab as you type, grow-only) 2026-09-26; v1.4.5 (⌘-clicking a path opens the file — below) 2026-09-30; v1.4.6 (pinned folders sit at the top and slide — below) 2026-10-01; v1.4.7 (a project tab's dots follow the bar — below) 2026-10-07; v1.4.8 (every live agent wears a dot, a cut-off turn comes back hollow, blue breathes — below; `docs/releases/v1.4.8.md`) 2026-10-07; v1.4.9 (a worktree never names the project — below) 2026-10-07. Milestones 0, 1 and 2 built (M1.1–M1.6,
 M2.1–M2.6 landed); polish pass (docs/POLISH_PLAN.md) built through all
 phases — 0 (foundation tokens), 1 (cockpit), 2 (distances), 3 (arrivals),
 4 (overlay physiology).** Read `VISION.md` (the
@@ -578,7 +578,7 @@ fine. A test `session.json` can be written by hand (`windows[].sessions[]`
 with `cwd`, `isIDE`, `layoutMode`, `title`, `claudeSessionId`, `dividers`,
 `attention`) to restore chosen conversations — never a live tab's.
 
-**A worktree never names the project** (2026-10-07, owner report: a
+**A worktree never names the project** (2026-10-07, v1.4.9, owner report: a
 relaunched llm-dungeon-master whose only sessions were in `⎇ reimagine`
 came back titled `reimagine`, top tab and pill). The snapshot kept each
 session's cwd but not the folder the project was opened on, so a restore
