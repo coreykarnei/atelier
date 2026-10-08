@@ -40,13 +40,21 @@ enum TranscriptTitle {
         /// Esc/⌃C ended the turn. No hook reports that — `Stop` is documented
         /// not to fire on a user interrupt — so this is the only word of it.
         var endsInterrupted = false
+        /// The conversation's last turn never reached its end: a prompt or a
+        /// tool's result with no reply after it, or Claude asking for a tool.
+        /// True throughout any live turn; on a freshly resumed agent it means
+        /// the process died mid-turn — Claude writes no marker for that, and
+        /// resuming adds nothing (measured 2026-10-07).
+        var turnOpen = false
     }
 
-    /// One tick's news for a session: its title, and whether the
-    /// conversation came to rest on an interrupt since the last read.
+    /// One tick's news for a session: its title, whether the conversation
+    /// came to rest on an interrupt since the last read, and whether its
+    /// last turn is still open (a state, not news).
     struct Reading {
         var title: String?
         var interrupted = false
+        var turnOpen = false
     }
 
     nonisolated(unsafe) private static var progress: [String: Progress] = [:]
@@ -105,7 +113,7 @@ enum TranscriptTitle {
             }
         }
         progress[sessionId] = state
-        return Reading(title: state.title, interrupted: state.endsInterrupted && !wasInterrupted)
+        return Reading(title: state.title, interrupted: state.endsInterrupted && !wasInterrupted, turnOpen: state.turnOpen)
     }
 
     private static let promptGrace: TimeInterval = 30
@@ -116,6 +124,21 @@ enum TranscriptTitle {
     private static let assistantKey = Data("\"type\":\"assistant\"".utf8)
     private static let sidechainKey = Data("\"isSidechain\":true".utf8)
     private static let interruptKey = Data("[Request interrupted by user".utf8)
+    private static let toolUseStopKey = Data("\"stop_reason\":\"tool_use\"".utf8)
+    private static let turnDurationKey = Data("\"subtype\":\"turn_duration\"".utf8)
+    /// Replies Claude Code writes itself. Resuming a conversation that ends
+    /// on an unanswered prompt patches in `No response requested.` — not an
+    /// answer, so it leaves the turn as it was; an `API Error:` one did end
+    /// the turn, and counts.
+    private static let syntheticKey = Data("\"model\":\"<synthetic>\"".utf8)
+    private static let apiErrorKey = Data("\"isApiErrorMessage\":true".utf8)
+    /// User records Claude Code writes for itself — a slash command, its
+    /// output, a `!` shell run, the meta caveat before them, a compaction
+    /// summary. No reply follows any of them, so none opens a turn.
+    private static let localUserKeys = [
+        "\"isMeta\":true", "\"isCompactSummary\":true", "\"content\":\"<command-name>",
+        "\"content\":\"<local-command-", "\"content\":\"<bash-",
+    ].map { Data($0.utf8) }
 
     /// Fold the title records in `data` (whole lines) into `state`. Lines are
     /// screened by a byte search before any JSON is parsed — the transcript
@@ -124,7 +147,11 @@ enum TranscriptTitle {
     /// Claude's marker (`[Request interrupted by user]`, or `… for tool
     /// use]`), a user record whose whole content is that text. The marker is
     /// matched structurally: a tool result quoting it (a grep of a
-    /// transcript) is not one.
+    /// transcript) is not one. And whether the last turn is open: a user
+    /// record (a prompt, a tool's result) opens or continues one unless it
+    /// is the marker; Claude's records keep it open only while they ask for
+    /// a tool; Claude Code's `turn_duration` closes it. A record without a
+    /// stop reason closes it too — when unsure, a turn ended.
     private static func scan(_ data: Data, into state: inout Progress) {
         var start = data.startIndex
         while start < data.endIndex {
@@ -132,8 +159,16 @@ enum TranscriptTitle {
             let line = data[start..<end]
             start = end == data.endIndex ? end : data.index(after: end)
             let isUser = line.range(of: userKey) != nil
-            if (isUser || line.range(of: assistantKey) != nil), line.range(of: sidechainKey) == nil {
+            let mainThread = line.range(of: sidechainKey) == nil
+            if (isUser || line.range(of: assistantKey) != nil), mainThread {
+                if isUser, localUserKeys.contains(where: { line.range(of: $0) != nil }) { continue }
+                if !isUser, line.range(of: syntheticKey) != nil, line.range(of: apiErrorKey) == nil { continue }
                 state.endsInterrupted = isUser && line.range(of: interruptKey) != nil && isInterruptMarker(line)
+                state.turnOpen = isUser ? !state.endsInterrupted : line.range(of: toolUseStopKey) != nil
+                continue
+            }
+            if mainThread, line.range(of: turnDurationKey) != nil {
+                state.turnOpen = false
                 continue
             }
             let hasAiTitle = line.range(of: aiTitleKey) != nil

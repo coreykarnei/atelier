@@ -43,6 +43,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         case needsInput   // agent explicitly blocked — permission/question (peach dot)
         case doneUnseen   // finished while you were elsewhere (ringing green → waiting on focus)
         case needsInputUnseen // blocked while you were elsewhere (ringing peach → needsInput on focus)
+        case cutOff       // its last turn died mid-flight — Atelier quit or crashed under it (hollow blue, until the next prompt)
 
         /// The two states that arrived while you were looking elsewhere —
         /// the only marks that move to catch your eye (the ring).
@@ -101,6 +102,18 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// When the current attention state began — the tooltip's "working · 4m"
     /// (§4: time on inquiry, zero always-on pixels).
     private(set) var attentionSince: Date?
+
+    /// Where this mark's motion stands in its cycle: the moment it entered
+    /// the state, so every dot keeps its own beat (owner call 2026-10-07)
+    /// and a session's bar and project-tab dots move as one. A restored
+    /// mark never saw that moment — and launch would start them all
+    /// together — so each takes an offset of its own.
+    var attentionCycleStart: Date { attentionSince ?? restoredCycleStart }
+    private lazy var restoredCycleStart = Date(timeIntervalSinceNow: -.random(in: 0..<4))
+
+    /// A restored local agent's conversation gets one look on the first
+    /// transcript read: did its last turn end? (`ProjectController`'s poll.)
+    var checksCutOff = false
 
     /// The label the tab actually shows.
     var displayTitle: String { customTitle ?? title }
@@ -211,16 +224,21 @@ final class Session: NSObject, NSSplitViewDelegate {
         self.isRestored = true
         self.location = restored.remoteHost.map { .remote(host: $0) } ?? .local
         self.state = restored.isIDE ? .ide : .landing
-        // What relaunch can honestly say: a resumed agent is idle, so a turn
-        // that was mid-flight or blocked comes back as plain waiting (the
-        // prompt that blocked it died with the process); an unseen
-        // completion stays unseen until you look (owner ask 2026-09-10).
+        // What relaunch can honestly say: an unseen completion stays unseen
+        // until you look (owner ask 2026-09-10). A turn mid-flight or blocked
+        // at quit died with a local agent — cut off (2026-10-07); a remote
+        // one kept running on its host, unknown until a hook says, so plain
+        // waiting. A crash saves nothing, so the transcript gets the last
+        // word too (`checksCutOff`).
         switch restored.attention.flatMap(Attention.init(rawValue:)) ?? .none {
         case .doneUnseen: self.attention = .doneUnseen
-        case .waiting, .working, .needsInput, .needsInputUnseen: self.attention = .waiting
+        case .working, .needsInput, .needsInputUnseen, .cutOff:
+            self.attention = restored.remoteHost == nil ? .cutOff : .waiting
+        case .waiting: self.attention = .waiting
         case .empty: self.attention = .empty
         case .none: break
         }
+        self.checksCutOff = restored.remoteHost == nil && restored.isIDE
         let restoredMode = LayoutMode(rawValue: restored.layoutMode) ?? .triptych
         self.layoutMode = restored.remoteHost == nil
             ? restoredMode

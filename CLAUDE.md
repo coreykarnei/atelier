@@ -320,7 +320,7 @@ stroke stays 1pt; 2.2× reach, 1.3s travel on a 2s beat, phase-locked to one
 app-wide clock so a row of them rings as one signal. Seeing the session
 settles it (`Attention.seen`: green → waiting, peach → still blocked — a
 seen block still never moves). Reduce Motion holds the ring still, halfway
-out. The project tab's dots grew to 7pt and each is a `MarkButton`: pointing
+out. (Since 2026-10-07 each dot keeps its own clock instead — below.) The project tab's dots grew to 7pt and each is a `MarkButton`: pointing
 hand, the hover pad's fills on a circle, press-and-release inside shows that
 session (`ProjectController.focusSession(id:)` switches the tab *before* the
 project comes forward, so arriving marks the right session seen); tooltip
@@ -527,13 +527,44 @@ banner. It now only corrects a mark that missed the turn's end (working /
 peach → waiting, unseen peach → unseen green), silently; it never fires
 over an open permission prompt (84s measured). **Working breathes:** the
 old ±10% pulse was invisible; the blue dot now eases to half brightness
-and back on a 4s beat, in place, phase-locked app-wide (POLISH_PLAN §1.1
-item 4 — the ring stays the only outward motion). Verified in a test
+and back on a 4s beat, in place (POLISH_PLAN §1.1 item 4 — the ring stays
+the only outward motion). Verified in a test
 instance: fresh → empty, prompt → working + breath, unseen Stop → ring
 still running after the idle_prompt, `/clear` → empty, `/resume` →
 waiting, a relaunch with a dotless saved tab → green on `SessionStart`.
 `probe:attention` dumps each session's state in bar order and every dot's
-running motions.
+running motions, cycle position and shown opacity.
+
+**A turn Atelier cut short comes back hollow; every dot keeps its own
+clock** (2026-10-07, owner calls). Quitting kills local agents, and a
+session that was blue or peach at quit used to come back green — no `Stop`
+ever said its turn ended. Now it comes back **`cutOff`**: a hollow blue dot
+(1.5pt ring, the dot's footprint; `○` on the Landing's shelf rows; tip
+`cut off`), still, held through `SessionStart(resume)` and `idle_prompt`
+until the next prompt (blue) or `/clear` (grey). Remote sessions keep
+running on their host, so they still come back waiting. Two sources: the
+saved state (`Session(restored:)` maps working/peach to cutOff for local
+sessions; `ProjectShelf.marks` agrees), and — for a crash or power loss,
+which save nothing — the transcript, read once on the first poll after
+restore (`Session.checksCutOff`, `TranscriptTitle.Reading.turnOpen`).
+Measured: a killed mid-turn conversation ends on the user's prompt with no
+reply and no marker; a finished turn ends with Claude's `end_turn` record
+and Claude Code's `system/turn_duration`. The scan skips user records
+Claude Code writes for itself (slash commands and their output, `!` runs,
+`isMeta`, compaction summaries) and the synthetic `No response requested.`
+reply it patches in when resuming an unanswered prompt (`"model":"<synthetic>"`
+without `isApiErrorMessage` — an `API Error:` reply did end the turn).
+**Own clocks:** the breath and the ring begin at the moment their session
+entered the state (`Session.attentionCycleStart`, passed to
+`AttentionDotView` through `SessionTabInfo`/`ProjectMark`), so dots no
+longer move in lockstep, a session's bar and project-tab dots move as one,
+and a rebuilt dot resumes mid-cycle; restored marks take a random 0–4s
+offset. Test-harness note: a restored test agent can miss
+`ATELIER_STATE_DIR` — on a busy machine the login-shell capture
+(`LoginEnvironment`, 3.6–4.8s measured here) outruns its 5s wait and the
+agent gets a bare environment, so its hooks reach the live app's socket
+(dropped as strangers, but a `Stop` still chimes there). New siblings are
+fine. The first transcript poll after restore lands ~9s in, behind that wait.
 
 ## Commands
 

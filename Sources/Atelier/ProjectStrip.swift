@@ -17,6 +17,8 @@ struct ProjectMark: Equatable {
     let attention: Session.Attention
     let title: String
     let since: Date?
+    /// Where the dot's motion stands (`Session.attentionCycleStart`).
+    let cycleStart: Date?
 }
 
 /// The project tab row under the titlebar (2026-09-10): Atelier's own tabs,
@@ -572,7 +574,7 @@ private final class MarkButton: NSView {
     init(mark: ProjectMark, diameter: CGFloat) {
         self.mark = mark
         self.diameter = diameter
-        dotView = AttentionDotView(attention: mark.attention, diameter: diameter)
+        dotView = AttentionDotView(attention: mark.attention, diameter: diameter, cycleStart: mark.cycleStart)
         super.init(frame: .zero)
         wantsLayer = true
         layer?.masksToBounds = false

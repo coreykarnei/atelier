@@ -8,11 +8,13 @@ import AppKit
 /// the *unseen* green and peach ring instead (2026-09-23). With one meaning
 /// per hue every mark is a plain dot; the `!` went (owner call 2026-09-15).
 /// Grey (2026-10-07) is no colour at all: a live agent with nothing in it
-/// yet — the chrome's muted ink, the Landing's never-ran dot too.
+/// yet — the chrome's muted ink, the Landing's never-ran dot too. A hollow
+/// blue (same day) is work that stopped partway: the turn Atelier's quit or
+/// a crash cut short, waiting on a prompt to pick it up.
 extension Theme {
     static func attentionColor(_ attention: Session.Attention) -> NSColor {
         switch attention {
-        case .working: return accentBlue
+        case .working, .cutOff: return accentBlue
         case .waiting, .doneUnseen: return accentGreen
         case .needsInput, .needsInputUnseen: return accentPeach
         case .empty, .none: return chromeMutedText
@@ -31,6 +33,7 @@ enum AttentionTip {
         case .needsInput, .needsInputUnseen: word = "blocked"
         case .doneUnseen: word = "done"
         case .empty: word = "empty"
+        case .cutOff: word = "cut off"
         case .none: return ""
         }
         guard let since else { return word }
@@ -51,8 +54,11 @@ enum AttentionTip {
 /// Working breathes (§1.1 item 4; owner call 2026-10-07 — the old ±10%
 /// pulse was subliminal enough to go unseen): the dot's own brightness
 /// eases down to half and back on a 4 s beat, in place, never outward — so
-/// a busy dot reads as alive without borrowing the ring's "come look", and
-/// every working dot breathes on one app-wide clock. Unseen — a completion
+/// a busy dot reads as alive without borrowing the ring's "come look".
+/// Every motion runs on the dot's own clock, from the moment its session
+/// entered the state (owner call 2026-10-07, replacing one app-wide beat:
+/// a row moving in lockstep read as machinery). Cut off is the one hollow
+/// mark, and still. Unseen — a completion
 /// or a block that landed while you were elsewhere — is what wants your eye,
 /// so it moves (owner calls 2026-09-15, 2026-09-23): the dot holds steady
 /// and a hairline ring in its colour leaves it, widening and fading, once
@@ -65,6 +71,8 @@ final class AttentionDotView: NSView {
     private let ringLayer = CALayer()
     private let attention: Session.Attention
     private let diameter: CGFloat
+    /// Where this dot's cycle began (`Session.attentionCycleStart`).
+    private let cycleStart: Date
 
     /// How far the ring travels: its final diameter, as a multiple of the dot.
     private static let ringReach: CGFloat = 2.2
@@ -75,9 +83,10 @@ final class AttentionDotView: NSView {
     private static let breathBeat: CFTimeInterval = 4.0
     private static let breathDepth: Float = 0.5
 
-    init(attention: Session.Attention, diameter: CGFloat) {
+    init(attention: Session.Attention, diameter: CGFloat, cycleStart: Date? = nil) {
         self.attention = attention
         self.diameter = diameter
+        self.cycleStart = cycleStart ?? Date()
         super.init(frame: CGRect(x: 0, y: 0, width: diameter, height: diameter))
         wantsLayer = true
         // The ring spreads past the view's frame; nothing here may clip it.
@@ -96,7 +105,14 @@ final class AttentionDotView: NSView {
             ringLayer.opacity = 0
             layer?.addSublayer(ringLayer)
         }
-        dotLayer.backgroundColor = color
+        if attention == .cutOff {
+            // A ring of the dot's own size: the same footprint, emptied.
+            // 1.5pt lands on whole pixels at 2× and leaves a 3–4pt hole.
+            dotLayer.borderColor = color
+            dotLayer.borderWidth = 1.5
+        } else {
+            dotLayer.backgroundColor = color
+        }
         dotLayer.cornerRadius = diameter / 2
         dotLayer.bounds = CGRect(x: 0, y: 0, width: diameter, height: diameter)
         dotLayer.position = center
@@ -111,7 +127,11 @@ final class AttentionDotView: NSView {
     /// `probe:attention`: the state, the motions running, and visibility.
     var debugLine: String {
         let motions = (dotLayer.animationKeys() ?? []) + (ringLayer.animationKeys() ?? [])
-        return "\(attention.rawValue) d=\(diameter) motions=\(motions) hidden=\(isHiddenOrHasHiddenAncestor)"
+        let elapsed = String(format: "%.2f", Date().timeIntervalSince(cycleStart))
+        let shown = String(format: "%.2f", dotLayer.presentation()?.opacity ?? dotLayer.opacity)
+        let hollow = dotLayer.borderWidth > 0 && dotLayer.backgroundColor == nil
+        return "\(attention.rawValue) d=\(diameter) motions=\(motions) cycle=\(elapsed)s opacity=\(shown)"
+            + "\(hollow ? " hollow" : "") hidden=\(isHiddenOrHasHiddenAncestor)"
     }
 
     override func viewDidMoveToWindow() {
@@ -127,11 +147,7 @@ final class AttentionDotView: NSView {
             breath.autoreverses = true
             breath.repeatCount = .infinity
             breath.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            // Phase-locked like the ring: a dot that turns blue joins the
-            // breath already under way, so a row of them rises and falls
-            // together.
-            let now = CACurrentMediaTime()
-            breath.beginTime = dotLayer.convertTime(now - fmod(now, Self.breathBeat), from: nil)
+            breath.beginTime = cycleBegin(in: dotLayer)
             dotLayer.add(breath, forKey: "breath")
         case .doneUnseen, .needsInputUnseen:
             if reduceMotion {
@@ -145,15 +161,19 @@ final class AttentionDotView: NSView {
             }
             guard ringLayer.animation(forKey: "ring") == nil else { return }
             let ring = Self.ringAnimation(diameter: diameter)
-            // Phase-locked to one app-wide beat: every unseen dot, wherever
-            // it is and whenever it arrived, rings on the same count — a
-            // row of them reads as one signal, not a scatter.
-            let now = CACurrentMediaTime()
-            ring.beginTime = ringLayer.convertTime(now - fmod(now, Self.ringBeat), from: nil)
+            ring.beginTime = cycleBegin(in: ringLayer)
             ringLayer.add(ring, forKey: "ring")
-        case .empty, .waiting, .needsInput, .none:
+        case .empty, .waiting, .needsInput, .cutOff, .none:
             return
         }
+    }
+
+    /// `cycleStart` on `layer`'s clock: a dot drawn mid-state (a tab
+    /// rebuilt, a project tab come back) picks its motion up where it
+    /// stands rather than starting over.
+    private func cycleBegin(in layer: CALayer) -> CFTimeInterval {
+        let elapsed = max(0, Date().timeIntervalSince(cycleStart))
+        return layer.convertTime(CACurrentMediaTime() - elapsed, from: nil)
     }
 
     private static func ringAnimation(diameter: CGFloat) -> CAAnimation {

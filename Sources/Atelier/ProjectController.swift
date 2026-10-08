@@ -872,7 +872,10 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// silent ones dropped. Each names its session, so a dot is a way there.
     var attentionMarks: [ProjectMark] {
         barOrder.map { sessions[$0] }.filter { $0.attention != .none }.map {
-            ProjectMark(sessionId: $0.id, attention: $0.attention, title: $0.displayTitle, since: $0.attentionSince)
+            ProjectMark(
+                sessionId: $0.id, attention: $0.attention, title: $0.displayTitle,
+                since: $0.attentionSince, cycleStart: $0.attentionCycleStart
+            )
         }
     }
 
@@ -1043,7 +1046,8 @@ final class ProjectController: NSObject, BottomBarDelegate {
                 groupKey: key,
                 groupLabel: folderLabel(for: session, key: key),
                 attention: session.attention,
-                attentionSince: session.attentionSince
+                attentionSince: session.attentionSince,
+                cycleStart: session.attentionCycleStart
             )
         }
     }
@@ -1087,13 +1091,15 @@ final class ProjectController: NSObject, BottomBarDelegate {
             // dot follows how it began (SessionStart's `source`, owner call
             // 2026-10-07): nothing in it yet — a launch, or `/clear` — is
             // grey; a resumed one is your move, unless a completion is still
-            // unseen (a relaunch keeps that ringing until you look); a
+            // unseen (a relaunch keeps that ringing until you look) or its
+            // last turn was cut off (that holds until the next prompt); a
             // compaction, or a helper too old to say, changes nothing.
             refreshTitles()
+            let current = sessions[index].attention
             switch message.source {
             case "startup", "clear":
                 sessions[index].attention = .empty
-            case "resume" where !sessions[index].attention.isUnseen:
+            case "resume" where !current.isUnseen && current != .cutOff:
                 sessions[index].attention = .waiting
             default:
                 return true
@@ -1115,7 +1121,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
             switch sessions[index].attention {
             case .working, .needsInput: sessions[index].attention = .waiting
             case .needsInputUnseen: sessions[index].attention = .doneUnseen
-            case .none, .empty, .waiting, .doneUnseen: return true
+            case .none, .empty, .waiting, .doneUnseen, .cutOff: return true
             }
         case .stop:
             sessions[index].attention = onScreen ? .waiting : .doneUnseen
@@ -1175,6 +1181,19 @@ final class ProjectController: NSObject, BottomBarDelegate {
                    [.working, .needsInput, .needsInputUnseen].contains(session.attention) {
                     session.attention = .waiting
                     changed = true
+                }
+                // Cut off (2026-10-07): a restored agent whose conversation
+                // stops mid-turn — Atelier crashed or lost power under it
+                // and saved nothing to say so (a quit already did, on
+                // restore). One look, the first read after relaunch, before
+                // the agent can start a turn of its own.
+                if session.checksCutOff {
+                    session.checksCutOff = false
+                    if reading?.turnOpen == true, [.none, .waiting].contains(session.attention) {
+                        NSLog("Atelier: tab \(session.id) came back cut off — its last turn never ended")
+                        session.attention = .cutOff
+                        changed = true
+                    }
                 }
             }
             if changed { self.updateBottomBar() }

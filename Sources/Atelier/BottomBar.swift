@@ -43,6 +43,8 @@ struct SessionTabInfo {
     /// When the attention state began — surfaced only in the hover tooltip
     /// (§1.3: time on inquiry, never pushed).
     let attentionSince: Date?
+    /// Where the dot's motion stands (`Session.attentionCycleStart`).
+    var cycleStart: Date? = nil
 }
 
 /// The bottom bar (MILESTONE_1 §7, revised 2026-09-03). Static project pill
@@ -1276,6 +1278,11 @@ final class BottomBar: NSView {
             case .empty, .working, .waiting, .doneUnseen, .needsInput, .needsInputUnseen:
                 Theme.attentionColor(attention).setFill()
                 NSBezierPath(ovalIn: NSRect(x: 2, y: 2, width: 6, height: 6)).fill()
+            case .cutOff:
+                Theme.attentionColor(attention).setStroke()
+                let ring = NSBezierPath(ovalIn: NSRect(x: 2.75, y: 2.75, width: 4.5, height: 4.5))
+                ring.lineWidth = 1.5
+                ring.stroke()
             }
             return true
         }
@@ -1408,6 +1415,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     private var badgeView: NSView?
     private var attention: Session.Attention = .none
     private var attentionSince: Date?
+    private var cycleStart: Date?
     private var isActive = false
     private var applied = false
     private var toolTipRect: CGRect = .null
@@ -1515,6 +1523,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
             closeButton.alphaValue = Self.closeRestAlpha
         }
         attentionSince = info.attentionSince
+        cycleStart = info.cycleStart
         setAttention(info.attention, animated: applied)
         applied = true
         needsLayout = true
@@ -1665,7 +1674,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         }
 
         guard newAttention != .none else { return }
-        let badge = Self.makeBadge(for: newAttention)
+        let badge = AttentionDotView(attention: newAttention, diameter: 6, cycleStart: cycleStart)
         addSubview(badge)
         badgeView = badge
         layout()
@@ -1689,10 +1698,6 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
             arrival.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             dot.add(arrival, forKey: "arrival")
         }
-    }
-
-    private static func makeBadge(for attention: Session.Attention) -> NSView {
-        AttentionDotView(attention: attention, diameter: 6)
     }
 
     override func mouseDown(with event: NSEvent) {
