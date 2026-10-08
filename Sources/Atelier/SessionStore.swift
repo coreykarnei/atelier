@@ -29,6 +29,11 @@ struct PersistedSession: Codable {
 struct PersistedWindow: Codable {
     var sessions: [PersistedSession]
     var activeIndex: Int
+    /// The folder the project was opened on (`ProjectController.projectRoot`)
+    /// — its name, kept so a relaunch doesn't rename the project after
+    /// whichever session comes back first. Nil for a remote or unpromoted
+    /// project, and in older snapshots.
+    var root: String? = nil
 }
 
 struct PersistedState: Codable {

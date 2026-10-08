@@ -84,6 +84,15 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// Rebuild a project from a snapshot (sessions are pre-validated by the caller).
     convenience init(restored: PersistedWindow) {
         self.init(chrome: ())
+        // The folder that was opened, not whichever session comes back first
+        // — a worktree's, once the main checkout's sessions have all closed.
+        // Older snapshots carry no root; `noteProjectRoot` infers one.
+        if let root = restored.root, restored.sessions.contains(where: \.isIDE) {
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: root, isDirectory: &isDir), isDir.boolValue {
+                anchor(on: root)
+            }
+        }
         for persisted in restored.sessions {
             adopt(Session(restored: persisted))
         }
@@ -138,7 +147,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
 
     /// Snapshot for the session store.
     func persisted() -> PersistedWindow {
-        PersistedWindow(sessions: sessions.map { $0.persisted() }, activeIndex: activeIndex)
+        PersistedWindow(sessions: sessions.map { $0.persisted() }, activeIndex: activeIndex, root: projectRoot)
     }
 
     // MARK: Shelf
@@ -191,11 +200,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
         }
         // Anchor on the folder that was opened, not on whichever session
         // happens to come back first (a worktree's, say).
-        if RemoteTarget.parse(key) == nil {
-            projectRoot = key
-            projectRepoRoot = WorktreeManager.repoRoot(for: key)
-            refreshMainBranch()
-        }
+        if RemoteTarget.parse(key) == nil { anchor(on: key) }
         for persisted in restorable { adopt(Session(restored: persisted)) }
         showSession(at: restorable.firstIndex { $0.claudeSessionId == activeId } ?? 0)
         updateBottomBar()
@@ -378,14 +383,25 @@ final class ProjectController: NSObject, BottomBarDelegate {
             refreshTitle()
             return
         }
-        if projectRoot == nil {
-            projectRoot = session.cwd
-            // No `?? cwd` fallback: nil *means* "not a repo", which is what
-            // every worktree gate below reads it for.
-            projectRepoRoot = WorktreeManager.repoRoot(for: session.cwd)
-            refreshMainBranch()
-        }
+        if projectRoot == nil { anchor(on: session.cwd) }
         refreshTitle()
+    }
+
+    /// Cache the folder this project was opened on and the repo behind it.
+    /// A linked worktree is never the project — it's a folder *in* one, and
+    /// its folder label already names it — so a worktree anchors on the
+    /// primary checkout: a project whose only sessions are in `reimagine`,
+    /// relaunched, is still `llm-dungeon-master` (owner report 2026-10-07).
+    private func anchor(on folder: String) {
+        // No `?? folder` fallback: nil *means* "not a repo", which is what
+        // every worktree gate reads it for.
+        projectRepoRoot = WorktreeManager.repoRoot(for: folder)
+        if folder.hasPrefix(WorktreeManager.base + "/"), let primary = projectRepoRoot {
+            projectRoot = primary
+        } else {
+            projectRoot = folder
+        }
+        refreshMainBranch()
     }
 
     /// The project's name, nothing else (owner call 2026-09-10): the worktree

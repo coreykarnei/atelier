@@ -578,6 +578,21 @@ fine. A test `session.json` can be written by hand (`windows[].sessions[]`
 with `cwd`, `isIDE`, `layoutMode`, `title`, `claudeSessionId`, `dividers`,
 `attention`) to restore chosen conversations — never a live tab's.
 
+**A worktree never names the project** (2026-10-07, owner report: a
+relaunched llm-dungeon-master whose only sessions were in `⎇ reimagine`
+came back titled `reimagine`, top tab and pill). The snapshot kept each
+session's cwd but not the folder the project was opened on, so a restore
+anchored on whichever IDE session came back first. `PersistedWindow.root`
+now records `projectRoot` (quit snapshot and shelf alike) and the restore
+anchors on it before adopting; and `ProjectController.anchor(on:)` — the
+one setter, shared by a first promotion, a relaunch and a shelf restore —
+maps a folder under `WorktreeManager.base` to its primary checkout, which
+also mends older snapshots, `⌘⇧T` after the last tab closed, and a
+worktree picked straight from the Landing. Verified in a test instance
+with a hand-written legacy snapshot: worktree-only → the repo's name,
+recorded root → kept, a plain subfolder project → unchanged; ⌘Q wrote
+`root` for each window.
+
 ## Commands
 
 - `make build` — compile all targets via SwiftPM.
