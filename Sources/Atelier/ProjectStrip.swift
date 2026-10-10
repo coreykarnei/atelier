@@ -87,7 +87,7 @@ final class ProjectStripView: NSView {
         super.init(frame: frameRect)
         newButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "New project tab")
         newButton.symbolConfiguration = .init(pointSize: 10, weight: .medium)
-        newButton.contentTintColor = Theme.chromeMutedText
+        newButton.contentTintColor = Theme.chromeText
         newButton.alphaValue = HoverPadButton.restingAlpha
         newButton.toolTip = "New Project Tab  ⌘T"
         newButton.target = self
@@ -367,7 +367,6 @@ private final class ProjectTabView: NSView {
         self.id = id
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = Theme.Elevation.radiusMedium
 
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.font = Theme.Typography.mono(Theme.Typography.body, weight: .medium)
@@ -424,12 +423,16 @@ private final class ProjectTabView: NSView {
     }
 
     private func restyle() {
-        // Ghostty's read (owner call 2026-09-10): the selected tab is flush
-        // with the app's surface — the panes' base — while the others sit
-        // darker (crust) in the mantle row. Three rungs of the z-ramp, the
-        // selected one continuous with the content below it.
-        let fill: NSColor = isActive ? Theme.Elevation.base : Theme.Elevation.crust
+        // The selected tab is a raised chip — surface0, opaque, rounded —
+        // and the others lie flat and square, wells of crust in the frame
+        // (owner call 2026-10-10). It used to be flush with the panes' base
+        // (2026-09-10), but base and crust sit one rung apart and both
+        // thinned with the field opacity, so turned down they read as one
+        // colour and the selected project got lost. The wells hold the
+        // frame's floor, so over a light window they still sit darker.
+        let fill: NSColor = isActive ? Theme.Elevation.surface0 : Theme.Elevation.frameWell
         layer?.backgroundColor = fill.cgColor
+        layer?.cornerRadius = isActive ? Theme.Elevation.radiusMedium : 0
         titleLabel.textColor = isActive ? Theme.chromeSelectedText : Theme.chromeText
         // Invisible until the pointer is over the tab (the session tabs'
         // rule); the slot stays reserved so the title never shifts.

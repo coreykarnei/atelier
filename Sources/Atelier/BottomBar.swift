@@ -83,10 +83,12 @@ final class BottomBar: NSView {
     private static let folderPadX: CGFloat = 6
     private static let folderPadY: CGFloat = 2
     private static let folderTabHeight: CGFloat = 13
-    /// Between folders — clearly more than any space inside one, so a `+`
-    /// at a cell's trailing end reads as that folder's (owner feel-check
-    /// 2026-09-17: at 10pt the `+` floated in the gap between folders).
-    private static let folderGap: CGFloat = 14
+    /// Between folders. The cells' own fills mark where each ends and the
+    /// `+` sits inside its cell, so the gap only has to part them — the
+    /// `⎇+`'s standoff, the nearest a neighbour comes without crowding a
+    /// cell (owner call 2026-10-10: the 14pt set on 2026-09-17, when the
+    /// `+` still whispered at the cell's edge, read as too wide).
+    private static let folderGap: CGFloat = 8
     private static let buttonGap: CGFloat = 6
     /// Each folder's own `+` (2026-09-16): a slot reserved at the cell's
     /// trailing end, always, so hovering never reflows the strip. The glyph
@@ -112,8 +114,8 @@ final class BottomBar: NSView {
     /// the row's `⎇+` reading at full, a dimmed folder `+` beside it was
     /// merely hard to see). The pad under the pointer is the hover feedback.
     /// The standoff the `⎇+` keeps from the last folder's cell: clear of the
-    /// folder, so it never reads as that worktree's second button, but well
-    /// short of the `folderGap` a folder would take.
+    /// folder, so it never reads as that worktree's second button — the
+    /// same remove the next folder would keep.
     private static let worktreeAddStandoff: CGFloat = 8
     /// Bare tabs have no cell edge to set the `⎇+` apart from the `+`, so a
     /// hairline does it and the gap widens to seat it at the run's rhythm —
@@ -532,8 +534,8 @@ final class BottomBar: NSView {
         guard let previous else { return 0 }
         if case .folder = previous, case .folder = item { return Self.folderGap }
         // The `⎇+` is the row's control, not any folder's. With folders
-        // drawn it stands off the last cell by a full `folderGap`, the way
-        // the next folder would — crowding the cell's edge made it read as
+        // drawn it stands off the last cell as far as the next folder
+        // would — crowding the cell's edge made it read as
         // that worktree's second button (owner report 2026-09-21). Bare, the
         // `+` beside it is a loose glyph too, so it follows at the same
         // remove the `+` keeps from its last tab.
@@ -1792,6 +1794,12 @@ private final class TabsAreaView: NSView {
 private final class FolderView: NSView {
     private static let radius: CGFloat = Theme.Elevation.radiusSmall
     private static let tabHeight: CGFloat = 13
+    /// The label tab's right side slants out to the right, a manila
+    /// folder's tab, its foot flaring into the cell's top edge (owner call
+    /// 2026-10-10): how far right the foot lands past the top edge's end.
+    private static let labelSlant: CGFloat = 7
+    /// Air between the label's text and the top of the slant.
+    private static let labelTextTrail: CGFloat = 4
     private var label: String?
     private var fill: NSColor = .clear
     private var coat: NSColor = .clear
@@ -2004,7 +2012,8 @@ private final class FolderView: NSView {
     /// A label tab's natural width: text plus insets. The flow sizes cells by it.
     static func labelWidth(for label: String) -> CGFloat {
         let (tree, text) = split(label)
-        return ceil((text as NSString).size(withAttributes: labelAttributes).width) + 14 + (tree ? treeGlyphWidth : 0)
+        let textWidth = ceil((text as NSString).size(withAttributes: labelAttributes).width)
+        return textWidth + 7 + labelTextTrail + labelSlant + (tree ? treeGlyphWidth : 0)
     }
 
     /// The label tab's width: its text plus insets, never wider than the cell.
@@ -2019,15 +2028,18 @@ private final class FolderView: NSView {
         let cellTop = bounds.height - Self.tabHeight
         let path = NSBezierPath()
         if label != nil {
+            // `tabWidth` is the slant's foot on the cell's top edge, the
+            // shoulder where the slant meets the label's top edge.
             let tabWidth = labelTabWidth()
+            let shoulder = tabWidth - Self.labelSlant
             let top = bounds.height
             // Clockwise from the cell's bottom-left, around the cell, up the
-            // label tab, and back down its left edge.
+            // label tab's slant, and back down its left edge.
             path.move(to: NSPoint(x: r, y: 0))
             path.appendArc(from: NSPoint(x: width, y: 0), to: NSPoint(x: width, y: cellTop), radius: r)
             path.appendArc(from: NSPoint(x: width, y: cellTop), to: NSPoint(x: tabWidth, y: cellTop), radius: r)
-            path.line(to: NSPoint(x: tabWidth, y: cellTop))
-            path.appendArc(from: NSPoint(x: tabWidth, y: top), to: NSPoint(x: 0, y: top), radius: r)
+            path.appendArc(from: NSPoint(x: tabWidth, y: cellTop), to: NSPoint(x: shoulder, y: top), radius: r)
+            path.appendArc(from: NSPoint(x: shoulder, y: top), to: NSPoint(x: 0, y: top), radius: r)
             path.appendArc(from: NSPoint(x: 0, y: top), to: NSPoint(x: 0, y: 0), radius: r)
             path.appendArc(from: NSPoint(x: 0, y: 0), to: NSPoint(x: width, y: 0), radius: r)
             path.close()
@@ -2039,6 +2051,8 @@ private final class FolderView: NSView {
 
         if let label {
             let tabWidth = labelTabWidth()
+            let shoulder = tabWidth - Self.labelSlant
+            let top = bounds.height
             let (tree, text) = Self.split(label)
             // The label tab rises over pane content: give it a second coat so
             // it reads as the folder's edge sitting *on* the bar, not a stain.
@@ -2046,9 +2060,10 @@ private final class FolderView: NSView {
             // the cell, the way a folder's tab does (owner call 2026-09-08).
             let tabPath = NSBezierPath()
             tabPath.move(to: NSPoint(x: 0, y: cellTop))
-            tabPath.appendArc(from: NSPoint(x: 0, y: bounds.height), to: NSPoint(x: tabWidth, y: bounds.height), radius: r)
-            tabPath.appendArc(from: NSPoint(x: tabWidth, y: bounds.height), to: NSPoint(x: tabWidth, y: cellTop), radius: r)
-            tabPath.line(to: NSPoint(x: tabWidth, y: cellTop))
+            tabPath.appendArc(from: NSPoint(x: 0, y: top), to: NSPoint(x: shoulder, y: top), radius: r)
+            tabPath.appendArc(from: NSPoint(x: shoulder, y: top), to: NSPoint(x: tabWidth, y: cellTop), radius: r)
+            // the foot's flare, exactly as the cell's outline draws it
+            tabPath.appendArc(from: NSPoint(x: tabWidth, y: cellTop), to: NSPoint(x: width, y: cellTop), radius: r)
             tabPath.close()
             coat.setFill()
             tabPath.fill()
@@ -2064,7 +2079,7 @@ private final class FolderView: NSView {
             let rect = NSRect(
                 x: textX,
                 y: cellTop + (Self.tabHeight - size.height) / 2 + 0.5,
-                width: tabWidth - textX - 7,
+                width: shoulder - Self.labelTextTrail - textX,
                 height: size.height
             )
             attributed.draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])

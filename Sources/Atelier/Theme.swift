@@ -74,9 +74,12 @@ enum Theme {
         /// that only the panes keep going (owner report 2026-10-10: at 0.3
         /// over a light window the bar's clock, buttons and `+` all but
         /// vanished).
-        static var frame: NSColor {
-            nsColor(0x181825).withAlphaComponent(max(Theme.effectiveFieldAlpha, frameFloor))
-        }
+        static var frame: NSColor { nsColor(0x181825).withAlphaComponent(frameAlpha) }
+        /// A well set into a frame — the project strip's unselected tabs —
+        /// crust that holds the frame's floor, so it stays darker than the
+        /// raised selected tab over any window behind.
+        static var frameWell: NSColor { nsColor(0x11111B).withAlphaComponent(frameAlpha) }
+        static var frameAlpha: CGFloat { max(Theme.effectiveFieldAlpha, frameFloor) }
         static let frameFloor: CGFloat = 0.75
         /// Content — the terminals.
         static var base: NSColor { translucent(0x1E1E2E) }
