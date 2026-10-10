@@ -335,13 +335,23 @@ final class Session: NSObject, NSSplitViewDelegate {
         title = (root as NSString).lastPathComponent
         RecentsStore.record(root)
 
-        // Re-root the live shell — same move the `ide` script makes (send-keys cd).
-        shellPane.send(text: " cd '\(root)' && clear\r")
         editorPane.setRoot(root)
         startAgent()
 
         rebuildLayout()
         landingView = nil
+        container.window?.refreshShadowAfterLayout()
+
+        // Re-root the live shell — same move the `ide` script makes (send-keys cd) —
+        // once its pane has its IDE size. Sent before the layout, zsh drew the fresh
+        // prompt at the Landing's width: its PROMPT_SP filler (COLUMNS−1 spaces)
+        // wrapped twice in the narrower pane and left the prompt on the third line
+        // (2026-10-08). Lay out now, so the resize reaches the shell first.
+        container.layoutSubtreeIfNeeded()
+        let shell = shellPane
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            shell.send(text: " cd '\(root)' && clear\r")
+        }
         onPromoted?()
     }
 

@@ -35,3 +35,20 @@ enum WindowBackgroundBlur {
         return setBlurRadius(mainConnection(), UInt32(window.windowNumber), UInt32(radius)) == 0
     }
 }
+
+extension NSWindow {
+    /// A translucent window's shadow is derived from the shape of what it has
+    /// drawn — when it's first shown and on a resize, never on a content change.
+    /// A window that opened on the Landing kept the card's shadow after the
+    /// Landing gave way, and through the translucent panes it read as a faint
+    /// copy of the card that never left (2026-10-08: +3 levels on 0–255, gone
+    /// once the shadow was recomputed). Call after a Landing is swapped out:
+    /// the shadow is recomputed once the new layout is on screen.
+    func refreshShadowAfterLayout() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self else { return }
+            self.displayIfNeeded()
+            self.invalidateShadow()
+        }
+    }
+}

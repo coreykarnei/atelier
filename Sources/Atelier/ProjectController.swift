@@ -204,6 +204,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
         for persisted in restorable { adopt(Session(restored: persisted)) }
         showSession(at: restorable.firstIndex { $0.claudeSessionId == activeId } ?? 0)
         updateBottomBar()
+        if landing != nil { view.window?.refreshShadowAfterLayout() }
         return true
     }
 
@@ -325,6 +326,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
         landing.container.removeFromSuperview()
         sessions.remove(at: index)
         adopt(Session(remoteHost: host, remoteDir: dir), at: index)
+        view.window?.refreshShadowAfterLayout()
     }
 
     private func adopt(_ session: Session, at index: Int? = nil) {
