@@ -51,21 +51,87 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
     /// does NOT request authorization — that prompt fires on first promote
     /// (the moment the first agent exists; POLISH_PLAN §5), via
     /// `NotificationPermission.requestOnce()`.
-    func start() {
-        UNUserNotificationCenter.current().delegate = self
-        bind()
+    ///
+    /// Returns false, touching nothing, when another Atelier already answers
+    /// on this state directory's socket (owner report 2026-10-08: a film
+    /// build launched without `ATELIER_STATE_DIR` unlinked the live app's
+    /// socket, then deleted its own on quit — every hook after that was
+    /// dropped, and the live app's dots stopped moving).
+    func start() -> Bool {
+        let bound: Bool = queue.sync {
+            if AtelierIPC.isAppListening() { return false }
+            bind()
+            return true
+        }
+        if bound { UNUserNotificationCenter.current().delegate = self }
+        return bound
     }
 
     func stop() {
-        acceptSource?.cancel()
-        if listenFD >= 0 { close(listenFD) }
-        unlink(AtelierIPC.socketPath())
+        queue.sync {
+            directoryWatch?.cancel()
+            directoryWatch = nil
+            // Only our own socket: a path some other instance bound since
+            // is theirs to remove.
+            let ours = ownsSocketPath
+            closeListener()
+            if ours { unlink(AtelierIPC.socketPath()) }
+        }
     }
 
     // MARK: Socket
 
+    /// The socket file we bound, by identity — a path is only ours while
+    /// it still names this inode.
+    private var boundFile: (dev: dev_t, ino: ino_t)?
+
+    /// Watches the state directory, so a socket removed or replaced from
+    /// outside — another instance's start or quit, an `rm` — is rebound at
+    /// once instead of leaving every hook to fail until relaunch.
+    private var directoryWatch: DispatchSourceFileSystemObject?
+
+    private var ownsSocketPath: Bool {
+        var st = stat()
+        guard let boundFile, stat(AtelierIPC.socketPath(), &st) == 0 else { return false }
+        return st.st_dev == boundFile.dev && st.st_ino == boundFile.ino
+    }
+
+    private func closeListener() {
+        acceptSource?.cancel()
+        acceptSource = nil
+        if listenFD >= 0 { close(listenFD) }
+        listenFD = -1
+        boundFile = nil
+    }
+
+    /// The directory changed: if our socket is no longer at its path, bind
+    /// a fresh one there. The first instance owns the directory — an older
+    /// build that took the path on launch gives it back here.
+    private func reclaimIfLost() {
+        guard boundFile != nil, !ownsSocketPath else { return }
+        NSLog("Atelier: notification socket was removed or replaced — rebinding")
+        closeListener()
+        bind()
+    }
+
+    private func watchDirectory(_ dir: String) {
+        directoryWatch?.cancel()
+        let fd = open(dir, O_EVTONLY)
+        guard fd >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd, eventMask: [.write, .delete, .rename], queue: queue
+        )
+        source.setEventHandler { [weak self] in self?.reclaimIfLost() }
+        source.setCancelHandler { close(fd) }
+        source.resume()
+        directoryWatch = source
+    }
+
+    /// On `queue`, like everything that touches the listener.
     private func bind() {
         let path = AtelierIPC.ensureSocketDirectory()
+        // A deleted directory is recreated above; watch whichever is there now.
+        watchDirectory((path as NSString).deletingLastPathComponent)
         unlink(path) // clear any stale socket from a previous run
 
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -92,6 +158,8 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
         guard bound == 0 else { NSLog("Atelier: bind() failed errno=\(errno)"); close(fd); return }
         guard listen(fd, 8) == 0 else { NSLog("Atelier: listen() failed"); close(fd); return }
 
+        var st = stat()
+        if stat(path, &st) == 0 { boundFile = (st.st_dev, st.st_ino) }
         listenFD = fd
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
         source.setEventHandler { [weak self] in self?.acceptOne() }

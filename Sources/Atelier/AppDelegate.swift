@@ -46,7 +46,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-        notificationServer.start()
+        guard notificationServer.start() else {
+            // Another Atelier owns this state directory — a dev build opened
+            // beside the live app without ATELIER_STATE_DIR. Restoring would
+            // resume each of its conversations a second time, and quitting
+            // would snapshot over its session file: leave before either.
+            NSLog("Atelier: another Atelier is listening at \(AtelierIPC.socketPath()) — quitting (set ATELIER_STATE_DIR to run beside it)")
+            exit(1)
+        }
 
         restoreOrOpenFresh()
         if ProcessInfo.processInfo.environment["ATELIER_DEBUG_ATTENTION"] != nil {

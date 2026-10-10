@@ -144,15 +144,33 @@ extension AtelierIPC {
     /// Connect to the app's socket and write one message line. Returns false if
     /// the app isn't listening (callers decide whether to launch it and retry).
     public static func send(line: Data) -> Bool {
+        guard let fd = connectToApp() else { return false }
+        defer { close(fd) }
+        let written = line.withUnsafeBytes { raw in
+            write(fd, raw.baseAddress, raw.count)
+        }
+        return written == line.count
+    }
+
+    /// Whether an Atelier already answers on this state directory's socket.
+    /// The app asks before it binds: a second instance on one directory
+    /// would take the first one's hooks and resume its conversations twice.
+    public static func isAppListening() -> Bool {
+        guard let fd = connectToApp() else { return false }
+        close(fd)
+        return true
+    }
+
+    /// A socket connected to the app, or nil if nothing is listening.
+    private static func connectToApp() -> Int32? {
         let path = socketPath()
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { return false }
-        defer { close(fd) }
+        guard fd >= 0 else { return nil }
 
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         let bytes = Array(path.utf8)
-        guard bytes.count < MemoryLayout.size(ofValue: addr.sun_path) else { return false }
+        guard bytes.count < MemoryLayout.size(ofValue: addr.sun_path) else { close(fd); return nil }
         withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
             ptr.withMemoryRebound(to: CChar.self, capacity: bytes.count + 1) { dst in
                 for (i, b) in bytes.enumerated() { dst[i] = CChar(bitPattern: b) }
@@ -164,10 +182,7 @@ extension AtelierIPC {
                 connect(fd, sp, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        guard connected == 0 else { return false }
-        let written = line.withUnsafeBytes { raw in
-            write(fd, raw.baseAddress, raw.count)
-        }
-        return written == line.count
+        guard connected == 0 else { close(fd); return nil }
+        return fd
     }
 }
