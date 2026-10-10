@@ -65,8 +65,19 @@ enum Theme {
     enum Elevation {
         /// Recessed wells — empty results panel, editor placeholder field.
         static var crust: NSColor { translucent(0x11111B) }
-        /// Bars and frames — the bottom bar.
+        /// Mantle fields — the Landing, the editor's header strips.
         static var mantle: NSColor { translucent(0x181825) }
+        /// The window's frames — the titlebar strip and the bottom bar —
+        /// mantle that holds its ground: it follows the fields down to the
+        /// default (the owner's tuned 0.75) and stops there, so the chrome
+        /// on it keeps its contrast however far the slider goes. Below
+        /// that only the panes keep going (owner report 2026-10-10: at 0.3
+        /// over a light window the bar's clock, buttons and `+` all but
+        /// vanished).
+        static var frame: NSColor {
+            nsColor(0x181825).withAlphaComponent(max(Theme.effectiveFieldAlpha, frameFloor))
+        }
+        static let frameFloor: CGFloat = 0.75
         /// Content — the terminals.
         static var base: NSColor { translucent(0x1E1E2E) }
         /// Raised controls — active tab, keycap chips.

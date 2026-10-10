@@ -9,13 +9,14 @@ protocol ProjectHost: AnyObject {
     func projectDidChangeSessions(_ project: ProjectController)
 }
 
-/// The mantle wash under the titlebar strip (§3.1). Mirrors the field
-/// surfaces' translucency handling.
+/// The mantle wash under the titlebar strip (§3.1) — one of the window's
+/// frames (`Theme.Elevation.frame`), with the field surfaces' translucency
+/// handling.
 private final class TitlebarWashView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+        layer?.backgroundColor = Theme.Elevation.frame.cgColor
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
             selector: #selector(accessibilityDisplayChanged),
@@ -39,11 +40,11 @@ private final class TitlebarWashView: NSView {
     }
 
     override func updateLayer() {
-        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+        layer?.backgroundColor = Theme.Elevation.frame.cgColor
     }
 
     @objc private func accessibilityDisplayChanged() {
-        layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+        layer?.backgroundColor = Theme.Elevation.frame.cgColor
     }
 
     /// The hidden-title titlebar passes clicks through to this wash, so the

@@ -197,7 +197,7 @@ final class BottomBar: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         backdrop.wantsLayer = true
-        backdrop.layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+        backdrop.layer?.backgroundColor = Theme.Elevation.frame.cgColor
         build()
         startClock()
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -224,11 +224,11 @@ final class BottomBar: NSView {
     }
 
     override func updateLayer() {
-        backdrop.layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+        backdrop.layer?.backgroundColor = Theme.Elevation.frame.cgColor
     }
 
     @objc private func accessibilityDisplayChanged() {
-        backdrop.layer?.backgroundColor = Theme.Elevation.mantle.cgColor
+        backdrop.layer?.backgroundColor = Theme.Elevation.frame.cgColor
     }
 
     /// The overhang band is transparent: a point up there is the pane's unless
@@ -309,10 +309,13 @@ final class BottomBar: NSView {
 
         // The clock is mono (§1.4) with the colon split out so it can breathe
         // (§1.1 motion inventory item 3: ~1 Hz opacity ease — a breath, not a
-        // blink). JetBrains Mono keeps the line from shifting under it.
+        // blink). JetBrains Mono keeps the line from shifting under it. It and
+        // the bar's buttons are chrome text at full, like the tab titles and
+        // the `+`: muted, they were merely hard to read (owner report
+        // 2026-10-10, the `+`'s own lesson of 2026-09-21).
         for label in [clockPrefixLabel, clockColonLabel, clockSuffixLabel] {
             label.font = Theme.Typography.mono(Theme.Typography.body)
-            label.textColor = Theme.chromeMutedText
+            label.textColor = Theme.chromeText
             label.translatesAutoresizingMaskIntoConstraints = false
             addSubview(label)
         }
@@ -395,7 +398,7 @@ final class BottomBar: NSView {
         button.isBordered = false
         button.imagePosition = .imageOnly
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        button.contentTintColor = Theme.chromeMutedText
+        button.contentTintColor = Theme.chromeText
         button.target = self
         button.action = action
     }
@@ -577,14 +580,14 @@ final class BottomBar: NSView {
             overflowButton.menu = overflowMenu(for: overflow)
             overflowButton.action = #selector(overflowTapped)
             // The `»` itself wears the loudest overflowed state (§7.1): peach
-            // for a block, green for an unseen completion, else muted. Still —
-            // no motion, no escalation.
+            // for a block, green for an unseen completion, else chrome text.
+            // Still — no motion, no escalation.
             if overflow.contains(where: { $0.attention == .needsInput || $0.attention == .needsInputUnseen }) {
                 overflowButton.contentTintColor = Theme.accentPeach
             } else if overflow.contains(where: { $0.attention == .doneUnseen }) {
                 overflowButton.contentTintColor = Theme.accentGreen
             } else {
-                overflowButton.contentTintColor = Theme.chromeMutedText
+                overflowButton.contentTintColor = Theme.chromeText
             }
             rows[rows.count - 1].append(.overflow)
         }
