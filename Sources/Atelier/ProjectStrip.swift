@@ -378,7 +378,7 @@ private final class ProjectTabView: NSView {
         closeButton.target = self
         closeButton.action = #selector(closeTapped)
         closeButton.isHidden = true
-        closeButton.alphaValue = 0
+        closeButton.alphaValue = HoverPadButton.closeRestAlpha
         addSubview(closeButton)
         installTracking()
     }
@@ -423,7 +423,7 @@ private final class ProjectTabView: NSView {
     }
 
     private func restyle() {
-        // The selected tab is a raised chip — surface0, opaque, rounded —
+        // The selected tab is a raised chip — surface0, opaque, a pill —
         // and the others lie flat and square, wells of crust in the frame
         // (owner call 2026-10-10). It used to be flush with the panes' base
         // (2026-09-10), but base and crust sit one rung apart and both
@@ -432,11 +432,13 @@ private final class ProjectTabView: NSView {
         // frame's floor, so over a light window they still sit darker.
         let fill: NSColor = isActive ? Theme.Elevation.surface0 : Theme.Elevation.frameWell
         layer?.backgroundColor = fill.cgColor
-        layer?.cornerRadius = isActive ? Theme.Elevation.radiusMedium : 0
+        layer?.cornerRadius = isActive ? ProjectStripView.tabHeight / 2 : 0
         titleLabel.textColor = isActive ? Theme.chromeSelectedText : Theme.chromeText
-        // Invisible until the pointer is over the tab (the session tabs'
-        // rule); the slot stays reserved so the title never shifts.
-        closeButton.alphaValue = hovered ? HoverPadButton.restingAlpha : 0
+        // Always drawn, a whisper until the pointer is over the tab — the
+        // session tabs' rule (owner call 2026-10-11; it hid until hover
+        // before). Closing only shelves the project now, so it costs nothing
+        // to keep in view.
+        closeButton.alphaValue = hovered ? HoverPadButton.closeHoverAlpha : HoverPadButton.closeRestAlpha
         closeButton.contentTintColor = optionHeld ? Theme.accentPeach : Theme.chromeText
         closeButton.setAccessibilityLabel(optionHeld ? "Close project and end sessions" : "Close project")
     }

@@ -1484,10 +1484,6 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
 
     /// The `×`'s pad: 16pt around an 8pt glyph, centred where the dot sits.
     static let closeWidth: CGFloat = 16
-    /// The `×` at rest and with the pointer over its tab (its own pad then
-    /// marks it under the pointer).
-    static let closeRestAlpha: CGFloat = 0.35
-    static let closeHoverAlpha: CGFloat = 0.85
 
     /// The tab's label: the title, then the `@host` mark for remote sessions —
     /// dropped when the title *is* the host ("jarvis @jarvis" says it once).
@@ -1525,7 +1521,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
             // A whisper at rest, so the tab always shows where it closes
             // (owner call 2026-09-17, replacing the invisible-until-hover of
             // 2026-07-13); the slot is reserved either way, nothing shifts.
-            closeButton.alphaValue = Self.closeRestAlpha
+            closeButton.alphaValue = HoverPadButton.closeRestAlpha
         }
         attentionSince = info.attentionSince
         cycleStart = info.cycleStart
@@ -1754,11 +1750,11 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        if !closeButton.isHidden { closeButton.alphaValue = Self.closeHoverAlpha }
+        if !closeButton.isHidden { closeButton.alphaValue = HoverPadButton.closeHoverAlpha }
     }
 
     override func mouseExited(with event: NSEvent) {
-        closeButton.alphaValue = Self.closeRestAlpha
+        closeButton.alphaValue = HoverPadButton.closeRestAlpha
     }
 
     @objc private func closeTapped() { onClose?(index) }

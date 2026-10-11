@@ -6,6 +6,11 @@ import AppKit
 /// dim; the pad says "this is a button" without the glyph shouting.
 final class HoverPadButton: NSButton {
     static let restingAlpha: CGFloat = 0.55
+    /// A selected tab's `×`, in either strip: a whisper at rest, so the tab
+    /// always shows where it closes, and plain over its tab (owner calls
+    /// 2026-09-17 for sessions, 2026-10-11 for projects).
+    static let closeRestAlpha: CGFloat = 0.35
+    static let closeHoverAlpha: CGFloat = 0.85
     /// The pad's colour; hosts on a dark fill use a light pad and vice versa.
     /// Brightened 2026-09-21 (owner call): at 10% over the bar's mantle the
     /// pad barely registered under a 12pt glyph.
