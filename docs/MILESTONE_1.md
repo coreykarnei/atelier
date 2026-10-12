@@ -103,6 +103,11 @@ is **promoted** into an IDE session:
   (refinement pass): closing the last session tab un-anchors the window into a
   fresh Landing; closing the last project window opens a fresh Landing window.
   Only `⌘Q` quits — which is also the persistence snapshot point (§9).
+  *Since revised:* the last project closing by hand closes the app
+  (2026-07-21), the close button is Quit (2026-09-23), and a project's last session closing
+  closes the project too, while other projects are open (2026-10-12) — only
+  the lone project still becomes a Landing, so `⌘W` never takes the window.
+  `⌘⇧T` brings a project closed that way back to its slot.
 
 ---
 
@@ -159,9 +164,9 @@ VSCode, and move only the bindings that *must* move to stop fighting the editor.
 | Next / prev session | `⌘⇧]` / `⌘⇧[` | browser/VSCode tab nav |
 | New project tab | `⌘T` | a Landing — matches Ghostty's new-tab muscle memory (revised during M1.3: the Landing is a *project* opener, so it lives at the project tier) |
 | New session (on main) | `⌥⌘T` | sibling session on the project's main checkout |
-| Reopen closed session | `⌘⇧T` | resurrects the last-closed session at its old position; the agent resumes its conversation |
+| Reopen closed session | `⌘⇧T` | resurrects the last-closed session at its old position — its project too, if that closed with it; the agent resumes its conversation |
 | Open IDE here | `⌘↩` | promote a Landing at the terminal's cwd |
-| Close session | `⌘W` | last one reverts the window to a Landing |
+| Close session | `⌘W` | the last one closes its project (the only project reverts to a Landing) |
 | Toggle layout | `⌘\` | Triptych ↔ Split |
 | Fuzzy file picker | `⌘P` | VSCode — locked |
 | Command palette | `⌘⇧P` | VSCode — locked |

@@ -7,6 +7,13 @@ protocol ProjectHost: AnyObject {
     func projectDidChangeTitle(_ project: ProjectController)
     /// Sessions were added/removed/re-badged: the project tab's marks follow.
     func projectDidChangeSessions(_ project: ProjectController)
+    /// The project's last session was closed by hand. True when the project
+    /// closed with it; false leaves it to carry on (as a Landing).
+    func projectDidCloseLastSession(_ project: ProjectController) -> Bool
+    /// `⌘⇧T` across the window: a session of the project on screen, or a
+    /// project that closed with its last session.
+    var canReopenClosedSession: Bool { get }
+    func reopenClosedSession()
 }
 
 /// The mantle wash under the titlebar strip (§3.1) — one of the window's
@@ -88,6 +95,11 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, Pro
     var activeProject: ProjectController? {
         projects.indices.contains(activeIndex) ? projects[activeIndex] : nil
     }
+
+    /// Projects that closed with their last session (⌘W), oldest → newest,
+    /// each with its old slot. Kept only while they hold a session `⌘⇧T`
+    /// can bring back; in memory, like the sessions' own reopen stack.
+    private var closedProjects: [(project: ProjectController, index: Int)] = []
 
     private let projectArea = NSView()
     private let strip = ProjectStripView()
@@ -234,10 +246,10 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, Pro
 
     // MARK: Projects
 
-    /// Adopt a project as a new tab (at the end). `activate` brings it on
-    /// screen; otherwise it starts hidden (restore fills the strip first,
-    /// then picks the tab that was active at quit).
-    func add(_ project: ProjectController, activate: Bool) {
+    /// Adopt a project as a new tab (at the end, or at `index`). `activate`
+    /// brings it on screen; otherwise it starts hidden (restore fills the
+    /// strip first, then picks the tab that was active at quit).
+    func add(_ project: ProjectController, at index: Int? = nil, activate: Bool) {
         project.host = self
         project.isActive = false
         project.view.isHidden = true
@@ -248,9 +260,11 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, Pro
             project.view.leadingAnchor.constraint(equalTo: projectArea.leadingAnchor),
             project.view.trailingAnchor.constraint(equalTo: projectArea.trailingAnchor),
         ])
-        projects.append(project)
+        let slot = min(index ?? projects.count, projects.count)
+        projects.insert(project, at: slot)
+        if slot <= activeIndex, projects.count > 1 { activeIndex += 1 }
         if activate || projects.count == 1 {
-            self.activate(index: projects.count - 1)
+            self.activate(index: slot)
         } else {
             refreshStrip()
         }
@@ -366,10 +380,16 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, Pro
             project.shelve()
             project.terminateAllSessions(killRemote: false)
         }
+        detach(at: index)
+    }
+
+    /// Take a project's tab out of the row; the neighbour that slides into
+    /// its slot comes on screen if it was the active one.
+    private func detach(at index: Int) {
+        let project = projects.remove(at: index)
         project.isActive = false
         project.view.removeFromSuperview()
         project.host = nil
-        projects.remove(at: index)
         if projects.isEmpty {
             window?.close()
             return
@@ -398,6 +418,59 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, Pro
 
     func projectDidChangeSessions(_ project: ProjectController) {
         refreshStrip()
+    }
+
+    /// ⌘W on a project's last session closes the project too (owner call
+    /// 2026-10-12): a tab that only turned back into a Landing was one more
+    /// thing to close. Nothing to shelve — its sessions were ended one by
+    /// one — so it waits in `closedProjects` for `⌘⇧T` instead. The only
+    /// project stays (it becomes a Landing): ⌘W never takes the window.
+    func projectDidCloseLastSession(_ project: ProjectController) -> Bool {
+        guard projects.count > 1, let index = projects.firstIndex(where: { $0 === project }) else { return false }
+        detach(at: index)
+        if project.canReopenClosedSession {
+            closedProjects.append((project, index))
+            if closedProjects.count > 10 { closedProjects.removeFirst().project.terminateAllSessions() }
+        } else {
+            // A closed Landing leaves nothing to reopen. The click that closed
+            // it may still be unwinding through the project's own bar, so
+            // the project outlives this turn.
+            DispatchQueue.main.async { withExtendedLifetime(project) {} }
+        }
+        return true
+    }
+
+    var canReopenClosedSession: Bool {
+        !closedProjects.isEmpty || activeProject?.canReopenClosedSession == true
+    }
+
+    /// `⌘⇧T` — the newest close comes back. A project closed after anything
+    /// the one on screen could reopen returns to its slot with the session
+    /// that closed it; otherwise the session comes back in place.
+    func reopenClosedSession() {
+        let onScreen = activeProject?.lastClosedAt ?? .distantPast
+        while let closed = closedProjects.last, (closed.project.lastClosedAt ?? .distantPast) > onScreen {
+            closedProjects.removeLast()
+            // Every root it held may be gone (worktree removed) — then it
+            // has nothing to come back as.
+            guard closed.project.reopenClosedSession() else {
+                closed.project.terminateAllSessions()
+                continue
+            }
+            add(closed.project, at: closed.index, activate: true)
+            return
+        }
+        activeProject?.reopenClosedSession()
+    }
+
+    /// Dev-only (`probe:projects`): the closed projects, oldest first.
+    var debugClosedProjects: [String] { closedProjects.map { "\($0.project.title)@\($0.index)" } }
+
+    /// Window closing or app quitting: the closed projects' sessions still
+    /// in their reopen grace die with it.
+    func discardClosedProjects() {
+        for closed in closedProjects { closed.project.terminateAllSessions() }
+        closedProjects.removeAll()
     }
 
     private func refreshStrip() {

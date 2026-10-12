@@ -54,10 +54,11 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// otherwise rejects `--resume` with "session already in use"; owner-hit
     /// bug 2026-07-13). After the grace it's terminated and downgraded to a
     /// snapshot that resumes via `--resume`. In-memory by design: the stack
-    /// dies with the window, like a browser's.
+    /// dies with the window, like a browser's. Each entry keeps when it
+    /// closed, so `⌘⇧T` can weigh it against a project closed since.
     private enum ClosedEntry {
-        case live(Session, index: Int)
-        case snapshot(PersistedSession, index: Int)
+        case live(Session, index: Int, at: Date)
+        case snapshot(PersistedSession, index: Int, at: Date)
     }
     private var recentlyClosed: [ClosedEntry] = []
     private static let closeGrace: TimeInterval = 60
@@ -507,7 +508,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
         // Only promoted sessions are worth resurrecting — a Landing is just a
         // shell and dies now. IDE sessions go into the grace window alive.
         if session.state == .ide {
-            recentlyClosed.append(.live(session, index: activeIndex))
+            recentlyClosed.append(.live(session, index: activeIndex, at: Date()))
             if recentlyClosed.count > 10 { evict(entry: recentlyClosed.removeFirst()) }
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.closeGrace) { [weak self, weak session] in
                 guard let self, let session else { return }
@@ -519,9 +520,10 @@ final class ProjectController: NSObject, BottomBarDelegate {
         session.container.removeFromSuperview()
 
         if sessions.isEmpty {
-            // Closing the last tab kicks back to the Launch view — the window
-            // un-anchors from its project and becomes a fresh Landing.
-            revertToLanding()
+            // The last session takes its project with it (owner call
+            // 2026-10-12) — unless it's the only project, which un-anchors
+            // into a fresh Landing instead: ⌘W never closes the window.
+            if host?.projectDidCloseLastSession(self) != true { revertToLanding() }
             return
         }
         showSession(at: min(activeIndex, sessions.count - 1))
@@ -540,7 +542,9 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// exists (a root can vanish under the stack: worktree removed). Inside
     /// the grace window the exact live session returns; past it the agent
     /// resumes the same conversation from disk. Old position either way.
-    func reopenClosedSession() {
+    /// False when nothing could come back.
+    @discardableResult
+    func reopenClosedSession() -> Bool {
         while let entry = recentlyClosed.popLast() {
             let (cwd, index) = entryLocation(entry)
             // Remote roots aren't stat-able here; reopen optimistically (the
@@ -558,28 +562,37 @@ final class ProjectController: NSObject, BottomBarDelegate {
                 sessions.removeAll()
             }
             switch entry {
-            case .live(let session, _):
+            case .live(let session, _, _):
                 adopt(session, at: min(index, sessions.count))
-            case .snapshot(let persisted, _):
+            case .snapshot(let persisted, _, _):
                 adopt(Session(restored: persisted), at: min(index, sessions.count))
             }
-            return
+            return true
         }
+        return false
     }
 
     var canReopenClosedSession: Bool { !recentlyClosed.isEmpty }
 
+    /// When the session `⌘⇧T` would bring back was closed.
+    var lastClosedAt: Date? {
+        guard let newest = recentlyClosed.last else { return nil }
+        switch newest {
+        case .live(_, _, let at), .snapshot(_, _, let at): return at
+        }
+    }
+
     private func entryLocation(_ entry: ClosedEntry) -> (cwd: String, index: Int) {
         switch entry {
-        case .live(let session, let index): return (session.cwd, index)
-        case .snapshot(let persisted, let index): return (persisted.cwd, index)
+        case .live(let session, let index, _): return (session.cwd, index)
+        case .snapshot(let persisted, let index, _): return (persisted.cwd, index)
         }
     }
 
     private func entryIsRemote(_ entry: ClosedEntry) -> Bool {
         switch entry {
-        case .live(let session, _): return session.isRemote
-        case .snapshot(let persisted, _): return persisted.remoteHost != nil
+        case .live(let session, _, _): return session.isRemote
+        case .snapshot(let persisted, _, _): return persisted.remoteHost != nil
         }
     }
 
@@ -587,27 +600,27 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// a `--resume` snapshot.
     private func expireGrace(for session: Session) {
         guard let slot = recentlyClosed.firstIndex(where: {
-            if case .live(let live, _) = $0 { return live === session }
+            if case .live(let live, _, _) = $0 { return live === session }
             return false
         }) else { return }
-        guard case .live(_, let index) = recentlyClosed[slot] else { return }
+        guard case .live(_, let index, let at) = recentlyClosed[slot] else { return }
         session.terminate()
-        recentlyClosed[slot] = .snapshot(session.persisted(), index: index)
+        recentlyClosed[slot] = .snapshot(session.persisted(), index: index, at: at)
     }
 
     private func evict(entry: ClosedEntry) {
-        if case .live(let session, _) = entry { session.terminate() }
+        if case .live(let session, _, _) = entry { session.terminate() }
     }
 
     /// Hidden-but-alive closed sessions on `path` (worktree removal must not
     /// leave PTYs holding a tree that's being deleted).
     func purgeClosedSessions(under path: String) {
         recentlyClosed.removeAll { entry in
-            if case .live(let session, _) = entry, session.cwd == path {
+            if case .live(let session, _, _) = entry, session.cwd == path {
                 session.terminate()
                 return true
             }
-            if case .snapshot(let persisted, _) = entry, persisted.cwd == path {
+            if case .snapshot(let persisted, _, _) = entry, persisted.cwd == path {
                 return true
             }
             return false
@@ -1570,9 +1583,9 @@ final class ProjectController: NSObject, BottomBarDelegate {
         commands.append(PaletteCommand(id: "session.close", title: "Session: Close", key: "⌘W") { [weak self] in
             self?.closeActiveSession()
         })
-        if canReopenClosedSession {
+        if host?.canReopenClosedSession == true {
             commands.append(PaletteCommand(id: "session.reopen", title: "Session: Reopen Closed", key: "⌘⇧T") { [weak self] in
-                self?.reopenClosedSession()
+                self?.host?.reopenClosedSession()
             })
         }
         commands.append(PaletteCommand(id: "session.next", title: "Session: Next", key: "⌘⇧]") { [weak self] in

@@ -226,6 +226,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Renders the app's own view tree, so it needs no Screen Recording grant;
     /// note the behind-window blur is composited by the WindowServer and won't
     /// appear — judge translucency live, use these for layout/type/color.
+    /// Dev-only workspace probes over `explorerSearch`, neither of which
+    /// brings the app forward: `probe:projects` writes the project row (and
+    /// the projects `⌘⇧T` could bring back) to probe.txt; `probe:menu=<sel>`
+    /// sends a menu action (`closeSession:`, `reopenSession:`) as its chord would.
+    private func debugWorkspaceProbe(_ query: String) -> Bool {
+        if query == "probe:projects" {
+            var lines = projects.enumerated().map { index, project in
+                "\(index) \(project.title) sessions=\(project.sessionCount)"
+                    + (project === keyController ? " active" : "")
+            }
+            lines.append("closed: " + (workspace?.debugClosedProjects ?? []).joined(separator: ", "))
+            lines.append("canReopen=\(workspace?.canReopenClosedSession ?? false) window=\(workspace?.window?.isVisible ?? false)")
+            try? (lines.joined(separator: "\n") + "\n").write(
+                toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8
+            )
+            return true
+        }
+        if query.hasPrefix("probe:menu=") {
+            let action = NSSelectorFromString(String(query.dropFirst("probe:menu=".count)))
+            if responds(to: action) { perform(action, with: nil) }
+            return true
+        }
+        return false
+    }
+
     private func handle(_ debug: DebugMessage) {
         switch debug.debug {
         case .snapshot:
@@ -247,6 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .toggleExplorer:
             keyController?.toggleExplorer()
         case .explorerSearch:
+            if debugWorkspaceProbe(debug.path) { return }
             keyController?.debugExplorerSearch(debug.path)
         case .lspProbe:
             let path = debug.path
@@ -264,6 +290,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // Quitting: remote work stays alive on its hosts (reattach on relaunch).
         for controller in projects { controller.terminateAllSessions(killRemote: false) }
+        workspace?.discardClosedProjects()
         LSPRegistry.terminateAll()
         RemoteLink.terminateAll()
         notificationServer.stop()
@@ -318,6 +345,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // finds nothing; during quit the snapshot already promised these
         // sessions back, so their remote side must survive.
         for project in projects { project.terminateAllSessions(killRemote: !isTerminating) }
+        workspace?.discardClosedProjects()
         workspace = nil
     }
 
@@ -354,7 +382,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func newWorktreeSession(_ sender: Any?) { keyController?.bottomBarDidRequestWorktreeSession() }
     @objc func openIDEHere(_ sender: Any?) { keyController?.promoteActiveSessionHere() }
     @objc func closeSession(_ sender: Any?) { keyController?.closeActiveSession() }
-    @objc func reopenSession(_ sender: Any?) { keyController?.reopenClosedSession() }
+    @objc func reopenSession(_ sender: Any?) { workspace?.reopenClosedSession() }
 
     @objc func openFile(_ sender: Any?) { keyController?.openFileInEditor() }
     @objc func saveFile(_ sender: Any?) { keyController?.saveEditor() }
@@ -399,7 +427,7 @@ extension AppDelegate: NSMenuItemValidation {
             return menuItem.tag <= (keyController?.sessionCount ?? 0)
         }
         if menuItem.action == #selector(reopenSession(_:)) {
-            return keyController?.canReopenClosedSession ?? false
+            return workspace?.canReopenClosedSession ?? false
         }
         if menuItem.action == #selector(openFile(_:)) || menuItem.action == #selector(goToFile(_:))
             || menuItem.action == #selector(searchRepo(_:)) {
