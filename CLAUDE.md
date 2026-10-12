@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17; v1.2.0 (the worktree door below) 2026-09-21; v1.3.0 (the 2026-09-23 work below — close-is-quit through drawn-row caching; `docs/releases/v1.3.0.md`) 2026-09-23; v1.4.0 (the project shelf + project-tab drag below; `docs/releases/v1.4.0.md`) 2026-09-24; v1.4.1 (a fresh prompt never titles a tab; the Landing's recent dot is gone) 2026-09-25; v1.4.2 (a folder's tabs share the width its label sets, so a short title reaches its `+`) 2026-09-26; v1.4.3 (Atelier brings its own hooks, SessionStart, Settings → Sounds — below) 2026-09-26; v1.4.4 (an inline rename widens its tab as you type, grow-only) 2026-09-26; v1.4.5 (⌘-clicking a path opens the file — below) 2026-09-30; v1.4.6 (pinned folders sit at the top and slide — below) 2026-10-01; v1.4.7 (a project tab's dots follow the bar — below) 2026-10-07; v1.4.8 (every live agent wears a dot, a cut-off turn comes back hollow, blue breathes — below; `docs/releases/v1.4.8.md`) 2026-10-07; v1.4.9 (a worktree never names the project — below) 2026-10-07; v1.4.10 (the frames hold their ground, no Landing ghost, one Atelier per state directory — below) 2026-10-10; v1.4.11 (the selected project is a raised chip, folder labels slant, folders sit closer — below) 2026-10-10; v1.4.12 (the selected project is a pill and its `×` always shows — below) 2026-10-11. Milestones 0, 1 and 2 built (M1.1–M1.6,
+**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17; v1.2.0 (the worktree door below) 2026-09-21; v1.3.0 (the 2026-09-23 work below — close-is-quit through drawn-row caching; `docs/releases/v1.3.0.md`) 2026-09-23; v1.4.0 (the project shelf + project-tab drag below; `docs/releases/v1.4.0.md`) 2026-09-24; v1.4.1 (a fresh prompt never titles a tab; the Landing's recent dot is gone) 2026-09-25; v1.4.2 (a folder's tabs share the width its label sets, so a short title reaches its `+`) 2026-09-26; v1.4.3 (Atelier brings its own hooks, SessionStart, Settings → Sounds — below) 2026-09-26; v1.4.4 (an inline rename widens its tab as you type, grow-only) 2026-09-26; v1.4.5 (⌘-clicking a path opens the file — below) 2026-09-30; v1.4.6 (pinned folders sit at the top and slide — below) 2026-10-01; v1.4.7 (a project tab's dots follow the bar — below) 2026-10-07; v1.4.8 (every live agent wears a dot, a cut-off turn comes back hollow, blue breathes — below; `docs/releases/v1.4.8.md`) 2026-10-07; v1.4.9 (a worktree never names the project — below) 2026-10-07; v1.4.10 (the frames hold their ground, no Landing ghost, one Atelier per state directory — below) 2026-10-10; v1.4.11 (the selected project is a raised chip, folder labels slant, folders sit closer — below) 2026-10-10; v1.4.12 (the selected project is a pill and its `×` always shows — below) 2026-10-11; v1.4.13 (a project's last session closing closes the project — below) 2026-10-12. Milestones 0, 1 and 2 built (M1.1–M1.6,
 M2.1–M2.6 landed); polish pass (docs/POLISH_PLAN.md) built through all
 phases — 0 (foundation tokens), 1 (cockpit), 2 (distances), 3 (arrivals),
 4 (overlay physiology).** Read `VISION.md` (the
@@ -651,6 +651,27 @@ tab — the session bar's rule; the pair is `HoverPadButton.closeRestAlpha`
 until hover; a close only shelves the project now. Built and dropped
 before it shipped (owner call, same day): `⌘N` digits on the other
 project tabs while `⌘` is held, `⌥⌘N` in the session bar.
+
+**A project's last session takes the project with it** (2026-10-12,
+v1.4.13, owner call: the tab that reverted to a Landing was one more
+thing to close). `ProjectController.forceCloseActiveSession` asks its
+host (`projectDidCloseLastSession`); with other projects open the
+workspace detaches the tab, its neighbour slides in, and nothing is
+shelved — the sessions were ended one by one. The lone project still
+reverts to a Landing, so ⌘W never closes the window (and so the app).
+**⌘⇧T is now the workspace's** (`WorkspaceWindowController.reopenClosedSession`,
+the menu item and the palette both): a project closed that way waits in
+`closedProjects` (≤10, in memory, kept only if it holds something to
+reopen) and returns to its slot with the session that closed it. The
+newest close wins — `ClosedEntry` carries its time and
+`ProjectController.lastClosedAt` exposes the newest, so a session closed
+on screen after the project still comes back first. Their grace
+sessions die on quit/window close (`discardClosedProjects`). Probes that
+never activate the app: `probe:projects` (the row and the closed stack
+to probe.txt) and `probe:menu=<selector>` (an AppDelegate action, e.g.
+`closeSession:`/`reopenSession:`/`newProject:`). Verified in an
+`open -g` test instance seeded with three projects; the live app stayed
+frontmost throughout.
 
 ## Commands
 
