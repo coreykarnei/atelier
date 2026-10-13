@@ -9,9 +9,9 @@
     <key>CFBundleIdentifier</key>
     <string>dev.sterlingcore.atelier</string>
     <key>CFBundleVersion</key>
-    <string>1.4.13</string>
+    <string>1.4.14</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.4.13</string>
+    <string>1.4.14</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
