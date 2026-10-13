@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17; v1.2.0 (the worktree door below) 2026-09-21; v1.3.0 (the 2026-09-23 work below — close-is-quit through drawn-row caching; `docs/releases/v1.3.0.md`) 2026-09-23; v1.4.0 (the project shelf + project-tab drag below; `docs/releases/v1.4.0.md`) 2026-09-24; v1.4.1 (a fresh prompt never titles a tab; the Landing's recent dot is gone) 2026-09-25; v1.4.2 (a folder's tabs share the width its label sets, so a short title reaches its `+`) 2026-09-26; v1.4.3 (Atelier brings its own hooks, SessionStart, Settings → Sounds — below) 2026-09-26; v1.4.4 (an inline rename widens its tab as you type, grow-only) 2026-09-26; v1.4.5 (⌘-clicking a path opens the file — below) 2026-09-30; v1.4.6 (pinned folders sit at the top and slide — below) 2026-10-01; v1.4.7 (a project tab's dots follow the bar — below) 2026-10-07; v1.4.8 (every live agent wears a dot, a cut-off turn comes back hollow, blue breathes — below; `docs/releases/v1.4.8.md`) 2026-10-07; v1.4.9 (a worktree never names the project — below) 2026-10-07; v1.4.10 (the frames hold their ground, no Landing ghost, one Atelier per state directory — below) 2026-10-10; v1.4.11 (the selected project is a raised chip, folder labels slant, folders sit closer — below) 2026-10-10; v1.4.12 (the selected project is a pill and its `×` always shows — below) 2026-10-11; v1.4.13 (a project's last session closing closes the project — below) 2026-10-12. Milestones 0, 1 and 2 built (M1.1–M1.6,
+**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17; v1.2.0 (the worktree door below) 2026-09-21; v1.3.0 (the 2026-09-23 work below — close-is-quit through drawn-row caching; `docs/releases/v1.3.0.md`) 2026-09-23; v1.4.0 (the project shelf + project-tab drag below; `docs/releases/v1.4.0.md`) 2026-09-24; v1.4.1 (a fresh prompt never titles a tab; the Landing's recent dot is gone) 2026-09-25; v1.4.2 (a folder's tabs share the width its label sets, so a short title reaches its `+`) 2026-09-26; v1.4.3 (Atelier brings its own hooks, SessionStart, Settings → Sounds — below) 2026-09-26; v1.4.4 (an inline rename widens its tab as you type, grow-only) 2026-09-26; v1.4.5 (⌘-clicking a path opens the file — below) 2026-09-30; v1.4.6 (pinned folders sit at the top and slide — below) 2026-10-01; v1.4.7 (a project tab's dots follow the bar — below) 2026-10-07; v1.4.8 (every live agent wears a dot, a cut-off turn comes back hollow, blue breathes — below; `docs/releases/v1.4.8.md`) 2026-10-07; v1.4.9 (a worktree never names the project — below) 2026-10-07; v1.4.10 (the frames hold their ground, no Landing ghost, one Atelier per state directory — below) 2026-10-10; v1.4.11 (the selected project is a raised chip, folder labels slant, folders sit closer — below) 2026-10-10; v1.4.12 (the selected project is a pill and its `×` always shows — below) 2026-10-11; v1.4.13 (a project's last session closing closes the project — below) 2026-10-12; v1.4.14 (bigger dots, a stronger ring — below) 2026-10-12. Milestones 0, 1 and 2 built (M1.1–M1.6,
 M2.1–M2.6 landed); polish pass (docs/POLISH_PLAN.md) built through all
 phases — 0 (foundation tokens), 1 (cockpit), 2 (distances), 3 (arrivals),
 4 (overlay physiology).** Read `VISION.md` (the
@@ -672,6 +672,21 @@ to probe.txt) and `probe:menu=<selector>` (an AppDelegate action, e.g.
 `closeSession:`/`reopenSession:`/`newProject:`). Verified in an
 `open -g` test instance seeded with three projects; the live app stayed
 frontmost throughout.
+
+**Dots grow; the ring leaves at full strength** (2026-10-12, v1.4.14,
+owner call: make the dots easier to parse at a glance). Bar dots are
+8pt (`SessionTabView.dot`, slot `dot + 5`), project-tab dots 9pt with
+`dotGap` 6, so a ring at full reach (9.9pt from centre) stays clear of
+the next dot (10.5). The ring is 1.5pt, starts at 100% and holds 85%
+halfway out over 1.6s of the 2s beat. The old 1pt hairline from 75% was
+brightest while still against the dot: clearly visible (≥30%, clear of
+the dot) ~35% of each beat, and a 250ms glance missed it about half the
+time; now ~64% and ~76%. The breath is unchanged on purpose: it's the
+commonest state and means "nothing needed", so it mustn't compete with
+the ring. Chosen from frame-accurate clips of three variants, filmed
+offscreen from a background test build with a scratch `CARenderer` probe
+(rendering `window.contentView.superview.layer` at exact media times;
+recipe in memory, not committed).
 
 ## Commands
 
