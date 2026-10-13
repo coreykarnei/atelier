@@ -1,4 +1,5 @@
 import AppKit
+import AtelierIPC
 
 /// One project tab's display state.
 struct ProjectTabInfo {
@@ -19,6 +20,8 @@ struct ProjectMark: Equatable {
     let since: Date?
     /// Where the dot's motion stands (`Session.attentionCycleStart`).
     let cycleStart: Date?
+    /// What a blue is only waiting on (`Session.pending`), for the tooltip.
+    var pending: [NotifyMessage.PendingWork] = []
 }
 
 /// The project tab row under the titlebar (2026-09-10): Atelier's own tabs,
@@ -605,7 +608,7 @@ private final class MarkButton: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     private static func accessibilityText(_ mark: ProjectMark) -> String {
-        "\(mark.title), \(AttentionTip.line(mark.attention, since: nil))"
+        "\(mark.title), \(AttentionTip.line(mark.attention, since: nil, pending: mark.pending))"
     }
 
     override func layout() {
@@ -668,6 +671,6 @@ private final class MarkButton: NSView {
     /// `Atelier checkout flow — waiting · 4m`: which session, and the one
     /// line the dots everywhere answer (§4, time on inquiry).
     @objc func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData: UnsafeMutableRawPointer?) -> String {
-        "\(mark.title) — \(AttentionTip.line(mark.attention, since: mark.since))"
+        "\(mark.title) — \(AttentionTip.line(mark.attention, since: mark.since, pending: mark.pending))"
     }
 }

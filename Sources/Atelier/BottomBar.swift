@@ -1,4 +1,5 @@
 import AppKit
+import AtelierIPC
 
 protocol BottomBarDelegate: AnyObject {
     func bottomBarDidSelectSession(at index: Int)
@@ -45,6 +46,8 @@ struct SessionTabInfo {
     let attentionSince: Date?
     /// Where the dot's motion stands (`Session.attentionCycleStart`).
     var cycleStart: Date? = nil
+    /// What a blue is only waiting on (`Session.pending`), for the tooltip.
+    var pending: [NotifyMessage.PendingWork] = []
 }
 
 /// The bottom bar (MILESTONE_1 §7, revised 2026-09-03). Static project pill
@@ -1421,6 +1424,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     private var attention: Session.Attention = .none
     private var attentionSince: Date?
     private var cycleStart: Date?
+    private var pending: [NotifyMessage.PendingWork] = []
     private var isActive = false
     private var applied = false
     private var toolTipRect: CGRect = .null
@@ -1529,6 +1533,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         }
         attentionSince = info.attentionSince
         cycleStart = info.cycleStart
+        pending = info.pending
         setAttention(info.attention, animated: applied)
         applied = true
         needsLayout = true
@@ -1767,7 +1772,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     /// unasked (§1.3). NSToolTipOwner callback (informal protocol, not an
     /// override).
     @objc func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData: UnsafeMutableRawPointer?) -> String {
-        AttentionTip.line(attention, since: attentionSince)
+        AttentionTip.line(attention, since: attentionSince, pending: pending)
     }
 }
 

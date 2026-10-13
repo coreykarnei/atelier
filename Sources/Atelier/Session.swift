@@ -111,6 +111,13 @@ final class Session: NSObject, NSSplitViewDelegate {
     var attentionCycleStart: Date { attentionSince ?? restoredCycleStart }
     private lazy var restoredCycleStart = Date(timeIntervalSinceNow: -.random(in: 0..<4))
 
+    /// The background agents and workflows the agent's last turn left
+    /// running, from its Stop (`NotifyMessage.pending`). While there are
+    /// any, the session stays blue: Claude wakes itself when they finish,
+    /// and that turn's Stop is the real end. Never persisted, because quitting
+    /// ends them.
+    var pending: [NotifyMessage.PendingWork] = []
+
     /// The label the tab actually shows.
     var displayTitle: String { customTitle ?? title }
 

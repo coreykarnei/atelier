@@ -2,9 +2,10 @@
 # Remote-host provisioning for Atelier remote sessions (phase 3). Run *on the
 # remote* by RemoteLink over ssh, with the atelier-notify python source piped
 # in on stdin. Idempotent and versioned: the marker file short-circuits every
-# run after the first — bump the -v suffix here AND in Remote.swift when the
-# payloads change, so existing hosts re-provision. (v4: the helper
-# forwards SessionStart's `source`.)
+# run after the first — bump the -v suffix when the payloads change, so
+# existing hosts re-provision. (v4: the helper forwards SessionStart's
+# `source`. v5: a Stop forwards the background agents and workflows
+# still running.)
 #
 # What it sets up:
 #   ~/.local/bin/atelier-notify         — the hook → forwarded-socket sender
@@ -12,7 +13,7 @@
 #                                         additively (one-time .atelier-bak)
 set -e
 
-MARKER="$HOME/.local/state/atelier/provisioned-v4"
+MARKER="$HOME/.local/state/atelier/provisioned-v5"
 [ -f "$MARKER" ] && exit 0
 
 mkdir -p "$HOME/.local/bin" "$HOME/.local/state/atelier"

@@ -63,17 +63,71 @@ public struct NotifyMessage: Codable {
     /// (startup, clear) is grey, a resumed one is your move, a compaction
     /// changes nothing. Absent from older helpers.
     public let source: String?
+    /// On a `.stop`: the background agents and workflows Claude left running
+    /// when its turn ended. It wakes itself when they finish, so the turn's
+    /// end isn't the work's end. From Stop's `background_tasks`, filtered by
+    /// the helper. Absent when there are none, and from older helpers.
+    public let pending: [PendingWork]?
+
+    /// One piece of background work Claude is waiting on.
+    public struct PendingWork: Codable, Equatable {
+        public enum Kind: String, Codable { case agent, workflow }
+        public let kind: Kind
+        /// The task's description, or a workflow's name.
+        public let name: String
+
+        public init(kind: Kind, name: String) {
+            self.kind = kind
+            self.name = name
+        }
+    }
 
     /// The environment variable that carries `tab` from agent to hook.
     public static let tabEnvironmentKey = "ATELIER_TAB"
 
-    public init(kind: Kind, title: String, body: String, sessionId: String? = nil, tab: String? = nil, source: String? = nil) {
+    public init(kind: Kind, title: String, body: String, sessionId: String? = nil, tab: String? = nil, source: String? = nil,
+                pending: [PendingWork]? = nil) {
         self.kind = kind
         self.title = title
         self.body = body
         self.sessionId = sessionId
         self.tab = tab
         self.source = source
+        self.pending = pending
+    }
+
+    /// What Claude is waiting on, from a Stop hook payload's
+    /// `background_tasks`: its background agents and workflows — the work
+    /// its own "Waiting for N background agents…" line counts, and what
+    /// wakes it when done. Claude labels each entry by type: `subagent`,
+    /// `workflow`, `shell`, `monitor`, `teammate`, `cloud session`… Shells and
+    /// monitors are left out because a dev server or a watcher never ends.
+    /// Teammates and cloud sessions are left out because Claude stops
+    /// counting them while they idle or run long, and the payload doesn't
+    /// say which. Paused work isn't waited on. Names are kept short: the
+    /// socket reads one 4 KB line.
+    public static func pendingWork(fromStopPayload payload: [String: Any]) -> [PendingWork] {
+        let tasks = payload["background_tasks"] as? [[String: Any]] ?? []
+        var work: [PendingWork] = []
+        for task in tasks where (task["status"] as? String) != "paused" {
+            let kind: PendingWork.Kind
+            let name: String?
+            switch task["type"] as? String {
+            case "subagent":
+                kind = .agent
+                name = task["description"] as? String
+            case "workflow":
+                kind = .workflow
+                name = (task["name"] as? String) ?? (task["description"] as? String)
+            default:
+                continue
+            }
+            var short = (name ?? "").split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+            if short.count > 60 { short = String(short.prefix(59)) + "…" }
+            work.append(PendingWork(kind: kind, name: short))
+            if work.count == 16 { break }
+        }
+        return work
     }
 
     /// Encode as a single newline-terminated JSON line for the stream protocol.

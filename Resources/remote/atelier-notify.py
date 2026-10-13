@@ -45,6 +45,32 @@ KINDS = {
 }
 
 
+def pending_work(payload):
+    """What Claude is waiting on, from a Stop payload's `background_tasks`:
+    its background agents and workflows, which wake it when they finish.
+    Shells and monitors may never end, and Claude stops counting teammates
+    and cloud sessions while they idle or run long, so those are left out.
+    Mirrors NotifyMessage.pendingWork in AtelierIPC.swift."""
+    work = []
+    for task in payload.get("background_tasks") or []:
+        if not isinstance(task, dict) or task.get("status") == "paused":
+            continue
+        kind = task.get("type")
+        if kind == "subagent":
+            kind, name = "agent", task.get("description")
+        elif kind == "workflow":
+            name = task.get("name") or task.get("description")
+        else:
+            continue
+        name = ((name or "").splitlines() or [""])[0]
+        if len(name) > 60:
+            name = name[:59] + "\u2026"
+        work.append({"kind": kind, "name": name})
+        if len(work) == 16:
+            break
+    return work
+
+
 def main():
     args = sys.argv[1:]
     verb = args[0] if args else "stop"
@@ -57,11 +83,16 @@ def main():
     # stdin is a pipe (hooks always pipe; a stray manual TTY run skips).
     session_id = None
     source = None
+    pending = []
     if not sys.stdin.isatty():
         try:
             payload = json.load(sys.stdin)
             session_id = payload.get("session_id")
             source = payload.get("source")
+            # A Stop with background agents or workflows still running isn't
+            # the end of the work: Claude wakes itself when they finish.
+            if kind == "stop":
+                pending = pending_work(payload)
             # A subagent's tools report under the parent's session id, even
             # after the parent's Stop — only the main agent's tools speak.
             if verb == "tool" and payload.get("agent_id") is not None:
@@ -78,6 +109,8 @@ def main():
         message["tab"] = tab
     if kind == "session" and source:
         message["source"] = source
+    if pending:
+        message["pending"] = pending
 
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(2)

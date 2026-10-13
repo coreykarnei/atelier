@@ -1,4 +1,5 @@
 import AppKit
+import AtelierIPC
 
 /// The attention palette (§7.1, revised 2026-09-15): three colours, three
 /// meanings. Blue — the agent is busy. Green — its turn is done and it's
@@ -23,11 +24,15 @@ extension Theme {
 }
 
 /// The one muted line an attention dot answers on hover — `waiting · 4m` —
-/// computed when asked, never shown unasked (§1.3).
+/// computed when asked, never shown unasked (§1.3). A blue that's only
+/// waiting on its background agents says so: `waiting on 2 agents · 4m`,
+/// or the one task's name.
 enum AttentionTip {
-    static func line(_ attention: Session.Attention, since: Date?) -> String {
+    static func line(_ attention: Session.Attention, since: Date?,
+                     pending: [NotifyMessage.PendingWork] = []) -> String {
         let word: String
         switch attention {
+        case .working where !pending.isEmpty: word = "waiting on " + Self.describe(pending)
         case .working: word = "working"
         case .waiting: word = "waiting"
         case .needsInput, .needsInputUnseen: word = "blocked"
@@ -45,6 +50,22 @@ enum AttentionTip {
         default: elapsed = "\(seconds / 3600)h \((seconds % 3600) / 60)m"
         }
         return "\(word) · \(elapsed)"
+    }
+
+    /// One task by its name; more by count, in Claude's own words
+    /// ("2 agents and 1 workflow").
+    private static func describe(_ pending: [NotifyMessage.PendingWork]) -> String {
+        if pending.count == 1, !pending[0].name.isEmpty {
+            let name = pending[0].name
+            return name.count > 40 ? String(name.prefix(39)) + "…" : name
+        }
+        let agents = pending.filter { $0.kind == .agent }.count
+        let workflows = pending.count - agents
+        let parts = [
+            agents > 0 ? "\(agents) \(agents == 1 ? "agent" : "agents")" : nil,
+            workflows > 0 ? "\(workflows) \(workflows == 1 ? "workflow" : "workflows")" : nil,
+        ].compactMap { $0 }
+        return parts.joined(separator: " and ")
     }
 }
 

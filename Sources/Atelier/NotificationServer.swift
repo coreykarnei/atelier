@@ -200,6 +200,10 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
         // `idle_prompt`, a minute after the Stop that already rang — a second
         // chime would re-notify (§1.3).
         guard msg.kind != .working, msg.kind != .session, msg.kind != .inputNeeded else { return }
+        // Nor a Stop that leaves background agents or workflows running:
+        // Claude wakes itself when they finish, and that turn's Stop is the
+        // one that says "finished".
+        guard msg.kind != .stop || (msg.pending ?? []).isEmpty else { return }
 
         // The sound vocabulary the dotfiles IDE used (POLISH_PLAN §7, resolved
         // 2026-09-16): Blow = finished, Tink = needs you. One audio path — the

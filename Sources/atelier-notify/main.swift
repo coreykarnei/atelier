@@ -11,7 +11,8 @@ import AtelierIPC
 // must never break the agent's hook chain.
 //
 // Claude Code passes the hook payload as JSON on stdin; we read it for the
-// session_id so the app can badge / focus the exact session tab.
+// session_id so the app can badge / focus the exact session tab, and on a
+// Stop for the background work Claude is still waiting on.
 
 let args = Array(CommandLine.arguments.dropFirst())
 let kindArg = args.first ?? "stop"
@@ -64,11 +65,15 @@ default:
 // when stdin is a pipe (hooks always pipe; a stray manual run from a TTY skips).
 var sessionId: String?
 var source: String?
+var pending: [NotifyMessage.PendingWork] = []
 if isatty(0) == 0 {
     let stdinData = FileHandle.standardInput.readDataToEndOfFile()
     if let payload = try? JSONSerialization.jsonObject(with: stdinData) as? [String: Any] {
         sessionId = payload["session_id"] as? String
         source = payload["source"] as? String
+        // A Stop with background agents or workflows still running isn't
+        // the end of the work: Claude wakes itself when they finish.
+        if kind == .stop { pending = NotifyMessage.pendingWork(fromStopPayload: payload) }
         // A subagent's tool calls carry `agent_id` under the parent's
         // session id — and a background one keeps calling after the
         // parent's Stop, which would repaint a finished session blue with
@@ -82,7 +87,7 @@ let body = override.isEmpty ? defaultBody : override
 let tab = ProcessInfo.processInfo.environment[NotifyMessage.tabEnvironmentKey]
 let message = NotifyMessage(
     kind: kind, title: defaultTitle, body: body, sessionId: sessionId, tab: tab,
-    source: kind == .session ? source : nil
+    source: kind == .session ? source : nil, pending: pending.isEmpty ? nil : pending
 )
 
 // Connect to the unix domain socket.

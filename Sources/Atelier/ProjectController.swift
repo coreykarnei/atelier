@@ -660,7 +660,11 @@ final class ProjectController: NSObject, BottomBarDelegate {
             // Every session's state in bar order, then every dot drawn in the
             // window with the motion it carries — the attention lifecycle,
             // read back without watching it.
-            var lines = barOrder.map { "\(sessions[$0].displayTitle): \(sessions[$0].attention.rawValue)" }
+            var lines = barOrder.map { index in
+                let session = sessions[index]
+                let pending = session.pending.isEmpty ? "" : " pending=" + session.pending.map { "\($0.kind.rawValue):\($0.name)" }.joined(separator: ",")
+                return "\(session.displayTitle): \(session.attention.rawValue)\(pending)"
+            }
             func walk(_ view: NSView) {
                 if let dot = view as? AttentionDotView { lines.append("dot \(dot.debugLine)") }
                 view.subviews.forEach(walk)
@@ -905,7 +909,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
         barOrder.map { sessions[$0] }.filter { $0.attention != .none }.map {
             ProjectMark(
                 sessionId: $0.id, attention: $0.attention, title: $0.displayTitle,
-                since: $0.attentionSince, cycleStart: $0.attentionCycleStart
+                since: $0.attentionSince, cycleStart: $0.attentionCycleStart, pending: $0.pending
             )
         }
     }
@@ -1078,7 +1082,8 @@ final class ProjectController: NSObject, BottomBarDelegate {
                 groupLabel: folderLabel(for: session, key: key),
                 attention: session.attention,
                 attentionSince: session.attentionSince,
-                cycleStart: session.attentionCycleStart
+                cycleStart: session.attentionCycleStart,
+                pending: session.pending
             )
         }
     }
@@ -1129,6 +1134,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
             let current = sessions[index].attention
             switch message.source {
             case "startup", "clear":
+                sessions[index].pending = []
                 sessions[index].attention = .empty
             case "resume" where !current.isUnseen && current != .cutOff:
                 sessions[index].attention = .waiting
@@ -1148,14 +1154,29 @@ final class ProjectController: NSObject, BottomBarDelegate {
             // report 2026-10-07). It only corrects a mark that missed the
             // end: a blue whose Stop never came (an interrupt on a remote
             // host), a peach answered where we couldn't read it. Settled
-            // marks stay. (It never fires over an open permission prompt.)
+            // marks stay. (It never fires over an open permission prompt, nor,
+            // in current Claude Code, while background agents run. If an older
+            // one sends it then, a blue waiting on them is right anyway.)
             switch sessions[index].attention {
+            case .working where !sessions[index].pending.isEmpty: return true
             case .working, .needsInput: sessions[index].attention = .waiting
             case .needsInputUnseen: sessions[index].attention = .doneUnseen
             case .none, .empty, .waiting, .doneUnseen, .cutOff: return true
             }
         case .stop:
-            sessions[index].attention = onScreen ? .waiting : .doneUnseen
+            // A turn that ends with background agents or workflows still
+            // running isn't done (owner report 2026-10-12: it went green
+            // while Claude sat on "Waiting for 1 dynamic workflow to
+            // finish"). Claude wakes itself when they finish and ends that
+            // turn with another Stop, so the session stays blue, with no ring,
+            // sound or banner (`NotificationServer.post`), until a Stop
+            // arrives with nothing pending.
+            sessions[index].pending = message.pending ?? []
+            if sessions[index].pending.isEmpty {
+                sessions[index].attention = onScreen ? .waiting : .doneUnseen
+            } else {
+                sessions[index].attention = .working
+            }
         }
         updateBottomBar()
         return true
