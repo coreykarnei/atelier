@@ -38,9 +38,12 @@ The complete list of things permitted to move while nothing is happening:
 4. The working-blue dot's breath (4 s period, opacity 1 ↔ 0.5, in place).
    Revised 2026-10-07 from a subliminal ±10%, which went unseen: busy
    should read as alive.
-5. The unseen marks' ring (2026-09-23): a hairline leaving a green or peach
+5. The unseen marks' ring (2026-09-23): a ring leaving a green or peach
    dot on a 2 s beat, until you look. The only outward motion — the one that
-   means "come look".
+   means "come look". Revised 2026-10-12 from a hairline that started at
+   75% and faded fast, which a glance missed about half the time: now
+   1.5pt, leaving at full strength and still 85% halfway out, over 1.6 s.
+   Dots grew with it (bar 6 → 8pt, project tabs 7 → 9pt).
 
 Each dot keeps its own clock, counted from the moment its session entered
 the state (owner call 2026-10-07; the ring was phase-locked app-wide

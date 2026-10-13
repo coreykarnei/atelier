@@ -1477,7 +1477,11 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     /// its own, so every selection reflowed the row. Now selecting a tab
     /// that has a dot changes no width at all. The slot exists only while it
     /// holds something, so a tab with nothing to say starts at its title.
-    static let markSlot: CGFloat = 11
+    /// The dot is 8pt (owner call 2026-10-12, was 6): at 6 blue and green
+    /// were hard to tell apart without waiting for the breath. The slot
+    /// keeps the 5pt between dot and title.
+    static let dot: CGFloat = 8
+    static let markSlot: CGFloat = dot + 5
     static func hasMarkSlot(attention: Session.Attention, isActive: Bool) -> Bool {
         isActive || attention != .none
     }
@@ -1543,7 +1547,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         // intact the moment another tab is selected.
         badgeView?.isHidden = isActive
         if !closeButton.isHidden {
-            let dotCenterX = leading + 3 // the 6pt dot's centre
+            let dotCenterX = leading + Self.dot / 2
             closeButton.frame = CGRect(
                 x: round(dotCenterX - closeWidth / 2),
                 y: (bounds.height - closeWidth) / 2,
@@ -1675,7 +1679,7 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
         }
 
         guard newAttention != .none else { return }
-        let badge = AttentionDotView(attention: newAttention, diameter: 6, cycleStart: cycleStart)
+        let badge = AttentionDotView(attention: newAttention, diameter: Self.dot, cycleStart: cycleStart)
         addSubview(badge)
         badgeView = badge
         layout()

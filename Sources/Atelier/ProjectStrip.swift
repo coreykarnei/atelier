@@ -356,10 +356,13 @@ private final class ProjectTabView: NSView {
     private static let closeWidth: CGFloat = 16
     private static let closeSlot: CGFloat = 6 + 16 + 6
     private static let markGap: CGFloat = 6
-    /// A touch larger than the session tabs' 6pt (2026-09-23): these dots
-    /// are click targets now, and they sit in a quieter row.
-    private static let dot: CGFloat = 7
-    private static let dotGap: CGFloat = 5
+    /// A touch larger than the session tabs' dots (2026-09-23): these are
+    /// click targets, and they sit in a quieter row. 9pt since 2026-10-12
+    /// (owner call, was 7), and the gap grew from 5 to 6 with them: a ring
+    /// at full reach is 9.9pt from its dot's centre, and the next dot now
+    /// starts at 10.5, so rings never cross a neighbour.
+    private static let dot: CGFloat = 9
+    private static let dotGap: CGFloat = 6
 
     override var mouseDownCanMoveWindow: Bool { false }
 
@@ -571,8 +574,8 @@ private final class MarkButton: NSView {
     private var hovered = false
     private var pressed = false
 
-    /// The pad a hovered dot sits in.
-    private static let pad: CGFloat = 15
+    /// The pad a hovered dot sits in: 4pt of margin around the dot.
+    private var pad: CGFloat { diameter + 8 }
 
     override var mouseDownCanMoveWindow: Bool { false }
 
@@ -583,8 +586,8 @@ private final class MarkButton: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.masksToBounds = false
-        padLayer.cornerRadius = Self.pad / 2
-        padLayer.bounds = CGRect(x: 0, y: 0, width: Self.pad, height: Self.pad)
+        padLayer.cornerRadius = pad / 2
+        padLayer.bounds = CGRect(x: 0, y: 0, width: pad, height: pad)
         layer?.addSublayer(padLayer)
         addSubview(dotView)
         addTrackingArea(NSTrackingArea(

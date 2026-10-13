@@ -61,11 +61,18 @@ enum AttentionTip {
 /// mark, and still. Unseen — a completion
 /// or a block that landed while you were elsewhere — is what wants your eye,
 /// so it moves (owner calls 2026-09-15, 2026-09-23): the dot holds steady
-/// and a hairline ring in its colour leaves it, widening and fading, once
-/// every beat. A ring reads as "something happened here" where a blinking
-/// dot read as a fault. Same beat forever — the ring never grows louder
-/// with age (§1.3). Once seen, every mark is still; a seen peach block
-/// stays still by rule ("urgency reads as stillness").
+/// and a ring in its colour leaves it, widening and fading, once every
+/// beat. A ring reads as "something happened here" where a blinking dot
+/// read as a fault. Same beat forever — the ring never grows louder with
+/// age (§1.3). Once seen, every mark is still; a seen peach block stays
+/// still by rule ("urgency reads as stillness").
+///
+/// The ring is 1.5pt and leaves at full strength (owner call 2026-10-12).
+/// The old hairline started at 75% and was brightest while still against
+/// the dot, so it read clearly (≥30% opacity, clear of the dot) for only
+/// ~35% of each beat and a quarter-second glance missed it about half the
+/// time. Now it holds 85% halfway out and travels 1.6s of the 2s beat:
+/// ~64% of the beat, and ~76% of glances.
 final class AttentionDotView: NSView {
     let dotLayer = CALayer()
     private let ringLayer = CALayer()
@@ -78,7 +85,9 @@ final class AttentionDotView: NSView {
     private static let ringReach: CGFloat = 2.2
     /// One ring per beat: it spreads over `ringTravel`, then the dot rests.
     private static let ringBeat: CFTimeInterval = 2.0
-    private static let ringTravel: CFTimeInterval = 1.3
+    private static let ringTravel: CFTimeInterval = 1.6
+    /// The ring's stroke, the same at every dot size.
+    private static let ringWidth: CGFloat = 1.5
     /// One breath: down to `breathDepth` and back over `breathBeat`.
     private static let breathBeat: CFTimeInterval = 4.0
     private static let breathDepth: Float = 0.5
@@ -96,9 +105,9 @@ final class AttentionDotView: NSView {
         if attention.isUnseen {
             // Under the dot, so the ring is born from its edge. A border
             // over a clear fill, with bounds (not scale) animated, keeps the
-            // stroke a hairline at every size.
+            // stroke `ringWidth` at every size.
             ringLayer.borderColor = color
-            ringLayer.borderWidth = 1
+            ringLayer.borderWidth = Self.ringWidth
             ringLayer.bounds = CGRect(x: 0, y: 0, width: diameter, height: diameter)
             ringLayer.cornerRadius = diameter / 2
             ringLayer.position = center
@@ -151,12 +160,13 @@ final class AttentionDotView: NSView {
             dotLayer.add(breath, forKey: "breath")
         case .doneUnseen, .needsInputUnseen:
             if reduceMotion {
-                // The ring held still, halfway out — the state stays
-                // distinct from a plain waiting dot without moving.
+                // The ring held still, halfway out at the strength it has
+                // there — the state stays distinct from a plain waiting dot
+                // without moving.
                 let size = diameter * (1 + Self.ringReach) / 2
                 ringLayer.bounds = CGRect(x: 0, y: 0, width: size, height: size)
                 ringLayer.cornerRadius = size / 2
-                ringLayer.opacity = 0.45
+                ringLayer.opacity = 0.85
                 return
             }
             guard ringLayer.animation(forKey: "ring") == nil else { return }
@@ -189,11 +199,13 @@ final class AttentionDotView: NSView {
             animation.duration = ringTravel
             animation.timingFunction = easeOut
         }
-        // Visible from the start, gone before it stops growing: the ring
+        // Full strength as it leaves the dot, still 85% halfway out — the
+        // ring is brightest once it's clear of the dot, not while it's
+        // still against it — and gone before it stops growing: it
         // dissolves while still moving, so no frame shows it parked.
         let fade = CAKeyframeAnimation(keyPath: "opacity")
-        fade.values = [0.75, 0.45, 0]
-        fade.keyTimes = [0, 0.35, 1]
+        fade.values = [1.0, 0.85, 0]
+        fade.keyTimes = [0, 0.5, 1]
         fade.duration = ringTravel
         let beat = CAAnimationGroup()
         beat.animations = [size, radius, fade]
