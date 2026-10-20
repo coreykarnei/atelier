@@ -37,15 +37,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 break
             }
         }
+        #if ATELIER_PROBES
         notificationServer.onDebug = { [weak self] debug in self?.handle(debug) }
         if ProcessInfo.processInfo.environment["ATELIER_LSP_TRACE"] != nil {
-            let log = NSHomeDirectory() + "/.local/state/atelier/lsp.log"
+            let log = AtelierIPC.stateDirectory() + "/lsp.log"
             LSPClient.debugTrace = { line in
                 if let handle = FileHandle(forWritingAtPath: log) ?? (FileManager.default.createFile(atPath: log, contents: nil) ? FileHandle(forWritingAtPath: log) : nil) {
                     handle.seekToEndOfFile(); handle.write((line + "\n").data(using: .utf8)!); handle.closeFile()
                 }
             }
         }
+        #endif
         guard notificationServer.start() else {
             // Another Atelier owns this state directory — a dev build opened
             // beside the live app without ATELIER_STATE_DIR. Restoring would
@@ -56,9 +58,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         restoreOrOpenFresh()
+        #if ATELIER_PROBES
         if ProcessInfo.processInfo.environment["ATELIER_DEBUG_ATTENTION"] != nil {
             keyController?.debugSeedAttention()
         }
+        #endif
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -222,6 +226,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.dockTile.badgeLabel = count == 0 ? nil : String(count)
     }
 
+    #if ATELIER_PROBES
     /// Dev-only (`DebugMessage`): self-capture every visible window to PNGs.
     /// Renders the app's own view tree, so it needs no Screen Recording grant;
     /// note the behind-window blur is composited by the WindowServer and won't
@@ -286,6 +291,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
+    #endif
 
     func applicationWillTerminate(_ notification: Notification) {
         // Quitting: remote work stays alive on its hosts (reattach on relaunch).

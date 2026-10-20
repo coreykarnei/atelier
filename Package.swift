@@ -1,6 +1,13 @@
 // swift-tools-version:6.0
 import PackageDescription
 
+// The dev probe surface (`DebugMessage`, `probe:*` over the socket) exists in
+// debug builds only; a release build doesn't contain it. Both targets take the
+// define — one without it would leave the other's probe code unreachable or
+// unbuildable. `swift build -c release -Xswiftc -DATELIER_PROBES` gives an
+// optimised build with probes, for honest timings.
+let probes = SwiftSetting.define("ATELIER_PROBES", .when(configuration: .debug))
+
 let package = Package(
     name: "Atelier",
     platforms: [
@@ -31,7 +38,7 @@ let package = Package(
         .target(
             name: "AtelierIPC",
             path: "Sources/AtelierIPC",
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [.swiftLanguageMode(.v5), probes]
         ),
         // The app.
         .executableTarget(
@@ -43,7 +50,7 @@ let package = Package(
                 .product(name: "CodeEditLanguages", package: "CodeEditLanguages"),
             ],
             path: "Sources/Atelier",
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [.swiftLanguageMode(.v5), probes]
         ),
         // Dev harness: compile a language's highlight query against the
         // bundled grammar and print every capture for a file — the way to

@@ -80,6 +80,12 @@ fi
 echo "==> Atelier $VERSION"
 echo "==> release build"
 swift build -c release
+# The dev probe surface (Package.swift, ATELIER_PROBES) must not ship: it
+# types into terminals and performs selectors for whoever reaches the socket.
+if strings "$(swift build -c release --show-bin-path)/Atelier" | grep -q -E 'probe:|DebugMessage'; then
+  echo "error: the release binary carries the probe surface (ATELIER_PROBES leaked into release)" >&2
+  exit 1
+fi
 "$ROOT/Scripts/bundle.sh" release >/dev/null
 
 unlock

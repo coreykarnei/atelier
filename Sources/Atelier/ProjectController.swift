@@ -209,6 +209,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
         return true
     }
 
+    #if ATELIER_PROBES
     /// Dev-only (snapshot debug dump): the active session's shell wash
     /// geometry plus every translucent-painting view in the window, for
     /// reconciling snapshot alpha probes with the live tree.
@@ -231,6 +232,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
         if window?.contentView != nil { walk(view, depth: 0) }
         return lines.joined(separator: "\n")
     }
+    #endif
 
     deinit {
         titleTimer?.invalidate()
@@ -650,10 +652,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
         }
     }
 
-    /// `⌘O` — open a file into the editor pane. The panel roots at the
-    /// session's cwd; Split mode flips back to the Triptych so the buffer is
-    /// actually on screen. (`⌘P`'s summon picker replaces this as the fast
-    /// path in M2.2; the panel stays as the native fallback.)
+    #if ATELIER_PROBES
     /// Dev-only: drive the explorer's search bar from the socket.
     func debugExplorerSearch(_ query: String) {
         if query == "probe:attention" {
@@ -677,6 +676,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
         }
         activeSession?.editorPane.debugExplorer(query)
     }
+    #endif
 
     /// ⌘⇧E — the sidebar search panel.
     func focusExplorerSearch() {
@@ -692,6 +692,10 @@ final class ProjectController: NSObject, BottomBarDelegate {
         if session.layoutMode == .split { toggleLayout() }
     }
 
+    /// `⌘O` — open a file into the editor pane. The panel roots at the
+    /// session's cwd; Split mode flips back to the Triptych so the buffer is
+    /// actually on screen. (`⌘P`'s summon picker replaces this as the fast
+    /// path in M2.2; the panel stays as the native fallback.)
     func openFileInEditor() {
         guard let session = activeSession, session.state == .ide, let window else { return }
         let panel = NSOpenPanel()
@@ -816,6 +820,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
         }
     }
 
+    #if ATELIER_PROBES
     /// Dev-only (lspProbe debug): definition at a given 1-based position in
     /// the active buffer plus the last published diagnostics, as text.
     func lspProbe(line: Int, column: Int, completion: @escaping (String) -> Void) {
@@ -838,6 +843,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
             completion(dump)
         }
     }
+    #endif
 
     /// F12 — go to definition at the caret (M2.5). Same-file jumps reveal in
     /// place; cross-file jumps ride the ⌘P open path (dirty guard included).
@@ -931,6 +937,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
         updateBottomBar()
     }
 
+    #if ATELIER_PROBES
     /// Dev-only (`ATELIER_DEBUG_ATTENTION=1` at launch, or the `seedAttention`
     /// debug message): one session per attention state, so the marks can be
     /// judged side by side. Adds Landings until there are five; the active
@@ -950,6 +957,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
         sessions[active].attention = .working
         updateBottomBar()
     }
+    #endif
 
     /// Sessions whose state means "your move is the bottleneck" — unseen
     /// completions and explicit blocks. Feeds the Dock badge (§4); plain

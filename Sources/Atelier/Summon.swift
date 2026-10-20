@@ -238,6 +238,7 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
         refilter(preserving: keep)
     }
 
+    #if ATELIER_PROBES
     /// Dev snapshots: one `↓` press.
     func debugMoveDown() {
         _ = control(field, textView: NSTextView(), doCommandBy: #selector(NSResponder.moveDown(_:)))
@@ -250,6 +251,7 @@ final class SummonList: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTe
         refilter()
         onQueryChange?(text)
     }
+    #endif
 
     /// Host-driven reset (the explorer's search after an open): empty field,
     /// full offer, listeners told.

@@ -397,6 +397,7 @@ final class EditorPane: NSView, WorkspacePane {
         explorer.openSearch()
     }
 
+    #if ATELIER_PROBES
     private static func probeTerminals(in window: NSWindow?) -> [FreezableTerminalView] {
         func walk(_ view: NSView) -> [FreezableTerminalView] {
             (view as? FreezableTerminalView).map { [$0] } ?? view.subviews.flatMap(walk)
@@ -423,7 +424,7 @@ final class EditorPane: NSView, WorkspacePane {
                     let report = "root=\(self.lspRoot ?? "-") diagnostics=\(self.lastDiagnostics.count) "
                         + self.lastDiagnostics.prefix(5).map { "\($0.startLine + 1):\($0.startCharacter + 1)-\($0.endLine + 1):\($0.endCharacter + 1) \($0.severity) '\($0.message.prefix(60))'" }.joined(separator: " | ")
                         + "\nstrip hidden=\(self.diagnosticStrip.isHidden) text='\(self.diagnosticStrip.debugText)' frame=\(self.diagnosticStrip.frame)\n"
-                    try? report.write(toFile: NSHomeDirectory() + "/.local/state/atelier/probe.txt", atomically: true, encoding: .utf8)
+                    try? report.write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
                 }
             }
             return
@@ -436,7 +437,7 @@ final class EditorPane: NSView, WorkspacePane {
             Task { @MainActor in
                 let links = await self.queryLinks(forRange: range, textView: controller) ?? []
                 let report = "links for '\(word)': \(links.count) " + links.map { "\($0.url?.lastPathComponent ?? "same-file"):\($0.targetRange.start.line):\($0.targetRange.start.column)" }.joined(separator: " ") + "\n"
-                try? report.write(toFile: NSHomeDirectory() + "/.local/state/atelier/probe.txt", atomically: true, encoding: .utf8)
+                try? report.write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
             }
             return
         }
@@ -478,7 +479,7 @@ final class EditorPane: NSView, WorkspacePane {
                         let ms = { (v: Double) in String(format: "%.1f", v * 1000) }
                         let report = "bracket=\(bracket) steps=\(steps) mean=\(ms(times.reduce(0, +) / Double(times.count)))ms "
                             + "p50=\(ms(sorted[sorted.count / 2]))ms max=\(ms(sorted.last ?? 0))ms bytes=\(bytes)\n"
-                        try? report.write(toFile: NSHomeDirectory() + "/.local/state/atelier/probe.txt", atomically: true, encoding: .utf8)
+                        try? report.write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
                         window.setFrame(start, display: true)
                     }
                     return
@@ -531,7 +532,7 @@ final class EditorPane: NSView, WorkspacePane {
             let link = pane.getTerminal().link(at: .screen(Position(col: col, row: row)), mode: .explicitAndImplicit)
             let resolved = link.flatMap { pane.fileURL(forLink: $0) }
             let report = "link=\(link ?? "nil") file=\(resolved?.path ?? "nil") base=\(pane.linkBaseDirectory ?? "nil")\n"
-            try? report.write(toFile: NSHomeDirectory() + "/.local/state/atelier/probe.txt", atomically: true, encoding: .utf8)
+            try? report.write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
             guard parts.contains("click") else { return }
             let grid = pane.getOptimalFrameSize()
             let cell = CGSize(width: grid.width / CGFloat(pane.getTerminal().cols),
@@ -576,7 +577,7 @@ final class EditorPane: NSView, WorkspacePane {
                             + (times.isEmpty ? "" : "mean=\(ms(times.reduce(0, +) / Double(times.count)))ms p50=\(ms(sorted[sorted.count / 2]))ms "
                                + "p90=\(ms(sorted[sorted.count * 9 / 10]))ms max=\(ms(sorted.last!))ms total=\(ms(times.reduce(0, +)))ms ")
                             + "wall=\(ms(CACurrentMediaTime() - start))ms rows hit=\(RowRenderCache.hits) miss=\(RowRenderCache.misses)\n"
-                        try? report.write(toFile: NSHomeDirectory() + "/.local/state/atelier/probe.txt", atomically: true, encoding: .utf8)
+                        try? report.write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
                     }
                     return
                 }
@@ -747,25 +748,6 @@ final class EditorPane: NSView, WorkspacePane {
                 post(.leftMouseDragged, NSPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t), after: 0.016 * Double(step))
             }
             post(.leftMouseUp, to, after: 0.016 * Double(steps + 1))
-            return
-        }
-        if query.hasPrefix("probe:click=") {
-            // `probe:click=x,y[,count]` — a click (or double-click) at window
-            // points, posted like `probe:drag`.
-            let parts = query.dropFirst("probe:click=".count).split(separator: ",").compactMap { Double($0) }
-            guard parts.count >= 2, let window else { return }
-            let point = NSPoint(x: parts[0], y: parts[1])
-            let clicks = parts.count > 2 ? Int(parts[2]) : 1
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
-            for count in 1...max(1, clicks) {
-                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-                    if let event = NSEvent.mouseEvent(
-                        with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: count, pressure: 1
-                    ) { NSApp.postEvent(event, atStart: false) }
-                }
-            }
             return
         }
         if query.hasPrefix("probe:move=") {
@@ -940,7 +922,7 @@ final class EditorPane: NSView, WorkspacePane {
             let undone = controller.text
             let report = "keys: before=\(before.count) after=\(after.count) undone=\(undone.count) restored=\(undone == before) "
                 + "key=\(window.isKeyWindow) canUndo=\(textView.undoManager?.canUndo ?? false)\n" + log.joined(separator: "\n") + "\n"
-            try? report.write(toFile: NSHomeDirectory() + "/.local/state/atelier/probe.txt", atomically: true, encoding: .utf8)
+            try? report.write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
             }
             return
         }
@@ -961,7 +943,7 @@ final class EditorPane: NSView, WorkspacePane {
             log.append("end fr=\(fr())")
             controller.duplicateLines(above: false)
             log.append("dupDirect fr=\(fr())")
-            try? (log.joined(separator: "\n") + "\n").write(toFile: NSHomeDirectory() + "/.local/state/atelier/probe.txt", atomically: true, encoding: .utf8)
+            try? (log.joined(separator: "\n") + "\n").write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
             return
         }
         if query == "probe:dupundo" {
@@ -979,12 +961,13 @@ final class EditorPane: NSView, WorkspacePane {
             let undone = controller.text
             let report = "before=\(before.count) after=\(after.count) undone=\(undone.count) restored=\(undone == before) "
                 + "undoManager=\(controller.textView?.undoManager.map { String(describing: type(of: $0)) } ?? "nil") canUndo=\(controller.textView?.undoManager?.canUndo ?? false)\n"
-            try? report.write(toFile: NSHomeDirectory() + "/.local/state/atelier/probe.txt", atomically: true, encoding: .utf8)
+            try? report.write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
             return
         }
         setExplorerExpanded(true)
         explorer.debugSetQuery(query)
     }
+    #endif
 
     /// ⌘B / the chevron — unfold the tree or fold it to the rail.
     func toggleExplorer() {
@@ -1606,6 +1589,7 @@ final class EditorPane: NSView, WorkspacePane {
 
     private static let diagnosticsEmphasisID = "lsp.diagnostics"
 
+    #if ATELIER_PROBES
     /// Dev-only (snapshot): the buffer's scroll geometry, for chasing
     /// horizontal-scroll complaints without a pointer.
     var debugGeometry: String {
@@ -1671,6 +1655,7 @@ final class EditorPane: NSView, WorkspacePane {
         }
         return out
     }
+    #endif
 
     // MARK: Configuration
 
@@ -1967,7 +1952,9 @@ final class DiagnosticStrip: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    #if ATELIER_PROBES
     var debugText: String { label.stringValue }
+    #endif
 
     func show(_ diagnostic: LSPDiagnostic) {
         let color: NSColor = switch diagnostic.severity {

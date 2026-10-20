@@ -154,6 +154,7 @@ final class AttentionDotView: NSView {
 
     override var fittingSize: NSSize { NSSize(width: diameter, height: diameter) }
 
+    #if ATELIER_PROBES
     /// `probe:attention`: the state, the motions running, and visibility.
     var debugLine: String {
         let motions = (dotLayer.animationKeys() ?? []) + (ringLayer.animationKeys() ?? [])
@@ -163,6 +164,7 @@ final class AttentionDotView: NSView {
         return "\(attention.rawValue) d=\(diameter) motions=\(motions) cycle=\(elapsed)s opacity=\(shown)"
             + "\(hollow ? " hollow" : "") hidden=\(isHiddenOrHasHiddenAncestor)"
     }
+    #endif
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()

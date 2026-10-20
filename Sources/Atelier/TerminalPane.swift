@@ -180,6 +180,7 @@ class FreezableTerminalView: LocalProcessTerminalView {
         super.send(source: source, data: data)
     }
 
+    #if ATELIER_PROBES
     /// Dev probes: every draw's duration while set, else nothing is kept.
     var drawTimes: [Double]? {
         didSet { drawObserver = drawTimes == nil ? nil : { [weak self] in self?.drawTimes?.append($0) } }
@@ -188,9 +189,12 @@ class FreezableTerminalView: LocalProcessTerminalView {
     /// Bytes the hosted process has written — dev probes measure a resize's
     /// repaint cost with it.
     private(set) var bytesReceived = 0
+    #endif
 
     override func dataReceived(slice: ArraySlice<UInt8>) {
+        #if ATELIER_PROBES
         bytesReceived += slice.count
+        #endif
         if let callback = onFirstData {
             onFirstData = nil
             DispatchQueue.main.async(execute: callback)
@@ -396,6 +400,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
         needsLayout = true
     }
 
+    #if ATELIER_PROBES
     /// Dev-only (the snapshot debug's state dump): the live wash geometry, so
     /// alpha-channel probes of snapshots can be reconciled with what the view
     /// tree actually holds.
@@ -405,6 +410,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
             + " layerBGAlpha=\(layerAlpha) sliverWash=\(sliverWash.frame)"
             + " nativeBGAlpha=\(String(format: "%.3f", terminal.nativeBackgroundColor.alphaComponent))"
     }
+    #endif
 
     @objc private func accessibilityDisplayChanged() {
         applyTheme()

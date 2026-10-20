@@ -460,6 +460,7 @@ final class FileExplorerView: NSView {
     }
 
 
+    #if ATELIER_PROBES
     /// Dev-only (snapshots): geometry of the sidebar's parts.
     var debugGeometry: String {
         "explorer bounds=\(bounds.size) collapsed=\(isCollapsed) searchOpen=\(isSearchOpen) files=\(filesOn) text=\(textOn) "
@@ -504,6 +505,7 @@ final class FileExplorerView: NSView {
             for _ in 0..<downs { self?.search.debugMoveDown() }
         }
     }
+    #endif
 
     // MARK: Search panel
 
@@ -1018,10 +1020,12 @@ final class FileExplorerView: NSView {
                 while path.count > 1, path.hasSuffix("/") { path.removeLast() }
                 return !(path == gitDir || path.hasPrefix(gitDir + "/"))
             }
+            #if ATELIER_PROBES
             if ProcessInfo.processInfo.environment["ATELIER_FS_TRACE"] != nil {
                 NSLog("Atelier: fsevents %@ root=%@ %@", relevant ? "reload" : "ignored", view.resolvedRoot,
                       Array(changed.prefix(Int(count))).joined(separator: " "))
             }
+            #endif
             if relevant { view.scheduleReload() }
         }
         guard let stream = FSEventStreamCreate(

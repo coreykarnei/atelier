@@ -463,8 +463,10 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, Pro
         activeProject?.reopenClosedSession()
     }
 
+    #if ATELIER_PROBES
     /// Dev-only (`probe:projects`): the closed projects, oldest first.
     var debugClosedProjects: [String] { closedProjects.map { "\($0.project.title)@\($0.index)" } }
+    #endif
 
     /// Window closing or app quitting: the closed projects' sessions still
     /// in their reopen grace die with it.

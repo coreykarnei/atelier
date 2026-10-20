@@ -166,10 +166,22 @@ public struct CommandMessage: Codable {
     }
 }
 
+#if ATELIER_PROBES
+extension AtelierIPC {
+    /// Whether this instance answers `DebugMessage`s: a debug build launched
+    /// on a state directory of its own — a test or film instance. The
+    /// owner's app, on the default directory, never does, debug or not.
+    public static var probesActive: Bool {
+        !(ProcessInfo.processInfo.environment["ATELIER_STATE_DIR"] ?? "").isEmpty
+    }
+}
+
 /// Dev-only plumbing: debug commands for the polish pass's visual feedback
 /// loop. `snapshot` makes the app write PNGs of its own windows (self-capture
 /// needs no Screen Recording grant, unlike `screencapture`). Not surfaced in
-/// the `atelier` CLI — send raw JSON at the socket.
+/// the `atelier` CLI — send raw JSON at the socket. Debug builds only, and
+/// only answered while `probesActive`: the surface types into terminals,
+/// performs selectors and writes files, so a release build doesn't carry it.
 public struct DebugMessage: Codable {
     public enum Action: String, Codable {
         case snapshot // write a PNG per visible window into `path`
@@ -193,6 +205,7 @@ public struct DebugMessage: Codable {
         self.column = column
     }
 }
+#endif
 
 extension AtelierIPC {
     /// Connect to the app's socket and write one message line. Returns false if
