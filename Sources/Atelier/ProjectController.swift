@@ -1414,6 +1414,9 @@ final class ProjectController: NSObject, BottomBarDelegate {
     }
 
     private func createWorktree(branch: String, repoRoot: String) {
+        guard whenTrusted(repoRoot, to: "create a worktree", then: { [weak self] in
+            self?.createWorktree(branch: branch, repoRoot: repoRoot)
+        }) else { return }
         do {
             let path = try WorktreeManager.create(branch: branch, repoRoot: repoRoot)
             adopt(Session(ideRoot: path))
@@ -1425,6 +1428,9 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// The informative delete modal: clean → quick confirm; dirty → names the loss
     /// and requires an explicit force (git's own refusal, surfaced).
     private func confirmRemoveWorktree(_ worktree: Worktree, repoRoot: String) {
+        guard whenTrusted(repoRoot, to: "check and remove a worktree", then: { [weak self] in
+            self?.confirmRemoveWorktree(worktree, repoRoot: repoRoot)
+        }) else { return }
         let branch = worktree.branch
         let openSessions = sessions.filter { $0.cwd == worktree.path }
         // Re-check the truth at decision time.
@@ -1643,6 +1649,26 @@ final class ProjectController: NSObject, BottomBarDelegate {
             NSApp.terminate(nil)
         })
         return commands
+    }
+
+    /// True when `folder` is trusted (`FolderTrust`). Otherwise asks —
+    /// checking out a branch or reading a worktree's status runs the repo's
+    /// hooks and filters — and runs `then` once the user trusts it.
+    private func whenTrusted(_ folder: String, to what: String, then: @escaping () -> Void) -> Bool {
+        guard !FolderTrust.isTrusted(folder) else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Trust \u{201C}\((folder as NSString).lastPathComponent)\u{201D} to \(what)?"
+        alert.informativeText = "Git runs the repo's own hooks and filters for this. "
+            + "Atelier hasn't seen a trust answer for the folder — Claude's or its own."
+        alert.addButton(withTitle: "Trust and Continue")
+        alert.addButton(withTitle: "Cancel")
+        let decide = { (response: NSApplication.ModalResponse) in
+            guard response == .alertFirstButtonReturn else { return }
+            FolderTrust.trust(folder)
+            then()
+        }
+        if let window { alert.beginSheetModal(for: window, completionHandler: decide) } else { decide(alert.runModal()) }
+        return false
     }
 
     private func presentError(title: String, error: Error) {

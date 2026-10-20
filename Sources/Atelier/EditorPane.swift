@@ -215,6 +215,16 @@ final class EditorPane: NSView, WorkspacePane {
             name: FileExplorerView.widthDidChange,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(trustChanged), name: FolderTrust.didChange, object: nil
+        )
+    }
+
+    /// The folder became trusted while a file was open: its server can
+    /// start now, and learns of the buffer as if it had just been opened.
+    @objc private func trustChanged() {
+        guard !isPreview, let filePath, filePath != lspAnnounced, let controller else { return }
+        announceOpen(path: filePath, text: controller.text)
     }
 
     /// Another pane's drag (or a reset) settled on a new tree width.
@@ -1032,6 +1042,7 @@ final class EditorPane: NSView, WorkspacePane {
         if let previous = filePath, previous != path {
             rememberPosition()
             lspClient?.didClose(path: previous)
+            lspAnnounced = nil
             clearDiagnostics()
         }
         isPreview = preview
@@ -1146,6 +1157,7 @@ final class EditorPane: NSView, WorkspacePane {
     private func fileRenamed(from: String, to: String) {
         guard filePath == from, let controller else { return }
         lspClient?.didClose(path: from)
+        lspAnnounced = nil
         filePath = to
         watchFile(to)
         explorer.reveal(path: to, scroll: false)
@@ -1343,8 +1355,13 @@ final class EditorPane: NSView, WorkspacePane {
     }
 
     /// Tell the language server a real buffer exists (Swift only).
+    /// The buffer the server last heard opened — so a trust arriving later
+    /// announces each buffer once.
+    private var lspAnnounced: String?
+
     private func announceOpen(path: String, text: String) {
         guard let client = lspClient else { return }
+        lspAnnounced = path
         client.onDiagnostics = { [weak self] diagnosticsPath, diagnostics in
             guard let self, diagnosticsPath == self.filePath else { return }
             self.showDiagnostics(diagnostics)

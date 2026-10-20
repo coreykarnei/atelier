@@ -92,6 +92,9 @@ final class FileExplorerView: NSView {
     /// beneath them as two-line rows. `↩`/click opens for real (Text: at the
     /// hit); `Esc` clears the query, then closes.
     private let magnifier = HoverPadButton(frame: .zero)
+    /// Shown while the root isn't trusted (`FolderTrust`): git status and
+    /// language servers are waiting. Clicking offers Atelier's own yes.
+    private let restricted = HoverPadButton(frame: .zero)
     private let searchHost = NSView()
     private var searchHostHeight: NSLayoutConstraint!
     /// Open: the panel is pinned to the bottom edge, so a window resize
@@ -157,6 +160,9 @@ final class FileExplorerView: NSView {
         build()
         NotificationCenter.default.addObserver(
             self, selector: #selector(appearanceChanged), name: Settings.didChange, object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(trustChanged), name: FolderTrust.didChange, object: nil
         )
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(appearanceChanged),
@@ -303,6 +309,14 @@ final class FileExplorerView: NSView {
         magnifier.action = #selector(magnifierClicked)
         magnifier.translatesAutoresizingMaskIntoConstraints = false
         header.addSubview(magnifier)
+        restricted.image = Self.symbol("lock", size: 10)
+        restricted.toolTip = "Restricted: git status and language servers wait until this folder is trusted"
+        restricted.setAccessibilityLabel("Restricted folder — trust it")
+        restricted.target = self
+        restricted.action = #selector(restrictedClicked)
+        restricted.isHidden = true
+        restricted.translatesAutoresizingMaskIntoConstraints = false
+        header.addSubview(restricted)
 
         // Search panel: hidden (0pt) until opened; then it takes the tree's
         // place under the header. Both summons live in it, one visible.
@@ -401,7 +415,11 @@ final class FileExplorerView: NSView {
             magnifier.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             magnifier.widthAnchor.constraint(equalToConstant: 20),
             magnifier.heightAnchor.constraint(equalToConstant: 20),
-            rootLabel.trailingAnchor.constraint(lessThanOrEqualTo: magnifier.leadingAnchor, constant: -6),
+            restricted.trailingAnchor.constraint(equalTo: magnifier.leadingAnchor, constant: -2),
+            restricted.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            restricted.widthAnchor.constraint(equalToConstant: 20),
+            restricted.heightAnchor.constraint(equalToConstant: 20),
+            rootLabel.trailingAnchor.constraint(lessThanOrEqualTo: restricted.leadingAnchor, constant: -6),
             searchHost.topAnchor.constraint(equalTo: header.bottomAnchor),
             searchHost.leadingAnchor.constraint(equalTo: leadingAnchor),
             searchHost.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -1),
@@ -433,8 +451,33 @@ final class FileExplorerView: NSView {
         refreshOffer()
         ignored = []
         outline.reloadData()
+        restricted.isHidden = FolderTrust.isTrusted(root)
         refreshIgnored()
         startWatching(root)
+    }
+
+    @objc private func trustChanged() {
+        guard let root else { return }
+        let trusted = FolderTrust.isTrusted(root)
+        guard restricted.isHidden != trusted else { return }
+        restricted.isHidden = trusted
+        if trusted { refreshIgnored() }
+    }
+
+    /// Atelier's own yes, for a folder Claude hasn't vouched for — the
+    /// backup when Claude's record says nothing (owner call 2026-10-20).
+    @objc private func restrictedClicked() {
+        guard let root else { return }
+        let alert = NSAlert()
+        alert.messageText = "Trust \u{201C}\((root as NSString).lastPathComponent)\u{201D}?"
+        alert.informativeText = "Until a folder is trusted, Atelier doesn't run git status or language servers in it — "
+            + "both can run code the folder brings. Answering Claude's trust question here does this too."
+        alert.addButton(withTitle: "Trust")
+        alert.addButton(withTitle: "Cancel")
+        let decide = { (response: NSApplication.ModalResponse) in
+            if response == .alertFirstButtonReturn { FolderTrust.trust(root) }
+        }
+        if let window { alert.beginSheetModal(for: window, completionHandler: decide) } else { decide(alert.runModal()) }
     }
 
     /// Select the row for `path`, expanding the folders above it. Silent if
@@ -911,7 +954,9 @@ final class FileExplorerView: NSView {
     /// stays bright — those are the files you're making.
     private func refreshIgnored() {
         guard let root else { return }
-        guard !RepoFileOffer.isUnboundedRoot(root) else {
+        // `git status` runs the repo's clean and process filters, so it
+        // waits for a trusted folder; until then nothing is dimmed.
+        guard !RepoFileOffer.isUnboundedRoot(root), FolderTrust.isTrusted(root) else {
             ignored = []
             return
         }

@@ -538,7 +538,9 @@ enum LSPRegistry {
     private static var clients: [String: LSPClient] = [:]
 
     static func client(for root: String, language: CodeLanguage) -> LSPClient? {
-        guard let spec = LSPServers.spec(for: language) else { return nil }
+        // A server runs the folder's own code (build scripts, proc macros,
+        // its venv's python): only once the folder is trusted.
+        guard FolderTrust.isTrusted(root), let spec = LSPServers.spec(for: language) else { return nil }
         let key = "\(root)|\(spec.key)"
         if let existing = clients[key] { return existing }
         guard let command = LSPServers.resolve(spec),
