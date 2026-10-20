@@ -118,7 +118,7 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
 
     private func watchDirectory(_ dir: String) {
         directoryWatch?.cancel()
-        let fd = open(dir, O_EVTONLY)
+        let fd = open(dir, O_EVTONLY | O_CLOEXEC)
         guard fd >= 0 else { return }
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd, eventMask: [.write, .delete, .rename], queue: queue
@@ -138,6 +138,9 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
 
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { NSLog("Atelier: socket() failed"); return }
+        // Never inherited: a child holding the listener could accept hooks
+        // meant for the app (the PTY spawn closes it too; this covers the rest).
+        _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
 
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)

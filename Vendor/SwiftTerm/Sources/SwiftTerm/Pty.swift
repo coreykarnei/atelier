@@ -93,12 +93,26 @@ public class PseudoTerminalHelpers {
         }
 
         var master: Int32 = 0
-        
+        // Read before forking: the child does nothing but close, chdir and
+        // exec. Capped, in case the limit is effectively unbounded.
+        let descriptorLimit = min(getdtablesize(), 65536)
+
         let pid = forkpty(&master, nil, nil, &desiredWindowSize)
         if pid < 0 {
             return nil
         }
         if pid == 0 {
+            // The child keeps the terminal (0, 1, 2) and nothing else. Every
+            // other descriptor the host had open — its sockets, other
+            // terminals' primary sides, watched directories — would
+            // otherwise pass through exec into the shell and everything it
+            // runs, which could then read or type into the host's other
+            // terminals. forkpty marks none of them close-on-exec.
+            var fd: Int32 = 3
+            while fd < descriptorLimit {
+                _ = close(fd)
+                fd += 1
+            }
             if let cCurrentDirectory {
                 _ = chdir(cCurrentDirectory)
             }

@@ -1161,7 +1161,7 @@ final class EditorPane: NSView, WorkspacePane {
     /// there. Events coalesce over a short debounce.
     private func watchFile(_ path: String) {
         stopWatchingFile()
-        let fd = Darwin.open(path, O_EVTONLY)
+        let fd = Darwin.open(path, O_EVTONLY | O_CLOEXEC)
         guard fd >= 0 else { return }
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,

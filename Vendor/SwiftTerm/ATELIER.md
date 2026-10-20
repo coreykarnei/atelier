@@ -92,3 +92,12 @@ a PR; when one lands, drop it here and note the version.
     view falls back to its child's cwd (`proc_pidinfo`), so a shell's
     relative paths follow its `cd`. `opensPathLinks` lets a host whose
     process runs elsewhere (ssh) keep paths from resolving on this machine.
+12. **A child inherits only its terminal** (`Pty.swift`; security review
+    2026-10-20). `forkpty` then `execve` closed nothing, and nothing in the
+    host marks its descriptors close-on-exec, so every shell and agent
+    started in a terminal held the host's listening socket, its watched
+    directories, and the primary side of every *other* terminal it had
+    open — a process in one could read or type into another. The forked
+    child now closes every descriptor from 3 up to `getdtablesize()`
+    (capped at 65536) before `chdir` and `execve`; the bound is read
+    before the fork, so the child only calls `close`.
