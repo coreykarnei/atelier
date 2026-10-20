@@ -4,15 +4,19 @@
 # downloaded copy — the Homebrew cask's included — opens without Gatekeeper's
 # quarantine prompt.
 #
-# One-time setup (docs/SETUP.md, "Releasing"):
-#   - a "Developer ID Application" certificate in the login keychain
-#     (Xcode → Settings → Accounts → Manage Certificates → + )
-#   - notary credentials stored as a keychain profile:
-#       xcrun notarytool store-credentials atelier-notary \
-#         --key <AuthKey_ID.p8> --key-id <ID> --issuer <issuer uuid>
+# The Developer ID identity and the notary credentials live in their own
+# keychain, locked except while this script runs: in the login keychain,
+# codesign could use the key without asking, so any process running as the
+# user could sign as the team. One-time setup is in docs/SETUP.md,
+# "Releasing".
 #
-# Overrides: DEVELOPER_ID="Developer ID Application: … (TEAMID)",
-# NOTARY_PROFILE=<keychain profile> (default atelier-notary).
+# Overrides: RELEASE_KEYCHAIN=<path> (default
+# ~/Library/Keychains/release.keychain-db), DEVELOPER_ID="Developer ID
+# Application: … (TEAMID)", NOTARY_PROFILE=<keychain profile> (default
+# atelier-notary).
+#
+# `release.sh --check` unlocks the keychain, test-signs a scratch binary,
+# checks the notary credentials, and locks it again — no build.
 #
 # Dev builds keep the self-signed identity (Scripts/bundle.sh); only this
 # script touches the Developer ID.
@@ -21,32 +25,68 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/.build/Atelier.app"
 DIST="$ROOT/.build/dist"
+KEYCHAIN="${RELEASE_KEYCHAIN:-$HOME/Library/Keychains/release.keychain-db}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-atelier-notary}"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT/Resources/Info.plist")"
 ZIP="$DIST/Atelier-$VERSION.zip"
 
-if [[ -z "${DEVELOPER_ID:-}" ]]; then
-  DEVELOPER_ID="$(security find-identity -v -p codesigning \
-    | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)"
-fi
-if [[ -z "$DEVELOPER_ID" ]]; then
-  echo "error: no 'Developer ID Application' identity in the keychain" >&2
-  echo "       (Xcode → Settings → Accounts → Manage Certificates → + )" >&2
+if [[ ! -f "$KEYCHAIN" ]]; then
+  echo "error: no release keychain at $KEYCHAIN (docs/SETUP.md, \"Releasing\")" >&2
   exit 1
 fi
-echo "==> Atelier $VERSION, signing as: $DEVELOPER_ID"
+if security find-identity -v -p codesigning | grep -q '"Developer ID Application:'; then
+  echo "warning: a Developer ID identity is still on the keychain search list;" >&2
+  echo "         it belongs only in $KEYCHAIN (docs/SETUP.md, \"Releasing\")" >&2
+fi
 
+# Unlocked only from here to exit, whatever the exit; the keychain's own
+# auto-lock is the backstop.
+unlock() {
+  echo "==> unlocking $(basename "$KEYCHAIN")"
+  security unlock-keychain "$KEYCHAIN"
+  trap 'security lock-keychain "$KEYCHAIN"; echo "==> keychain locked"' EXIT
+  if [[ -z "${DEVELOPER_ID:-}" ]]; then
+    DEVELOPER_ID="$(security find-identity -v -p codesigning "$KEYCHAIN" \
+      | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)"
+  fi
+  if [[ -z "$DEVELOPER_ID" ]]; then
+    echo "error: no 'Developer ID Application' identity in $KEYCHAIN" >&2
+    exit 1
+  fi
+}
+
+sign() {
+  codesign --force --options runtime --timestamp --keychain "$KEYCHAIN" \
+    --sign "$DEVELOPER_ID" "$@"
+}
+
+notary() {
+  xcrun notarytool "$@" --keychain-profile "$NOTARY_PROFILE" --keychain "$KEYCHAIN"
+}
+
+if [[ "${1:-}" == "--check" ]]; then
+  unlock
+  SCRATCH="$(mktemp -d)"
+  cp /bin/echo "$SCRATCH/probe"
+  sign "$SCRATCH/probe"
+  codesign --verify --verbose=1 "$SCRATCH/probe"
+  rm -rf "$SCRATCH"
+  echo "==> signing works as: $DEVELOPER_ID"
+  notary history >/dev/null
+  echo "==> notary credentials work ($NOTARY_PROFILE)"
+  exit 0
+fi
+
+echo "==> Atelier $VERSION"
 echo "==> release build"
 swift build -c release
 "$ROOT/Scripts/bundle.sh" release >/dev/null
 
-echo "==> signing"
+unlock
+echo "==> signing as: $DEVELOPER_ID"
 # Inside out: the helper binaries first, then the app, which seals them and
 # every resource. The bundle is re-signed from scratch — bundle.sh's
 # self-signed signature is replaced, not layered.
-sign() {
-  codesign --force --options runtime --timestamp --sign "$DEVELOPER_ID" "$@"
-}
 sign "$APP/Contents/MacOS/atelier-notify"
 sign "$APP/Contents/MacOS/atelier-cli"
 sign "$APP"
@@ -56,8 +96,7 @@ echo "==> notarizing (usually a few minutes)"
 mkdir -p "$DIST"
 rm -f "$ZIP"
 ditto -c -k --keepParent "$APP" "$ZIP"
-if ! xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait --output-format plist \
-     > "$DIST/notary.plist"; then
+if ! notary submit "$ZIP" --wait --output-format plist > "$DIST/notary.plist"; then
   cat "$DIST/notary.plist" >&2 || true
   exit 1
 fi
@@ -65,7 +104,7 @@ STATUS="$(/usr/libexec/PlistBuddy -c 'Print :status' "$DIST/notary.plist")"
 ID="$(/usr/libexec/PlistBuddy -c 'Print :id' "$DIST/notary.plist")"
 if [[ "$STATUS" != "Accepted" ]]; then
   echo "error: notarization $STATUS — the log says why:" >&2
-  xcrun notarytool log "$ID" --keychain-profile "$NOTARY_PROFILE" >&2
+  notary log "$ID" >&2
   exit 1
 fi
 

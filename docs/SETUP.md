@@ -117,22 +117,63 @@ signed with the Developer ID (hardened runtime, secure timestamp), notarized
 by Apple and stapled, so it opens without the quarantine prompt. It writes
 `.build/dist/Atelier-<version>.zip` and prints the sha256 for the cask.
 
+The Developer ID identity and the notary credentials live in a keychain of
+their own, `~/Library/Keychains/release.keychain-db`, which stays locked
+except while `make release` runs. `release.sh` unlocks it with one password
+prompt and locks it on exit, whatever the outcome. In the login keychain,
+`codesign` could use the key without asking, so any process running as you
+could sign as the team (found 2026-10-20, `docs/HARDENING.md`).
+
 One-time setup, on an Apple Developer Program account:
 
-1. A **Developer ID Application** certificate in the login keychain — Xcode →
-   Settings → Accounts → Manage Certificates → **+**.
-2. Notary credentials as a keychain profile, from an App Store Connect API key
-   (Users and Access → Integrations → Team Keys, Developer access):
+1. **The keychain.** Give it its own password, kept in a password manager:
+
+   ```sh
+   security create-keychain ~/Library/Keychains/release.keychain-db
+   security set-keychain-settings -l -u -t 600 ~/Library/Keychains/release.keychain-db
+   chmod 600 ~/Library/Keychains/release.keychain-db   # created 0644
+   security list-keychains -d user   # it should not be listed; if it is:
+   # security list-keychains -d user -s ~/Library/Keychains/login.keychain-db
+   ```
+
+2. **A Developer ID Application identity in it.**
+   - Make one in Xcode (Settings → Accounts → Manage Certificates → **+**).
+   - Export it from the login keychain with Keychain Access (My
+     Certificates → the identity → Export… → .p12).
+   - Import it into the release keychain, and let Apple's tools use it while
+     the keychain is unlocked:
+
+     ```sh
+     security import <identity>.p12 -k ~/Library/Keychains/release.keychain-db -f pkcs12
+     security set-key-partition-list -S apple-tool:,apple: -s ~/Library/Keychains/release.keychain-db
+     ```
+
+   - Then delete it from the login keychain
+     (`security delete-identity -Z <SHA-1> ~/Library/Keychains/login.keychain-db`).
+   - Keep the .p12 in the password manager, not on disk.
+   - Renewal: the current certificate expires **2027-02-01**. Make the new
+     one in Xcode, which puts it in the login keychain, then move it with the
+     same export, import, partition-list and delete steps.
+
+3. **Notary credentials as a profile in it**, from an App Store Connect API
+   key (Users and Access → Integrations → Team Keys, Developer access):
 
    ```sh
    xcrun notarytool store-credentials atelier-notary \
-     --key ~/.appstoreconnect/AuthKey_<KEYID>.p8 --key-id <KEYID> --issuer <ISSUER-UUID>
+     --keychain ~/Library/Keychains/release.keychain-db \
+     --key AuthKey_<KEYID>.p8 --key-id <KEYID> --issuer <ISSUER-UUID>
    ```
 
-   A 403 "required agreement is missing" means the Program License Agreement
-   needs accepting at developer.apple.com — and can take a while to take
-   effect once it has been.
+   - Keep the .p8 in the password manager, not on disk.
+   - A 403 "required agreement is missing" means the Program License
+     Agreement needs accepting at developer.apple.com, and it can take a
+     while to take effect once accepted.
 
-`DEVELOPER_ID` and `NOTARY_PROFILE` override the identity and the profile.
+`Scripts/release.sh --check` proves the setup without building. It unlocks
+the keychain, test-signs a scratch binary, checks the notary credentials,
+and locks it again.
+
+`RELEASE_KEYCHAIN`, `DEVELOPER_ID` and `NOTARY_PROFILE` override the
+keychain, the identity and the profile.
 Dev builds (`make bundle`) keep the self-signed identity above; after a
 release, `make bundle` returns `.build/Atelier.app` to one.
