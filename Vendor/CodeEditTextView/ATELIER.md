@@ -64,3 +64,7 @@ local override by package identity, the same way `Vendor/CodeEditSymbols` is.
    rects, accessibility frames — drew a sliver at the wrap point instead of
    the text. Atelier's search-hit mark on a wrapped preview was the report
    (2026-09-17): matches past the first visual row never appeared.
+7. **No SwiftLint build plugin** (`Package.swift`; security review
+   2026-10-20). Same as CodeEditSourceEditor patch 10: the plugin downloaded
+   and ran a SwiftLint binary in every build, release builds included; the
+   dependency and both `plugins:` entries are gone.

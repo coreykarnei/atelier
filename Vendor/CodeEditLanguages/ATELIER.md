@@ -4,6 +4,14 @@ Vendored copy of CodeEditLanguages 0.1.20 (upstream 331d5db), used as a
 local path override — the same pattern as `Vendor/SwiftTerm`. Each patch is
 meant for an upstream PR.
 
+The prebuilt grammars, `CodeLanguagesContainer.xcframework.zip`, are
+upstream's file at the 0.1.20 tag, unmodified: SHA-256
+`c6ee69d9d373a9c3cf93d239e05369d9b941275d31cd7956d0dc83b5a5c3e152`,
+checked against
+`raw.githubusercontent.com/CodeEditApp/CodeEditLanguages/0.1.20/CodeLanguagesContainer.xcframework.zip`
+on 2026-10-20. Re-check with `shasum -a 256` whenever it's replaced; it's
+compiled code, so it's the one thing here a review can't read.
+
 1. **Query URL resolved against both bundle layouts** (`CodeLanguage.swift`,
    `queryURL(for:)`). `Bundle.module.resourceURL` is the bundle root under
    Xcode but `<bundle>/Resources` under `swift build`, so the fixed

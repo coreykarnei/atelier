@@ -29,11 +29,6 @@ let package = Package(
             url: "https://github.com/CodeEditApp/CodeEditSymbols.git",
             exact: "0.2.3"
         ),
-        // SwiftLint
-        .package(
-            url: "https://github.com/lukepistrol/SwiftLintPlugin",
-            from: "0.2.2"
-        ),
         // Rules for indentation, pair completion, whitespace
         .package(
             url: "https://github.com/ChimeHQ/TextFormation",
@@ -50,9 +45,6 @@ let package = Package(
                 "CodeEditLanguages",
                 "TextFormation",
                 "CodeEditSymbols"
-            ],
-            plugins: [
-                .plugin(name: "SwiftLint", package: "SwiftLintPlugin")
             ]
         ),
 
@@ -63,9 +55,6 @@ let package = Package(
                 "CodeEditSourceEditor",
                 "CodeEditLanguages",
                 .product(name: "CustomDump", package: "swift-custom-dump")
-            ],
-            plugins: [
-                .plugin(name: "SwiftLint", package: "SwiftLintPlugin")
             ]
         ),
     ]

@@ -77,6 +77,24 @@ if [[ "${1:-}" == "--check" ]]; then
   exit 0
 fi
 
+# What ships is what's committed and tagged: no stray edits, no untracked
+# files, HEAD at v$VERSION — and the one prebuilt binary in the tree is the
+# upstream file it claims to be (Vendor/CodeEditLanguages/ATELIER.md).
+if [[ -n "$(git -C "$ROOT" status --porcelain)" ]]; then
+  echo "error: the tree has uncommitted or untracked changes — release from a clean checkout" >&2
+  exit 1
+fi
+if [[ "$(git -C "$ROOT" tag --points-at HEAD)" != *"v$VERSION"* ]]; then
+  echo "error: HEAD isn't tagged v$VERSION (Info.plist's version) — commit, tag, then release" >&2
+  exit 1
+fi
+GRAMMARS="$ROOT/Vendor/CodeEditLanguages/CodeLanguagesContainer.xcframework.zip"
+GRAMMARS_SHA256=c6ee69d9d373a9c3cf93d239e05369d9b941275d31cd7956d0dc83b5a5c3e152
+if [[ "$(shasum -a 256 "$GRAMMARS" | cut -d' ' -f1)" != "$GRAMMARS_SHA256" ]]; then
+  echo "error: $GRAMMARS isn't the recorded upstream file (Vendor/CodeEditLanguages/ATELIER.md)" >&2
+  exit 1
+fi
+
 echo "==> Atelier $VERSION"
 echo "==> release build"
 swift build -c release

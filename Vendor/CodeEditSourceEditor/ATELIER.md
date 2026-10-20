@@ -57,3 +57,9 @@ root overrides by identity with `Vendor/` copies.
    untouched for a read-only view so it travels the responder chain; the
    host decides what typing into a read-only buffer means (Atelier: it
    enters the previewed file, then replays the key).
+10. **No SwiftLint build plugin** (`Package.swift`; security review
+    2026-10-20). Upstream attaches `lukepistrol/SwiftLintPlugin` to its
+    targets, which downloads a SwiftLint binary and runs it in every build —
+    release builds included, on the machine that holds the signing keys.
+    Lint isn't Atelier's to run here; the dependency and both `plugins:`
+    entries are gone.
