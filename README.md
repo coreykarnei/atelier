@@ -12,7 +12,7 @@ Built with AppKit, with a keyboard-first workflow, Catppuccin Mocha colors,
 and native translucency. Claude Code runs as its own process, with its tools
 and permissions intact.
 
-Atelier is the author's daily driver. Version **1.4.15** installs with
+Atelier is the author's daily driver. Version **1.5.0** installs with
 Homebrew, or you can build it from source.
 
 <a href="https://raw.githubusercontent.com/coreykarnei/atelier/main/docs/media/atelier-demo-full.avif"><picture><source srcset="docs/media/atelier-demo.avif" type="image/avif"><img src="docs/media/atelier-demo-poster.jpg" width="100%" alt="Atelier at work: Claude Code, a VS Code–style editor and a terminal lift apart and settle back into one window. Along the session bar, each Claude session shows its status; one needs attention, and a click opens its permission prompt, which is approved. Then the project row shows every project's sessions at a glance."></picture></a>
