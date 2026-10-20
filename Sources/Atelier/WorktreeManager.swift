@@ -142,9 +142,7 @@ enum WorktreeManager {
     // MARK: Process
 
     private static func git(_ args: [String]) -> (status: Int32, out: String, err: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = args
+        let process = Git.process(args)
         let outPipe = Pipe(), errPipe = Pipe()
         process.standardOutput = outPipe
         process.standardError = errPipe

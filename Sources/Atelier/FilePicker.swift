@@ -68,11 +68,9 @@ enum RepoFileOffer {
                 DispatchQueue.main.async { completion(built) }
                 return
             }
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
             // `-- .` bounds the listing to the session folder: a root that is
             // a sub-folder of its repo lists its own subtree, not the repo.
-            process.arguments = ["-C", root, "ls-files", "--cached", "--others", "--exclude-standard", "--", "."]
+            let process = Git.process(["-C", root, "ls-files", "--cached", "--others", "--exclude-standard", "--", "."])
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = Pipe()

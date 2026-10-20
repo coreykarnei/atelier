@@ -289,10 +289,24 @@ final class Session: NSObject, NSSplitViewDelegate {
         // (2026-10-08). Lay out now, so the resize reaches the shell first.
         container.layoutSubtreeIfNeeded()
         let shell = shellPane
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            shell.send(text: " cd '\(root)' && clear\r")
+        if let word = Self.shellWord(root) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                shell.send(text: " cd \(word) && clear\r")
+            }
         }
         onPromoted?()
+    }
+
+    /// `path` as one single-quoted shell word — each `'` closed, escaped and
+    /// reopened, so a folder named `it's` re-roots and one named
+    /// `x'; curl … | sh; '` doesn't run anything — or nil when it holds a
+    /// control character, which no quoting makes safe to type into a live
+    /// shell (the shell then stays where it is).
+    static func shellWord(_ path: String) -> String? {
+        guard !path.unicodeScalars.contains(where: { $0.value < 0x20 || (0x7f...0x9f).contains($0.value) }) else {
+            return nil
+        }
+        return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     private var agentStarted = false
@@ -357,7 +371,13 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// under an id nothing knew). Follow it — the title, the dots, banner
     /// clicks, and relaunch's `--resume` all key on `claudeSessionId`.
     func adoptConversation(_ sessionId: String) {
-        let id = sessionId.lowercased()
+        // Only ever a conversation: the id becomes `--resume`'s argument and
+        // part of a transcript path (2026-10 security pass).
+        guard let uuid = UUID(uuidString: sessionId) else {
+            NSLog("Atelier: tab \(self.id) ignored a conversation id that isn't a UUID")
+            return
+        }
+        let id = uuid.uuidString.lowercased()
         guard id != claudeSessionId else { return }
         NSLog("Atelier: tab \(self.id) followed its agent from \(claudeSessionId) to \(id)")
         claudeSessionId = id

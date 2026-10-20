@@ -23,15 +23,37 @@ public enum AtelierIPC {
         "\(stateDirectory())/notify.sock"
     }
 
-    /// Ensure the parent directory exists. Returns the socket path.
+    /// Ensure the state directory exists and is the user's alone — created
+    /// 0700, an existing one tightened to it — and return the socket path.
+    /// Nil, a refusal, when the directory is a symlink or someone else's
+    /// (an `ATELIER_STATE_DIR` aimed into a shared place): the socket and the
+    /// session files would sit where another account could swap them.
     @discardableResult
-    public static func ensureSocketDirectory() -> String {
+    public static func ensureSocketDirectory() -> String? {
         let path = socketPath()
         let dir = (path as NSString).deletingLastPathComponent
         try? FileManager.default.createDirectory(
-            atPath: dir, withIntermediateDirectories: true
+            atPath: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
         )
+        var st = stat()
+        guard lstat(dir, &st) == 0, st.st_mode & S_IFMT == S_IFDIR, st.st_uid == getuid() else {
+            NSLog("Atelier: refusing state directory \(dir) — not a directory of this user's")
+            return nil
+        }
+        if st.st_mode & 0o077 != 0 { chmod(dir, 0o700) }
         return path
+    }
+
+    /// Write one of Atelier's state files: atomically, so a crash mid-write
+    /// can't leave half a session tree, and readable by the user alone.
+    public static func writeStateFile(_ data: Data, to path: String) {
+        guard ensureSocketDirectory() != nil else { return }
+        do {
+            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+            chmod(path, 0o600)
+        } catch {
+            NSLog("Atelier: couldn't write \(path): \(error.localizedDescription)")
+        }
     }
 }
 

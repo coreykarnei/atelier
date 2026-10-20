@@ -69,8 +69,9 @@ final class RepoTextSearch {
         searchQueue.async { [weak self] in
             self?.runningProcess?.terminate()
 
-            let process = Process()
+            let process: Process
             if let rg = Self.ripgrepPath {
+                process = Process()
                 process.executableURL = URL(fileURLWithPath: rg)
                 process.arguments = [
                     "--fixed-strings", "--smart-case", "--line-number", "--column",
@@ -79,8 +80,7 @@ final class RepoTextSearch {
                 ]
                 process.currentDirectoryURL = URL(fileURLWithPath: root)
             } else {
-                process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-                process.arguments = ["-C", root, "grep", "-In", "--column", "-F", "-e", query]
+                process = Git.process(["-C", root, "grep", "-In", "--column", "-F", "-e", query])
             }
             let pipe = Pipe()
             process.standardOutput = pipe

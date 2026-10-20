@@ -927,9 +927,7 @@ final class FileExplorerView: NSView {
             let sub: String? = toplevel.map { top in
                 resolvedRoot == top ? "" : (resolvedRoot.hasPrefix(top + "/") ? String(resolvedRoot.dropFirst(top.count + 1)) + "/" : "")
             }
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            process.arguments = ["-C", root, "status", "--porcelain", "--ignored", "-z", "--untracked-files=normal", "--", "."]
+            let process = Git.process(["-C", root, "status", "--porcelain", "--ignored", "-z", "--untracked-files=normal", "--", "."])
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = FileHandle.nullDevice
@@ -964,9 +962,7 @@ final class FileExplorerView: NSView {
     /// `git rev-parse --show-toplevel` for `root`, symlinks resolved as git
     /// spells it; nil outside a repo.
     private static func gitToplevel(_ root: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["-C", root, "rev-parse", "--show-toplevel"]
+        let process = Git.process(["-C", root, "rev-parse", "--show-toplevel"])
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice

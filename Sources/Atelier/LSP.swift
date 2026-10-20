@@ -155,8 +155,10 @@ enum LSPServers {
             "\(home)/go/bin", "\(home)/.bun/bin", "\(home)/.deno/bin", "\(home)/.volta/bin",
             "\(home)/.npm-global/bin", "/usr/bin",
         ]
+        // Absolute entries only: a relative one (`.`, `node_modules/.bin`)
+        // would resolve against whatever folder the process is in.
         var seen = Set<String>()
-        return dirs.filter { !$0.isEmpty && seen.insert($0).inserted }
+        return dirs.filter { $0.hasPrefix("/") && seen.insert($0).inserted }
     }()
 }
 
@@ -203,17 +205,17 @@ final class LSPClient {
             FileManager.default.createFile(atPath: errLog, contents: nil)
             if let handle = FileHandle(forWritingAtPath: errLog) { process.standardError = handle }
         }
-        // The environment the server sees. For Python, the venv's `bin` goes
-        // first on PATH and VIRTUAL_ENV is set — the same thing `source
-        // .venv/bin/activate` does — so a server that just runs `python`
-        // (pylsp, jedi, pyright's fallback) lands in the right interpreter
-        // without any protocol negotiation.
+        // The environment the server sees. For Python, VIRTUAL_ENV names the
+        // venv. Its `bin` is never put on PATH (2026-10 security pass): the
+        // folder is the repo's, and pyright-langserver alone is a
+        // `#!/usr/bin/env node` script, so a `.venv/bin/node` committed to a
+        // repo would run before the server did. The interpreter reaches the
+        // server as `pythonPath` instead.
         var environment = ProcessInfo.processInfo.environment
         environment["PATH"] = LSPServers.searchPath.joined(separator: ":")
         if let python = (settings["python"] as? [String: Any])?["pythonPath"] as? String {
             let bin = (python as NSString).deletingLastPathComponent
             environment["VIRTUAL_ENV"] = (bin as NSString).deletingLastPathComponent
-            environment["PATH"] = bin + ":" + (environment["PATH"] ?? "")
         }
         process.environment = environment
         do { try process.run() } catch { return nil }

@@ -16,8 +16,8 @@ struct PersistedSession: Codable {
     var openFile: String?
     /// Read only, never written: remote sessions were removed in v1.5.0, and
     /// a snapshot or shelf entry from before can still hold one, its `cwd` a
-    /// directory on the host. Kept so `droppingLegacyRemote()` can leave such
-    /// a session behind on load instead of restoring it as a local one.
+    /// directory on the host. Kept so `loadable()` can leave such a session
+    /// behind on load instead of restoring it as a local one.
     var remoteHost: String? = nil
     /// The tab's attention state at quit (`Session.Attention` raw value), so a
     /// relaunch shows what you hadn't seen yet. Optional: older snapshots.
@@ -33,19 +33,25 @@ struct PersistedWindow: Codable {
     /// and in older snapshots.
     var root: String? = nil
 
-    /// The window without sessions from before v1.5.0's removal of remote
-    /// sessions, its active tab found again by conversation (an index would
-    /// land on a neighbour once an earlier tab is gone). Nil when nothing
-    /// local is left.
-    func droppingLegacyRemote() -> PersistedWindow? {
-        guard sessions.contains(where: { $0.remoteHost != nil }) else { return self }
+    /// The window with only the sessions that can come back: not a remote
+    /// one from before v1.5.0's removal of remote sessions, and not one
+    /// whose conversation id isn't a UUID — the id becomes a claude argument
+    /// and part of a transcript path, so a tampered or corrupt file must not
+    /// carry anything else there. The active tab is found again by
+    /// conversation (an index would land on a neighbour once an earlier tab
+    /// is gone). Nil when nothing is left.
+    func loadable() -> PersistedWindow? {
+        func keeps(_ session: PersistedSession) -> Bool {
+            session.remoteHost == nil && UUID(uuidString: session.claudeSessionId) != nil
+        }
+        guard !sessions.allSatisfy(keeps) else { return self }
         let active = sessions.indices.contains(activeIndex) ? sessions[activeIndex].claudeSessionId : nil
         var kept = self
-        kept.sessions = sessions.filter { $0.remoteHost == nil }
+        kept.sessions = sessions.filter(keeps)
+        NSLog("Atelier: left \(sessions.count - kept.sessions.count) saved session(s) behind (remote, or no valid conversation id)")
         guard !kept.sessions.isEmpty else { return nil }
         kept.activeIndex = kept.sessions.firstIndex { $0.claudeSessionId == active }
             ?? min(activeIndex, kept.sessions.count - 1)
-        NSLog("Atelier: left \(sessions.count - kept.sessions.count) remote session(s) behind — remote sessions were removed")
         return kept
     }
 }
@@ -68,7 +74,7 @@ enum SessionStore {
         var windows: [PersistedWindow] = []
         var active = 0
         for (index, window) in state.windows.enumerated() {
-            guard let kept = window.droppingLegacyRemote() else { continue }
+            guard let kept = window.loadable() else { continue }
             if index <= state.activeWindow { active = windows.count }
             windows.append(kept)
         }
@@ -76,12 +82,10 @@ enum SessionStore {
     }
 
     static func save(_ state: PersistedState) {
-        let dir = (path as NSString).deletingLastPathComponent
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(state) else { return }
-        try? data.write(to: URL(fileURLWithPath: path))
+        AtelierIPC.writeStateFile(data, to: path)
     }
 }
 
@@ -110,19 +114,17 @@ enum ProjectShelf {
         // Remote projects (`ssh://host:dir` keys) and remote sessions inside
         // local ones are from before v1.5.0; the next write drops them.
         return shelf.compactMapValues { entry in
-            guard let window = entry.window.droppingLegacyRemote(), window.sessions.contains(where: \.isIDE) else { return nil }
+            guard let window = entry.window.loadable(), window.sessions.contains(where: \.isIDE) else { return nil }
             return Entry(window: window, shelvedAt: entry.shelvedAt)
         }.filter { !$0.key.hasPrefix("ssh://") }
     }
 
     private static func save(_ shelf: [String: Entry]) {
-        let dir = (path as NSString).deletingLastPathComponent
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         guard let data = try? encoder.encode(shelf) else { return }
-        try? data.write(to: URL(fileURLWithPath: path))
+        AtelierIPC.writeStateFile(data, to: path)
     }
 
     private static var decoder: JSONDecoder {

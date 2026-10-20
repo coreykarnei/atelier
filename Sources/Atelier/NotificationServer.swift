@@ -36,8 +36,8 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
     /// Every agent lifecycle event (incl. `working`, which posts no banner) —
     /// feeds the per-tab attention state (MILESTONE_1 §7.1). The full message is
     /// passed so the app can classify (e.g. idle-waiting vs needs-permission).
-    /// Main thread.
-    var onAgentEvent: ((NotifyMessage) -> Void)?
+    /// Returns whether a session Atelier hosts claimed it. Main thread.
+    var onAgentEvent: ((NotifyMessage) -> Bool)?
 
     /// A notification banner was clicked; the payload is the Claude session id.
     /// Click-to-focus the right session tab (TECHNICAL_PLAN §4 M3). Main thread.
@@ -131,7 +131,7 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
 
     /// On `queue`, like everything that touches the listener.
     private func bind() {
-        let path = AtelierIPC.ensureSocketDirectory()
+        guard let path = AtelierIPC.ensureSocketDirectory() else { return }
         // A deleted directory is recreated above; watch whichever is there now.
         watchDirectory((path as NSString).deletingLastPathComponent)
         unlink(path) // clear any stale socket from a previous run
@@ -158,6 +158,9 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
             }
         }
         guard bound == 0 else { NSLog("Atelier: bind() failed errno=\(errno)"); close(fd); return }
+        // The user's alone (the directory already is): connecting takes
+        // write permission on the socket file.
+        chmod(path, 0o600)
         guard listen(fd, 8) == 0 else { NSLog("Atelier: listen() failed"); close(fd); return }
 
         var st = stat()
@@ -174,6 +177,10 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
         let client = accept(listenFD, nil, nil)
         guard client >= 0 else { return }
         defer { close(client) }
+        // A client that connects and never writes must not hold up every
+        // hook behind it, nor quit, which waits on this queue.
+        var timeout = timeval(tv_sec: 0, tv_usec: 500_000)
+        setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
 
         // Hooks send one short JSON line then close — a single read suffices.
         var buffer = [UInt8](repeating: 0, count: 4096)
@@ -201,7 +208,10 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
 
     private func post(_ msg: NotifyMessage) {
         NSLog("Atelier: notify received kind=\(msg.kind.rawValue) session=\(msg.sessionId ?? "-")")
-        onAgentEvent?(msg)
+        // Only a session Atelier hosts speaks here: a message no tab claims
+        // is a stranger's, and a banner under Atelier's name would let it
+        // say anything.
+        guard onAgentEvent?(msg) == true else { return }
 
         // `working` and `session` are tab state only — no banner for "you
         // pressed Enter" or "a conversation opened." Nor `inputNeeded`: it is
