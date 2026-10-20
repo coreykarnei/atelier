@@ -113,7 +113,7 @@ One-time setup, on an Apple Developer Program account:
    security create-keychain ~/Library/Keychains/release.keychain-db
    security set-keychain-settings -l -u -t 600 ~/Library/Keychains/release.keychain-db
    chmod 600 ~/Library/Keychains/release.keychain-db   # created 0644
-   security list-keychains -d user   # it should not be listed; if it is:
+   security list-keychains -d user   # it should not be listed (release.sh adds it only while signing); if it is:
    # security list-keychains -d user -s ~/Library/Keychains/login.keychain-db
    ```
 

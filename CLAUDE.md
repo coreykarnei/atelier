@@ -409,7 +409,11 @@ Dev builds keep the self-signed identity, in their own bundle
 Developer ID build between releases. Since 2026-10-20 the identity
 and the notary profile live in `~/Library/Keychains/release.keychain-db`,
 locked except while `release.sh` runs (one password prompt), and the script
-refuses a dirty or untagged tree — so tag before `make release`;
+refuses a dirty or untagged tree — so tag before `make release`. While
+unlocked, the keychain also joins the user search list (restored on exit):
+`codesign --keychain` picks the identity there but finds its private key
+through the search list ("The specified item could not be found in the
+keychain" otherwise — the v1.5.0 release's first attempt);
 `Scripts/release.sh --check` tests the keychain without building. Setup and failure modes (the
 403 "agreement missing" lag) are in `docs/SETUP.md` → Releasing. Homebrew's
 own clone of the tap lives at `/opt/homebrew/Library/Taps/coreykarnei/homebrew-tap`

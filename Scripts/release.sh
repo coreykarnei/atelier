@@ -40,11 +40,23 @@ if security find-identity -v -p codesigning | grep -q '"Developer ID Application
 fi
 
 # Unlocked only from here to exit, whatever the exit; the keychain's own
-# auto-lock is the backstop.
+# auto-lock is the backstop. It also joins the user's keychain search list
+# for that span: `codesign --keychain` picks the identity there, but finds
+# its private key through the search list, so a keychain off the list fails
+# with "The specified item could not be found in the keychain". The list
+# goes back to exactly what it was.
 unlock() {
   echo "==> unlocking $(basename "$KEYCHAIN")"
   security unlock-keychain "$KEYCHAIN"
-  trap 'security lock-keychain "$KEYCHAIN"; echo "==> keychain locked"' EXIT
+  SEARCH_LIST=()
+  while IFS= read -r entry; do
+    entry="${entry#"${entry%%[![:space:]]*}"}"
+    entry="${entry#\"}"
+    entry="${entry%\"}"
+    [[ -n "$entry" && "$entry" != "$KEYCHAIN" ]] && SEARCH_LIST+=("$entry")
+  done < <(security list-keychains -d user)
+  trap 'security list-keychains -d user -s "${SEARCH_LIST[@]}"; security lock-keychain "$KEYCHAIN"; echo "==> keychain locked"' EXIT
+  security list-keychains -d user -s "${SEARCH_LIST[@]}" "$KEYCHAIN"
   if [[ -z "${DEVELOPER_ID:-}" ]]; then
     DEVELOPER_ID="$(security find-identity -v -p codesigning "$KEYCHAIN" \
       | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)"
