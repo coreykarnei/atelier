@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17; v1.2.0 (the worktree door below) 2026-09-21; v1.3.0 (the 2026-09-23 work below — close-is-quit through drawn-row caching; `docs/releases/v1.3.0.md`) 2026-09-23; v1.4.0 (the project shelf + project-tab drag below; `docs/releases/v1.4.0.md`) 2026-09-24; v1.4.1 (a fresh prompt never titles a tab; the Landing's recent dot is gone) 2026-09-25; v1.4.2 (a folder's tabs share the width its label sets, so a short title reaches its `+`) 2026-09-26; v1.4.3 (Atelier brings its own hooks, SessionStart, Settings → Sounds — below) 2026-09-26; v1.4.4 (an inline rename widens its tab as you type, grow-only) 2026-09-26; v1.4.5 (⌘-clicking a path opens the file — below) 2026-09-30; v1.4.6 (pinned folders sit at the top and slide — below) 2026-10-01; v1.4.7 (a project tab's dots follow the bar — below) 2026-10-07; v1.4.8 (every live agent wears a dot, a cut-off turn comes back hollow, blue breathes — below; `docs/releases/v1.4.8.md`) 2026-10-07; v1.4.9 (a worktree never names the project — below) 2026-10-07; v1.4.10 (the frames hold their ground, no Landing ghost, one Atelier per state directory — below) 2026-10-10; v1.4.11 (the selected project is a raised chip, folder labels slant, folders sit closer — below) 2026-10-10; v1.4.12 (the selected project is a pill and its `×` always shows — below) 2026-10-11; v1.4.13 (a project's last session closing closes the project — below) 2026-10-12; v1.4.14 (bigger dots, a stronger ring — below) 2026-10-12; v1.4.15 (a turn waiting on its background agents stays blue — below) 2026-10-12. Milestones 0, 1 and 2 built (M1.1–M1.6,
+**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17; v1.2.0 (the worktree door below) 2026-09-21; v1.3.0 (the 2026-09-23 work below — close-is-quit through drawn-row caching; `docs/releases/v1.3.0.md`) 2026-09-23; v1.4.0 (the project shelf + project-tab drag below; `docs/releases/v1.4.0.md`) 2026-09-24; v1.4.1 (a fresh prompt never titles a tab; the Landing's recent dot is gone) 2026-09-25; v1.4.2 (a folder's tabs share the width its label sets, so a short title reaches its `+`) 2026-09-26; v1.4.3 (Atelier brings its own hooks, SessionStart, Settings → Sounds — below) 2026-09-26; v1.4.4 (an inline rename widens its tab as you type, grow-only) 2026-09-26; v1.4.5 (⌘-clicking a path opens the file — below) 2026-09-30; v1.4.6 (pinned folders sit at the top and slide — below) 2026-10-01; v1.4.7 (a project tab's dots follow the bar — below) 2026-10-07; v1.4.8 (every live agent wears a dot, a cut-off turn comes back hollow, blue breathes — below; `docs/releases/v1.4.8.md`) 2026-10-07; v1.4.9 (a worktree never names the project — below) 2026-10-07; v1.4.10 (the frames hold their ground, no Landing ghost, one Atelier per state directory — below) 2026-10-10; v1.4.11 (the selected project is a raised chip, folder labels slant, folders sit closer — below) 2026-10-10; v1.4.12 (the selected project is a pill and its `×` always shows — below) 2026-10-11; v1.4.13 (a project's last session closing closes the project — below) 2026-10-12; v1.4.14 (bigger dots, a stronger ring — below) 2026-10-12; v1.4.15 (a turn waiting on its background agents stays blue — below) 2026-10-12; v1.5.0 (the security pass; remote sessions removed — below; `docs/releases/v1.5.0.md`, `docs/devlog/2026-10-20-security-hardening.md`) 2026-10-20. Milestones 0, 1 and 2 built (M1.1–M1.6,
 M2.1–M2.6 landed); polish pass (docs/POLISH_PLAN.md) built through all
 phases — 0 (foundation tokens), 1 (cockpit), 2 (distances), 3 (arrivals),
 4 (overlay physiology).** Read `VISION.md` (the
@@ -69,7 +69,7 @@ move — waiting, or an unseen completion that rings until you look — and
 peach for the one blocked state (ringing too while unseen); fed by hooks carrying
 `session_id`, banner clicks focus the exact session), **worktree folders** in
 the tab strip (2026-09-03: each root's tabs sit in a folder-shaped cell whose
-label tab names the worktree — `main` / `⎇ dir` / `@host` — stepped lighter/
+label tab names the worktree — `main` / `⎇ dir` — stepped lighter/
 darker per group off the main folder's colour; two-row group-aware wrap + `»` overflow, overflowed tabs keep their
 ⎇/attention marks in the menu, and the `»` wears the loudest overflowed
 state), a **Settings window** (`⌘,` / the bar's gear: field-opacity slider
@@ -147,19 +147,13 @@ documented there. `Scripts/hlcheck/shadow.sh` runs the prebuilt harness
 against another checkout's queries — the loop for parallel query work. The triptych's two dividers can be dragged together from
 where they cross (`SplitCornerHandle` in `Layout.swift`).
 
-Also landed 2026-07-14: **remote sessions** — the native successor of the
-dotfiles' `ide-pi` (see `docs/devlog/2026-07-14-remote-sessions.md`). A
-session can live on an ssh host (`Remote.swift`): both panes ride
-`ssh -t … tmux new -A` into a host-side `-L atelier` server, so the work
-survives link death and app quits; link death (ssh 255) auto-reattaches on
-backoff behind the reconnecting placard, ⌘W kills the host-side pair, quit
-leaves it running and relaunch reattaches mid-conversation. Entry: hosts
-from `~/.ssh/config` in the Landing offer (`host:dir` typed queries inject
-a synthetic row). Remote sessions pin Split, skip editor/⌘P/⌘⇧F/worktrees,
-wear `@host` on the tab, and group by host. Attention dots cross the wire:
-`RemoteLink` provisions a python `atelier-notify` + hook entries onto the
-host and holds a dedicated single-flight `ssh -N -R` socket forward (never
-through the ControlMaster mux — it reports success and never binds).
+**Remote sessions** (landed 2026-07-14, `docs/devlog/2026-07-14-remote-sessions.md`:
+ssh + host-side tmux panes, `@host` folders, host provisioning, an
+`ssh -N -R` socket forward) were **removed in v1.5.0** (owner call
+2026-10-20: unused, and the forward handed every host the Mac's socket).
+The last tree with them is tagged `pre-remote-strip`. Mentions of remote
+hosts, `provisioned-vN`, `@host` and "both helpers" in the dated entries
+below are history.
 
 Also landed 2026-07-14: the **transparency pipeline** (the owner-reported
 opaque-window bug was compositing arithmetic — see
@@ -411,7 +405,11 @@ then bump `version`/`sha256` in `~/repositories/homebrew-tap/Casks/atelier.rb`
 caveat any more — `brew install --cask coreykarnei/tap/atelier` opens clean
 (verified: `spctl` on a quarantined download says *Notarized Developer ID*).
 Dev builds keep the self-signed identity; after a release `.build/Atelier.app`
-is the Developer ID build until `make bundle`. Setup and failure modes (the
+is the Developer ID build until `make bundle`. Since 2026-10-20 the identity
+and the notary profile live in `~/Library/Keychains/release.keychain-db`,
+locked except while `release.sh` runs (one password prompt), and the script
+refuses a dirty or untagged tree — so tag before `make release`;
+`Scripts/release.sh --check` tests the keychain without building. Setup and failure modes (the
 403 "agreement missing" lag) are in `docs/SETUP.md` → Releasing. Homebrew's
 own clone of the tap lives at `/opt/homebrew/Library/Taps/coreykarnei/homebrew-tap`
 — never commit there; it rebases onto GitHub on `brew update`.
@@ -712,6 +710,47 @@ swap its `atelier-notify` for a shell wrapper that logs each raw hook
 payload and pins `ATELIER_STATE_DIR`, so a restored agent with a bare
 environment can't reach the live app.
 
+**The security pass** (2026-10-20, v1.5.0; `docs/devlog/2026-10-20-security-hardening.md`,
+prompted by an outside review). Standing rules it leaves:
+- **Probes are debug-only.** `DebugMessage` and every `probe:*` live under
+  `#if ATELIER_PROBES` (Package.swift defines it for debug builds, on both
+  `AtelierIPC` and `Atelier`) and answer only when `ATELIER_STATE_DIR` is
+  set (`AtelierIPC.probesActive`). Every test instance already sets it;
+  the owner's app never answers, debug or not. `release.sh` fails if the
+  release binary contains `probe:`. New probes go inside the flag.
+- **Every git goes through `Git.process`** (`-c core.fsmonitor=false`) —
+  never a bare `/usr/bin/git`.
+- **A folder's own code waits for `FolderTrust`**: git status (filters),
+  language servers and the venv, worktree create/remove. Trust is Claude's
+  `~/.claude.json` record for the folder itself, its repo, or a worktree's
+  main checkout — never an ancestor (the owner's record trusts `~` and
+  `/`) — or Atelier's own yes (`trust.folders` default), given from the
+  explorer header's lock or "Trust and Continue". It's re-read every 2s.
+  Anything new that runs repo code joins the gate. No repo directory goes
+  on a spawned tool's PATH.
+- **Links go through `LinkPolicy`**: anything that runs asks first, with
+  ↩ meaning Cancel. Terminal links reach it via SwiftTerm's
+  `linkOpenPolicy`, the Markdown preview via its text-view delegate.
+- **State files go through `AtelierIPC.writeStateFile`** (atomic, 0600, in
+  a directory `ensureSocketDirectory` keeps 0700 and refuses if it's a
+  symlink or someone else's). The socket is 0600, reads time out after
+  500ms, and a notify message no session claims posts no banner.
+  Conversation ids are UUIDs or are dropped, both on adoption and on load
+  (`PersistedWindow.loadable()`, which also leaves legacy remote sessions
+  behind).
+- **Typing into a shell**: quote with `Session.shellWord` (or don't).
+- SwiftTerm patches 12–13: the PTY child closes every descriptor above 2;
+  pastes lose control characters; `clipboardCopy` is `open` (OSC 52
+  writes show the pane's "… set the clipboard · N characters" notice).
+- Vendored CodeEdit packages don't run SwiftLint. `Package.resolved` is
+  committed. The grammar xcframework's SHA-256 is recorded in
+  `Vendor/CodeEditLanguages/ATELIER.md` and checked by `release.sh`.
+- Verified in an `open -g` test instance against a fixture repo whose
+  `.git/config` names an fsmonitor program and a clean filter, and which
+  ships `.venv/bin/python` and `.venv/bin/node` that leave markers when
+  run. The owner's starship prompt still applies a repo's filters in the
+  shell pane — that's dotfiles territory.
+
 ## Commands
 
 - `make build` — compile all targets via SwiftPM.
@@ -720,7 +759,8 @@ environment can't reach the live app.
 - `make run` — build, bundle, and `open` the app.
 - `make clean` — `swift package clean` + remove the app bundle.
 - `make release` — Developer ID-signed, notarized, stapled zip in `.build/dist`
-  (see *Releases are Developer ID-signed* above).
+  (see *Releases are Developer ID-signed* above; needs a clean tree tagged
+  `v<version>` and the release keychain's password).
 
 Notifications need a real `.app` launch (`make run`/`open`) for the bundle identity
 UNUserNotification requires — and a one-time permission grant. Agent hooks
