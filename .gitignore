@@ -1,6 +1,8 @@
 ## Swift / SwiftPM
 .build/
 .swiftpm/
+# Only the root Package.resolved pins the build; a vendored package's own is noise.
+Vendor/*/Package.resolved
 *.xcodeproj
 DerivedData/
 
