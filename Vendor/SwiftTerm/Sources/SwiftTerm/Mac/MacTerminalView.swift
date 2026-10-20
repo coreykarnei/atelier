@@ -1202,7 +1202,8 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     }
     
     func insertText(_ string: Any, replacementRange: NSRange, isPaste: Bool) {
-        if let str = string as? NSString {
+        if var str = string as? NSString {
+            if isPaste { str = TerminalView.pasteSafe(str as String) as NSString }
             if !terminal.keyboardEnhancementFlags.isEmpty {
                 if isPaste, terminal.bracketedPasteMode {
                     pendingKittyKeyEvent = nil
@@ -2042,6 +2043,12 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     /// runs elsewhere (ssh) turns this off; links with a scheme still open.
     public var opensPathLinks: Bool = true
 
+    /// When set, a link click hands its resolved target here instead of
+    /// opening it: call `open` to go ahead. A host uses it to ask before
+    /// launching something that runs — an app, a `.command` — since the
+    /// text that carried the link (OSC 8) can say anything.
+    public var linkOpenPolicy: ((_ target: URL, _ open: @escaping () -> Void) -> Void)?
+
     public override func mouseUp(with event: NSEvent) {
         let hit = calculateMouseHit(with: event).grid
         updateHoverLink(at: hit, commandOverride: commandActive || event.modifierFlags.contains(.command))
@@ -2413,7 +2420,8 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     /// OSC 52: the program asked to put text on the clipboard. Forwarded to
     /// the view delegate (the local-process view writes the pasteboard);
     /// without this the parsed request died in the protocol's empty default.
-    public func clipboardCopy(source: Terminal, content: Data) {
+    /// Open, so a host can say that it happened.
+    open func clipboardCopy(source: Terminal, content: Data) {
         terminalDelegate?.clipboardCopy(source: self, content: content)
     }
     
@@ -2555,13 +2563,39 @@ extension TerminalView {
         if let url = URL(string: link), url.scheme != nil {
             let target = url.isFileURL ? URL(fileURLWithPath: url.path) : url
             if NSWorkspace.shared.urlForApplication(toOpen: target) != nil {
-                NSWorkspace.shared.open(target)
+                launch(target)
                 return
             }
         }
         if let url = fileURL(forLink: link) {
-            NSWorkspace.shared.open(url)
+            launch(url)
         }
+    }
+
+    /// Open `target`, through `linkOpenPolicy` when the host set one.
+    private func launch(_ target: URL) {
+        guard let policy = linkOpenPolicy else {
+            NSWorkspace.shared.open(target)
+            return
+        }
+        policy(target) { NSWorkspace.shared.open(target) }
+    }
+
+    /// Pasted text with the control characters taken out: C0 except tab,
+    /// newline and return, DEL, and C1. With them gone, text copied from a
+    /// web page or put on the clipboard by a program (OSC 52) can't carry
+    /// `ESC [201~` to end bracketed paste early and run the rest as typed
+    /// input, nor any other escape sequence.
+    public static func pasteSafe(_ text: String) -> String {
+        var scalars = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars {
+            switch scalar.value {
+            case 0x09, 0x0A, 0x0D: scalars.append(scalar)
+            case 0x00...0x1F, 0x7F...0x9F: continue
+            default: scalars.append(scalar)
+            }
+        }
+        return String(scalars)
     }
 }
 

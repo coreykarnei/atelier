@@ -30,6 +30,7 @@ final class MarkdownPreviewView: NSView {
             .cursor: NSCursor.pointingHand,
         ]
 
+        textView.delegate = self
         scroll.documentView = textView
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
@@ -223,5 +224,19 @@ final class MarkdownPreviewView: NSView {
     private static func boldened(_ font: NSFont?) -> NSFont {
         let font = font ?? Theme.Typography.ui(Theme.TypeScale.current)
         return NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+    }
+}
+
+extension MarkdownPreviewView: NSTextViewDelegate {
+    /// A rendered link opens the way a terminal link does — through
+    /// `LinkPolicy`, which asks before anything that runs. One without a
+    /// scheme (a repo-relative `docs/x.md`) names nothing this view can
+    /// resolve and is left alone.
+    func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+        let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:))
+        guard let url, url.scheme != nil else { return true }
+        let target = url.isFileURL ? URL(fileURLWithPath: url.path) : url
+        LinkPolicy.open(target, from: self) { NSWorkspace.shared.open(target) }
+        return true
     }
 }

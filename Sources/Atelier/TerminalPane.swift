@@ -14,9 +14,7 @@ class FreezableTerminalView: LocalProcessTerminalView {
     /// 2026-09-10 — a bar that never scrolls anything full-screen is noise).
     override init(frame: CGRect) {
         super.init(frame: frame)
-        showsScroller = false
-        wheelPrecisionMultiplier = Self.wheelFeel
-        copyOnSelect = true // Ghostty parity: highlight is copy (owner call 2026-09-10)
+        configure()
     }
 
     /// Trackpad wheel feel over the Ghostty-equivalent 1.0 (owner: "still
@@ -25,9 +23,26 @@ class FreezableTerminalView: LocalProcessTerminalView {
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        configure()
+    }
+
+    private func configure() {
         showsScroller = false
         wheelPrecisionMultiplier = Self.wheelFeel
         copyOnSelect = true // Ghostty parity: highlight is copy (owner call 2026-09-10)
+        // ⌘-click: an app, a script or a terminal's file asks first.
+        linkOpenPolicy = { [weak self] target, open in LinkPolicy.open(target, from: self, open: open) }
+    }
+
+    /// A program in the pane set the clipboard (OSC 52), with this many
+    /// characters. Main thread.
+    var onClipboardSet: ((Int) -> Void)?
+
+    override func clipboardCopy(source: Terminal, content: Data) {
+        super.clipboardCopy(source: source, content: content)
+        guard let text = String(data: content, encoding: .utf8) else { return }
+        let count = text.count
+        DispatchQueue.main.async { [weak self] in self?.onClipboardSet?(count) }
     }
 
     /// A BEL from either pane (a shell's bell, a `printf '\a'` hook) is one
@@ -284,7 +299,9 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
     ///   from copied text. Off for the shell (its copy is already truthful).
     init(deguttersCopy: Bool = false) {
         terminal = deguttersCopy ? AgentTerminalView(frame: .zero) : FreezableTerminalView(frame: .zero)
+        speaker = deguttersCopy ? "Claude" : "The shell"
         super.init(frame: .zero)
+        terminal.onClipboardSet = { [weak self] count in self?.showClipboardNotice(characters: count) }
 
         translatesAutoresizingMaskIntoConstraints = false
         terminal.translatesAutoresizingMaskIntoConstraints = false
@@ -459,6 +476,72 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
     var hostedPid: pid_t? {
         guard let process = terminal.process, process.shellPid != 0 else { return nil }
         return process.shellPid
+    }
+
+    // MARK: Clipboard notice
+
+    /// Who writes in this pane, for the notice.
+    private let speaker: String
+    private var clipboardNotice: NSView?
+    private var clipboardNoticeHide: DispatchWorkItem?
+
+    /// A program in this pane put text on the clipboard (OSC 52) — said
+    /// quietly at the pane's foot (owner call 2026-10-20): a print can do it
+    /// without a keystroke of yours, so it shouldn't happen unseen. Your own
+    /// copies (a selection, ⌘C) say nothing. One notice at a time; a second
+    /// write updates it and restarts its clock.
+    private func showClipboardNotice(characters: Int) {
+        clipboardNoticeHide?.cancel()
+        let text = "\(speaker) set the clipboard · \(characters) character\(characters == 1 ? "" : "s")"
+        let notice: NSView
+        if let existing = clipboardNotice, let label = existing.subviews.first as? NSTextField {
+            label.stringValue = text
+            notice = existing
+        } else {
+            notice = NSView()
+            notice.wantsLayer = true
+            notice.layer?.backgroundColor = Theme.Elevation.surface0.cgColor
+            notice.layer?.cornerRadius = Theme.Elevation.radiusSmall
+            notice.translatesAutoresizingMaskIntoConstraints = false
+            let label = NSTextField(labelWithString: text)
+            label.font = Theme.Typography.ui(Theme.Typography.small)
+            label.textColor = Theme.chromeText
+            label.translatesAutoresizingMaskIntoConstraints = false
+            notice.addSubview(label)
+            addSubview(notice)
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: notice.leadingAnchor, constant: 8),
+                label.trailingAnchor.constraint(equalTo: notice.trailingAnchor, constant: -8),
+                label.topAnchor.constraint(equalTo: notice.topAnchor, constant: 4),
+                label.bottomAnchor.constraint(equalTo: notice.bottomAnchor, constant: -4),
+                notice.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+                notice.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
+            ])
+            clipboardNotice = notice
+            fade(notice, to: 1, from: 0)
+        }
+        let hide = DispatchWorkItem { [weak self, weak notice] in
+            guard let self, let notice else { return }
+            self.fade(notice, to: 0) {
+                notice.removeFromSuperview()
+                if self.clipboardNotice === notice { self.clipboardNotice = nil }
+            }
+        }
+        clipboardNoticeHide = hide
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: hide)
+    }
+
+    private func fade(_ view: NSView, to alpha: CGFloat, from start: CGFloat? = nil, then done: (() -> Void)? = nil) {
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            view.alphaValue = alpha
+            done?()
+            return
+        }
+        if let start { view.alphaValue = start }
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = alpha > 0 ? 0.15 : 0.25
+            view.animator().alphaValue = alpha
+        }, completionHandler: done)
     }
 
     // MARK: Resuming placard (POLISH_PLAN §5)

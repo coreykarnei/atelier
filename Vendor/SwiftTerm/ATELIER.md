@@ -101,3 +101,16 @@ a PR; when one lands, drop it here and note the version.
     child now closes every descriptor from 3 up to `getdtablesize()`
     (capped at 65536) before `chdir` and `execve`; the bound is read
     before the fork, so the child only calls `close`.
+13. **Pastes carry no control characters; link opens and OSC 52 have host
+    hooks** (`Mac/MacTerminalView.swift`; security review 2026-10-20).
+    `insertText(_:replacementRange:isPaste:)` sent pasted text verbatim
+    between the bracketed-paste markers, so a clipboard holding
+    `ESC [201~` — put there by a web page or by any program's OSC 52 —
+    ended the paste early and the rest ran as typed input.
+    `TerminalView.pasteSafe(_:)` now strips C0 controls except tab,
+    newline and return, DEL and C1 from every paste. `linkOpenPolicy`, when
+    set, receives each resolved link target and an `open` continuation
+    instead of the view opening it, so a host can ask before launching an
+    app or a script (OSC 8 text can hide where a link goes).
+    `clipboardCopy(source:content:)` is `open`, so a host can say when a
+    program set the clipboard.
