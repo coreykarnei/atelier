@@ -511,7 +511,7 @@ final class FileExplorerView: NSView {
             + "tree=\(scroll.frame) treeHidden=\(scroll.isHidden) sticky=\(sticky.frame) stickyHidden=\(sticky.isHidden) "
             + "clipY=\(scroll.contentView.bounds.minY) topRow=\(outline.row(at: NSPoint(x: 1, y: scroll.contentView.bounds.minY + 1))) "
             + "chain=\(stickyChain().map { "\($0.node.name)@\($0.top - scroll.contentView.bounds.minY)" }) "
-            + "insetTop=\(scroll.contentInsets.top)"
+            + "insetTop=\(scroll.contentInsets.top) restricted=\(!restricted.isHidden) ignored=\(ignored.count)"
     }
 
     /// Dev-only (snapshots): open the panel and type `query`; trailing `↓`
