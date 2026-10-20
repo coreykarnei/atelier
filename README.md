@@ -67,9 +67,10 @@ From the repository root:
 make run
 ```
 
-This builds the app, assembles `.build/Atelier.app`, and launches it. The first
-build downloads Swift package dependencies. Open a project from the landing
-screen to start working.
+This builds the app, assembles `.build/AtelierDev.app` ("Atelier Dev", a debug
+build with its own bundle id, settings and permissions), and launches it. The
+first build downloads Swift package dependencies. Open a project from the
+landing screen to start working.
 
 To make the app available in Applications, Spotlight, and the Dock:
 
@@ -77,8 +78,9 @@ To make the app available in Applications, Spotlight, and the Dock:
 make install
 ```
 
-This creates a symlink to the build in this checkout, rather than copying the
-app. Keep the checkout in place. See the [setup guide](docs/SETUP.md) for
+This creates a symlink to the build in this checkout (`/Applications/Atelier
+Dev.app` for a debug build, `/Applications/Atelier.app` with `CONFIG=release`),
+rather than copying the app. Keep the checkout in place. See the [setup guide](docs/SETUP.md) for
 notifications and sounds, the optional CLI, and language servers.
 
 Local builds use ad-hoc signing or a local development certificate. Release

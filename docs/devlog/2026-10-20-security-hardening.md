@@ -150,7 +150,11 @@ app frontmost throughout) restored a hand-written legacy `session.json`:
   in the test — from starship, drawing the shell's prompt in the fixture,
   not from Atelier. starship applies a repository's filters itself. That
   lives in the dotfiles.
-- **Dev builds** are self-signed with a key `codesign` can use silently,
-  without hardened runtime, and under the release bundle id, so TCC grants
-  move to whichever build ran last. A distinct dev bundle id is the main
-  lever; it splits dev and release settings, so it's the owner's call.
+- **Dev builds** are still self-signed with a key `codesign` can use
+  silently, and without hardened runtime (which would stop `sample` and
+  lldb attaching). The lever that mattered is done (owner call): a debug
+  build is its own app, "Atelier Dev" (`dev.sterlingcore.atelier.dev`,
+  `.build/AtelierDev.app`). TCC keeps grants per bundle id, so a lookalike
+  signed with the dev key can reach only what the dev app was granted —
+  never the release's grants, which used to move to whichever build ran
+  last.

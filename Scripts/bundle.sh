@@ -7,7 +7,17 @@ set -euo pipefail
 CONFIG="${1:-debug}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN_DIR="$ROOT/.build/arm64-apple-macosx/$CONFIG"
-APP="$ROOT/.build/Atelier.app"
+# A debug build is its own app, "Atelier Dev" (dev.sterlingcore.atelier.dev),
+# beside the release one rather than over it: macOS keeps privacy grants,
+# notification permission and settings per bundle id, so a self-signed dev
+# build never inherits the grants given to the Developer ID release
+# (security review 2026-10-20), and `make bundle` no longer replaces the app
+# /Applications points at.
+if [[ "$CONFIG" == "release" ]]; then
+  APP="$ROOT/.build/Atelier.app"
+else
+  APP="$ROOT/.build/AtelierDev.app"
+fi
 
 if [[ ! -x "$BIN_DIR/Atelier" ]]; then
   echo "error: $BIN_DIR/Atelier not found — run 'swift build' (config: $CONFIG) first" >&2
@@ -18,6 +28,13 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/Atelier" "$APP/Contents/MacOS/Atelier"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
+if [[ "$CONFIG" != "release" ]]; then
+  /usr/libexec/PlistBuddy \
+    -c "Set :CFBundleIdentifier dev.sterlingcore.atelier.dev" \
+    -c "Set :CFBundleName Atelier Dev" \
+    -c "Set :CFBundleDisplayName Atelier Dev" \
+    "$APP/Contents/Info.plist"
+fi
 
 # The app icon. Resources/AppIcon.icns is cut from Resources/AppIcon-1024.png
 # (see docs/POLISH_PLAN.md §4, "As built"); rebuild it with iconutil, never a script.

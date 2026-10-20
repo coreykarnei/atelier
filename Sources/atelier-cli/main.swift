@@ -57,10 +57,17 @@ if let removeBranch {
 let line = message.encodedLine()
 if AtelierIPC.send(line: line) { exit(0) }
 
-// App not running — launch it and retry until the socket appears.
+// App not running — launch it and retry until the socket appears. The app
+// this CLI shipped in (it lives in Contents/MacOS; ~/.local/bin/atelier is a
+// symlink to it), so a dev build's CLI opens Atelier Dev; else the release.
 let launcher = Process()
 launcher.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-launcher.arguments = ["-b", "dev.sterlingcore.atelier"]
+let executable = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
+let enclosingApp = executable.resolvingSymlinksInPath()
+    .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+launcher.arguments = enclosingApp.pathExtension == "app"
+    ? [enclosingApp.path]
+    : ["-b", "dev.sterlingcore.atelier"]
 try? launcher.run()
 launcher.waitUntilExit()
 guard launcher.terminationStatus == 0 else {

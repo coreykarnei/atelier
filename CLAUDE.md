@@ -404,8 +404,9 @@ then bump `version`/`sha256` in `~/repositories/homebrew-tap/Casks/atelier.rb`
 (GitHub `coreykarnei/homebrew-tap`) and push. The cask carries no quarantine
 caveat any more — `brew install --cask coreykarnei/tap/atelier` opens clean
 (verified: `spctl` on a quarantined download says *Notarized Developer ID*).
-Dev builds keep the self-signed identity; after a release `.build/Atelier.app`
-is the Developer ID build until `make bundle`. Since 2026-10-20 the identity
+Dev builds keep the self-signed identity, in their own bundle
+(`.build/AtelierDev.app`, since 2026-10-20), so `.build/Atelier.app` stays the
+Developer ID build between releases. Since 2026-10-20 the identity
 and the notary profile live in `~/Library/Keychains/release.keychain-db`,
 locked except while `release.sh` runs (one password prompt), and the script
 refuses a dirty or untagged tree — so tag before `make release`;
@@ -754,8 +755,15 @@ prompted by an outside review). Standing rules it leaves:
 ## Commands
 
 - `make build` — compile all targets via SwiftPM.
-- `make bundle` — assemble `.build/Atelier.app` (Info.plist → bundle id
-  `dev.sterlingcore.atelier`, ad-hoc signed; bundles `atelier-notify` too).
+- `make bundle` — assemble the app from the build product, `atelier-notify`
+  and `atelier-cli` included. A debug build (the default) is its own app
+  since 2026-10-20: `.build/AtelierDev.app`, "Atelier Dev", bundle id
+  `dev.sterlingcore.atelier.dev`, self-signed — separate settings,
+  notification and TCC grants, so it never inherits the release's privacy
+  grants and never replaces the app `/Applications/Atelier.app` points at.
+  `CONFIG=release` builds `.build/Atelier.app` (`dev.sterlingcore.atelier`).
+  Both share the default state directory, so one runs at a time unless
+  `ATELIER_STATE_DIR` is set.
 - `make run` — build, bundle, and `open` the app.
 - `make clean` — `swift package clean` + remove the app bundle.
 - `make release` — Developer ID-signed, notarized, stapled zip in `.build/dist`

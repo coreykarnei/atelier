@@ -24,9 +24,17 @@ make bundle CONFIG=release
 open .build/Atelier.app
 ```
 
-`make install` links `/Applications/Atelier.app` to this checkout's build.
-`make install CONFIG=release` builds and links an optimized version. Moving or
-removing the checkout breaks that link; rebuilding updates the app it points to.
+A debug build is its own app: `.build/AtelierDev.app`, named Atelier Dev, with
+the bundle id `dev.sterlingcore.atelier.dev`. macOS keeps permissions,
+notification settings and preferences per bundle id, so a self-signed debug
+build never inherits what you granted the signed release, and building one
+never replaces it. Both use the same state directory, so only one runs at a
+time unless `ATELIER_STATE_DIR` sets another.
+
+`make install` links `/Applications/Atelier Dev.app` to this checkout's debug
+build; `make install CONFIG=release` builds an optimized one and links
+`/Applications/Atelier.app`. Moving or removing the checkout breaks the link;
+rebuilding updates the app it points to.
 
 ## Notifications and sounds
 
@@ -148,5 +156,6 @@ and locks it again.
 
 `RELEASE_KEYCHAIN`, `DEVELOPER_ID` and `NOTARY_PROFILE` override the
 keychain, the identity and the profile.
-Dev builds (`make bundle`) keep the self-signed identity above; after a
-release, `make bundle` returns `.build/Atelier.app` to one.
+Dev builds (`make bundle`) keep the self-signed identity above, in their
+own bundle (`.build/AtelierDev.app`); a release leaves them alone and they
+leave the release alone.

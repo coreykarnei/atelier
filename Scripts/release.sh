@@ -144,5 +144,5 @@ echo
 echo "built $ZIP"
 echo "sha256 $(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
 echo
-echo "Note: .build/Atelier.app is now the Developer ID release build; 'make bundle'"
-echo "returns it to a self-signed debug build."
+echo "Note: .build/Atelier.app is the Developer ID release build; debug builds"
+echo "('make bundle') go to .build/AtelierDev.app and leave it alone."

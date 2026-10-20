@@ -3,7 +3,8 @@
 
 .DEFAULT_GOAL := build
 CONFIG ?= debug
-APP := .build/Atelier.app
+# Debug builds are their own app, "Atelier Dev" (Scripts/bundle.sh).
+APP := $(if $(filter release,$(CONFIG)),.build/Atelier.app,.build/AtelierDev.app)
 
 .PHONY: build
 build: ## Compile the Atelier executable
@@ -26,9 +27,9 @@ release: ## Developer ID-signed, notarized, stapled zip in .build/dist (Scripts/
 	./Scripts/release.sh
 
 .PHONY: install
-install: bundle ## Symlink Atelier.app into /Applications (Spotlight / Dock launch)
-	ln -sfn $(CURDIR)/$(APP) /Applications/Atelier.app
-	@echo "linked: /Applications/Atelier.app -> $(APP)"
+install: bundle ## Symlink the app into /Applications (Spotlight / Dock launch)
+	ln -sfn $(CURDIR)/$(APP) /Applications/$(notdir $(APP))
+	@echo "linked: /Applications/$(notdir $(APP)) -> $(APP)"
 
 .PHONY: install-cli
 install-cli: bundle ## Symlink the atelier CLI into ~/.local/bin
@@ -39,7 +40,7 @@ install-cli: bundle ## Symlink the atelier CLI into ~/.local/bin
 .PHONY: clean
 clean: ## Remove build artifacts
 	swift package clean
-	rm -rf $(APP)
+	rm -rf .build/Atelier.app .build/AtelierDev.app
 
 .PHONY: help
 help: ## List targets
