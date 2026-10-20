@@ -34,8 +34,7 @@ Homebrew, or you can build it from source.
 - **Know when to come back.** Claude's hooks, wired in by Atelier, update session indicators
   and the Dock badge. Click a notification to return to its session.
 - **Continue where you left off.** Atelier restores projects and sessions on
-  relaunch and resumes Claude conversations. Remote shell and agent sessions
-  run inside tmux on the host and can reconnect after a dropped connection.
+  relaunch and resumes Claude conversations.
 
 Atelier grew out of a personal Ghostty, tmux, Helix, and Claude Code setup.
 It keeps that workflow in a deliberately small native app. It is opinionated
@@ -80,7 +79,7 @@ make install
 
 This creates a symlink to the build in this checkout, rather than copying the
 app. Keep the checkout in place. See the [setup guide](docs/SETUP.md) for
-notifications and sounds, the optional CLI, language servers, and remote sessions.
+notifications and sounds, the optional CLI, and language servers.
 
 Local builds use ad-hoc signing or a local development certificate. Release
 zips (`make release`, the build the Homebrew cask ships) are Developer
@@ -104,8 +103,7 @@ ID-signed and notarized; the setup guide covers the one-time setup.
 | Settings | ⌘, |
 
 Worktree selection and autosave can be enabled in Settings. Both are off by
-default. Remote sessions use the shell/agent layout; the local editor and
-worktree tools are not available there.
+default.
 
 ## Help shape Atelier
 

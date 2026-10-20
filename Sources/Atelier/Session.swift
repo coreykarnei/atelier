@@ -63,20 +63,9 @@ final class Session: NSObject, NSSplitViewDelegate {
     let id = UUID()
     private(set) var state: State = .landing
     private(set) var cwd: String
-    /// Where the hosted processes run. Remote sessions spawn both panes over
-    /// ssh into host-side tmux; `cwd` then holds the *remote* directory.
-    let location: SessionLocation
-    var isRemote: Bool { location.isRemote }
     /// Lowercased to match Claude's on-disk transcript filename. Replaced
     /// when the exit card's New session starts a fresh conversation here.
     private(set) var claudeSessionId: String
-    /// Names this session's host-side tmux sessions. The birth
-    /// `claudeSessionId`, fixed for life: a new conversation in the tab must
-    /// not orphan the remote shell it shares the tab with.
-    let tmuxKey: String
-    /// True when this session came back from disk — the agent then *resumes* its
-    /// previous Claude conversation instead of starting a fresh one.
-    private let isRestored: Bool
 
     let editorPane = EditorPane(frame: .zero)
     let shellPane = TerminalPane()
@@ -131,11 +120,6 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// refresh the project pill, tab strip, and focus.
     var onPromoted: (() -> Void)?
 
-    /// A Landing chose a remote target. Promotion-in-place can't cross
-    /// machines (the landing shell's PTY is local), so the window controller
-    /// replaces this Landing with a fresh remote session in the same tab slot.
-    var onRemoteRequested: ((_ host: String, _ dir: String) -> Void)?
-
     /// Asked before a Landing promotes onto `root`; returning true means the
     /// window controller took the pick itself (a shelved project on that
     /// root came back in this Landing's place) and this Landing must not
@@ -162,15 +146,11 @@ final class Session: NSObject, NSSplitViewDelegate {
         self.cwd = cwd
         self.title = (cwd as NSString).lastPathComponent
         self.claudeSessionId = UUID().uuidString.lowercased()
-        self.tmuxKey = claudeSessionId
-        self.isRestored = false
-        self.location = .local
         super.init()
         container.translatesAutoresizingMaskIntoConstraints = false
 
         let landing = LandingView(defaultFolder: cwd)
         landing.onOpen = { [weak self] path in self?.promote(to: path) }
-        landing.onOpenRemote = { [weak self] host, dir in self?.onRemoteRequested?(host, dir) }
         landing.liveCwd = { [weak self] in
             self?.shellPane.hostedPid.flatMap(ProcessCwd.cwd(of:))
         }
@@ -186,57 +166,31 @@ final class Session: NSObject, NSSplitViewDelegate {
         self.title = (ideRoot as NSString).lastPathComponent
         self.state = .ide
         self.claudeSessionId = UUID().uuidString.lowercased()
-        self.tmuxKey = claudeSessionId
-        self.isRestored = false
-        self.location = .local
         super.init()
         container.translatesAutoresizingMaskIntoConstraints = false
         editorPane.setRoot(ideRoot)
         rebuildLayout()
     }
 
-    /// A session born remote: shell + agent on `host` over ssh, rooted at
-    /// `remoteDir` (`~`-relative or absolute, on the *remote* filesystem).
-    /// Always an IDE session in Split — there is no Landing stage on a remote
-    /// (the pick already happened) and no editor (the files aren't here).
-    init(remoteHost: String, remoteDir: String) {
-        self.cwd = remoteDir
-        self.title = remoteDir == "~"
-            ? remoteHost
-            : (remoteDir as NSString).lastPathComponent
-        self.state = .ide
-        self.claudeSessionId = UUID().uuidString.lowercased()
-        self.tmuxKey = claudeSessionId
-        self.isRestored = false
-        self.location = .remote(host: remoteHost)
-        self.layoutMode = .split
-        super.init()
-        container.translatesAutoresizingMaskIntoConstraints = false
-        rebuildLayout()
-    }
-
     /// What a saved session comes back as — its tab on relaunch, its dot on
     /// the Landing's shelf row before that. An unseen completion stays
-    /// unseen until you look (owner ask 2026-09-10). For a local agent the
-    /// transcript has the last word (owner report 2026-10-07), read as
+    /// unseen until you look (owner ask 2026-09-10). The transcript has the
+    /// last word (owner report 2026-10-07), read as
     /// Atelier left it, before the agent resumes: a last turn that never
     /// ended was cut off — Atelier quit, crashed or lost power under it —
     /// and one that ended is your move whatever the saved dot said, since a
     /// lost hook can leave a dot behind. Without a transcript that can say,
-    /// the saved dot decides: blue or peach died with a local agent; a
-    /// remote one kept running on its host, unknown until a hook says, so
-    /// plain waiting.
+    /// the saved dot decides: blue or peach died with the agent.
     static func restoredAttention(_ persisted: PersistedSession) -> Attention {
         let saved = persisted.attention.flatMap(Attention.init(rawValue:)) ?? .none
-        let local = persisted.remoteHost == nil
-        if local, persisted.isIDE,
+        if persisted.isIDE,
            let open = TranscriptTitle.lastTurnOpen(sessionId: persisted.claudeSessionId, cwd: persisted.cwd) {
             if open { return .cutOff }
             return saved == .doneUnseen ? .doneUnseen : .waiting
         }
         switch saved {
         case .doneUnseen: return .doneUnseen
-        case .working, .needsInput, .needsInputUnseen, .cutOff: return local ? .cutOff : .waiting
+        case .working, .needsInput, .needsInputUnseen, .cutOff: return .cutOff
         case .waiting: return .waiting
         case .empty: return .empty
         case .none: return .none
@@ -251,18 +205,12 @@ final class Session: NSObject, NSSplitViewDelegate {
         self.title = restored.title
         self.customTitle = restored.customTitle
         self.claudeSessionId = restored.claudeSessionId
-        self.tmuxKey = restored.tmuxKey ?? restored.claudeSessionId
-        self.isRestored = true
-        self.location = restored.remoteHost.map { .remote(host: $0) } ?? .local
         self.state = restored.isIDE ? .ide : .landing
         self.attention = Session.restoredAttention(restored)
         if attention == .cutOff {
             NSLog("Atelier: tab \(id) comes back cut off — its last turn never ended")
         }
-        let restoredMode = LayoutMode(rawValue: restored.layoutMode) ?? .triptych
-        self.layoutMode = restored.remoteHost == nil
-            ? restoredMode
-            : (restoredMode == .splitSide ? .splitSide : .split)
+        self.layoutMode = LayoutMode(rawValue: restored.layoutMode) ?? .triptych
         self.dividers = restored.dividers.mapValues { CGFloat($0) }
         super.init()
         container.translatesAutoresizingMaskIntoConstraints = false
@@ -270,7 +218,6 @@ final class Session: NSObject, NSSplitViewDelegate {
         if state == .landing {
             let landing = LandingView(defaultFolder: cwd)
             landing.onOpen = { [weak self] path in self?.promote(to: path) }
-            landing.onOpenRemote = { [weak self] host, dir in self?.onRemoteRequested?(host, dir) }
             landing.liveCwd = { [weak self] in
                 self?.shellPane.hostedPid.flatMap(ProcessCwd.cwd(of:))
             }
@@ -278,7 +225,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         }
         rebuildLayout()
 
-        if state == .ide, !isRemote { editorPane.setRoot(cwd) }
+        if state == .ide { editorPane.setRoot(cwd) }
         // The open file rides persistence (M2.1): reopen it if it's still there.
         if state == .ide, let file = restored.openFile,
            FileManager.default.fileExists(atPath: file) {
@@ -295,10 +242,8 @@ final class Session: NSObject, NSSplitViewDelegate {
             title: title,
             customTitle: customTitle,
             claudeSessionId: claudeSessionId,
-            tmuxKey: tmuxKey == claudeSessionId ? nil : tmuxKey,
             dividers: dividers.mapValues { Double($0) },
             openFile: editorPane.committedFilePath,
-            remoteHost: location.host,
             attention: attention.rawValue
         )
     }
@@ -316,19 +261,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         guard !shellStarted else { return }
         shellStarted = true
         agentPane.terminal.onInput = { [weak self] bytes in self?.agentInput(bytes) }
-        switch location {
-        case .local:
-            shellPane.start(executable: "/bin/zsh", args: ["-l"], cwd: cwd)
-        case .remote(let host):
-            // A login shell, like tmux's default — but with COLORTERM set
-            // explicitly: the conf's set-environment races the initial
-            // session's pane creation (observed), and truecolor programs in
-            // the pane check the env, not the terminal.
-            startRemotePane(
-                shellPane, host: host, suffix: "sh",
-                command: "sh -c 'COLORTERM=truecolor exec \"$SHELL\" -l'"
-            )
-        }
+        shellPane.start(executable: "/bin/zsh", args: ["-l"], cwd: cwd)
         if state == .ide { startAgent() }
     }
 
@@ -370,42 +303,11 @@ final class Session: NSObject, NSSplitViewDelegate {
         // §5: the notification-permission prompt fires the moment the first
         // agent exists — promote or restore — not at app launch.
         NotificationPermission.requestOnce()
-        spawnAgent(resume: isRestored)
+        spawnAgent()
     }
 
-    /// Spawn Claude in the agent pane. `resume` matters only remotely — the
-    /// transcript lives on the host, so the caller says whether one exists;
-    /// locally the transcript on disk decides.
-    private func spawnAgent(resume: Bool) {
-        if case .remote(let host) = location {
-            // A login shell so the remote PATH resolves claude; `--session-id`
-            // is still app-chosen so transcripts and (M-remote phase 3) hook
-            // events join on the same id. On a restored session the command
-            // resumes — but `new -A` only *runs* it when the tmux session is
-            // gone; if claude is still alive out there we just reattach to it,
-            // mid-conversation, which no local `--resume` can match.
-            let flag = resume ? "--resume" : "--session-id"
-            if resume {
-                // At launch the tmux session may still hold a live claude;
-                // after an exit there is nothing to reattach to.
-                agentPane.showResumingPlacard(
-                    title: displayTitle,
-                    subtitle: agentHasExited ? "resuming…" : "reattaching to \(host)…"
-                )
-            }
-            // The unsets matter as much as COLORTERM: Claude Code fingerprints
-            // tmux via TMUX/TERM_PROGRAM and self-downgrades to indexed-256
-            // (ignoring COLORTERM and even FORCE_COLOR) — the owner's "muted"
-            // pane. tmux itself passes RGB fine (Tc); hide the fingerprints
-            // and claude emits truecolor. Verified against jarvis 2026-07-14.
-            startRemotePane(
-                agentPane, host: host, suffix: "ai",
-                command: "bash -lc \"unset TMUX TMUX_PANE TERM_PROGRAM TERM_PROGRAM_VERSION;"
-                    + " COLORTERM=truecolor \(tabEnvironment) exec claude \(flag) \(claudeSessionId)\""
-            )
-            return
-        }
-
+    /// Spawn Claude in the agent pane.
+    private func spawnAgent() {
         let claude = Session.resolveClaudeBinary()
         // Resume whenever Claude already has a transcript under this id (a
         // restored session, or a reopened one); `--session-id` on a known id
@@ -461,13 +363,14 @@ final class Session: NSObject, NSSplitViewDelegate {
         claudeSessionId = id
     }
 
+    /// Set the moment this session is deliberately torn down (a close, a
+    /// quit), so the agent dying then isn't taken for an exit to offer back.
+    private var intentionalTeardown = false
+
     /// Claude ended (`/exit`, ⌃C⌃C, a crash, a kill). The tab stays; the pane
     /// offers the way back in — this conversation, or a fresh one here.
-    private var agentHasExited = false
-
     private func agentExited() {
         guard !intentionalTeardown else { return }
-        agentHasExited = true
         if attention != .none {
             attention = .none
             onAttentionChanged?()
@@ -475,68 +378,13 @@ final class Session: NSObject, NSSplitViewDelegate {
         agentPane.showExitCard(
             title: displayTitle,
             subtitle: "Claude exited",
-            onResume: { [weak self] in self?.spawnAgent(resume: true) },
+            onResume: { [weak self] in self?.spawnAgent() },
             onNew: { [weak self] in
                 guard let self else { return }
                 self.claudeSessionId = UUID().uuidString.lowercased()
-                self.spawnAgent(resume: false)
+                self.spawnAgent()
             }
         )
-    }
-
-    // MARK: Remote panes
-
-    /// Consecutive failed reconnects per pane — indexes the backoff ladder,
-    /// reset by the first byte of a live connection.
-    private var reconnectAttempts: [ObjectIdentifier: Int] = [:]
-
-    /// Set the moment this session is deliberately torn down, so a dying ssh
-    /// client is not mistaken for link death and reattached.
-    private var intentionalTeardown = false
-
-    /// Spawn one pane's ssh→tmux chain and arm the reattach loop. The same
-    /// argv is respawned verbatim on link death — `tmux new -A` turns every
-    /// respawn into a reattach.
-    private func startRemotePane(_ pane: TerminalPane, host: String, suffix: String, command: String?) {
-        RemoteLink.link(for: host).activate()
-        let argv = RemoteCommand.paneArgv(
-            host: host,
-            tmuxSession: RemoteCommand.tmuxSessionName(key: tmuxKey, pane: suffix),
-            remoteDir: cwd,
-            command: command
-        )
-        pane.onProcessTerminated = { [weak self, weak pane] code in
-            guard let self, let pane else { return }
-            self.remotePaneExited(pane, host: host, argv: argv, code: code)
-        }
-        // A path printed here names a file on the host, not this Mac.
-        pane.terminal.opensPathLinks = false
-        pane.start(executable: RemoteCommand.sshPath, args: argv, cwd: nil)
-    }
-
-    /// Link death → placard + backoff respawn, forever (a rebooting host takes
-    /// as long as it takes). Anything else — typed `exit`, tmux kill — is a
-    /// deliberate end and the pane goes idle, exactly like a local shell's.
-    private func remotePaneExited(_ pane: TerminalPane, host: String, argv: [String], code: Int32?) {
-        guard !intentionalTeardown else { return }
-        guard RemoteCommand.isLinkFailure(code) else {
-            NSLog("Atelier: remote pane ended (session \(id), code: \(String(describing: code)))")
-            if pane === agentPane { agentExited() }
-            return
-        }
-        let key = ObjectIdentifier(pane)
-        let attempt = reconnectAttempts[key, default: 0]
-        reconnectAttempts[key] = attempt + 1
-        let delay = [1.0, 2.0, 5.0][min(attempt, 2)]
-        pane.showResumingPlacard(title: displayTitle, subtitle: "reconnecting to \(host)…") {
-            [weak self] in self?.reconnectAttempts[key] = 0
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak pane] in
-            guard let self, let pane, !self.intentionalTeardown else { return }
-            // The notify forward likely died with the same network event.
-            RemoteLink.link(for: host).activate()
-            pane.start(executable: RemoteCommand.sshPath, args: argv, cwd: nil)
-        }
     }
 
     /// Whether Claude already holds a transcript under this id — the same
@@ -549,18 +397,10 @@ final class Session: NSObject, NSSplitViewDelegate {
     }
 
     /// Terminate the hosted processes when the session is closed.
-    ///
-    /// For a remote session the local ssh clients always die, but the tmux'd
-    /// work on the host dies only on a *deliberate* close (`killRemote`, the
-    /// default). Quit paths pass `false`: the work stays running out there and
-    /// relaunch reattaches to it.
-    func terminate(killRemote: Bool = true) {
+    func terminate() {
         intentionalTeardown = true
         shellPane.terminate()
         if agentStarted { agentPane.terminate() }
-        if killRemote, shellStarted, case .remote(let host) = location {
-            RemoteCommand.killRemoteSessions(host: host, key: tmuxKey)
-        }
     }
 
     // MARK: Focus
@@ -592,7 +432,6 @@ final class Session: NSObject, NSSplitViewDelegate {
             switch layoutMode {
             case .triptych: return [editorPane, shellPane, agentPane]
             case .split: return [agentPane, shellPane]
-            case .splitSide: return [shellPane, agentPane]
             }
         }
     }
@@ -716,12 +555,9 @@ final class Session: NSObject, NSSplitViewDelegate {
     // MARK: Layout
 
     /// Toggle the layout. Meaningless for a Landing, so a no-op there.
-    /// Remote sessions never show the editor (it edits *local* files), so
-    /// their ⌘\ cycles the two-pane arrangements instead: stacked ↔
-    /// side-by-side.
     func toggleLayout() {
         guard state == .ide else { return }
-        layoutMode = isRemote ? layoutMode.nextSplit : layoutMode.next
+        layoutMode = layoutMode.next
         rebuildLayout()
     }
 
@@ -739,7 +575,7 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// PTY resizes are frozen for the duration (§1.5, same rule as divider
     /// drags): re-parenting walks the terminals through degenerate transient
     /// frames, and a 0-column resize reaching the hosted process can kill it —
-    /// observed as the remote claude dying on a ⌘\ toggle. Only the final
+    /// observed as claude dying on a ⌘\ toggle. Only the final
     /// geometry may land.
     private func rebuildLayout() {
         shellPane.terminal.resizeFrozen = true
@@ -763,8 +599,6 @@ final class Session: NSObject, NSSplitViewDelegate {
                 root = outer
             case .split:
                 root = makeSplit(slot: LayoutSlots.splitVertical, vertical: false, first: agentPane, second: shellPane)
-            case .splitSide:
-                root = makeSplit(slot: LayoutSlots.splitSide, vertical: true, first: shellPane, second: agentPane)
             }
         }
 

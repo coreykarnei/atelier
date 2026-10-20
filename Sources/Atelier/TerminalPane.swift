@@ -463,25 +463,17 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
 
     // MARK: Resuming placard (POLISH_PLAN §5)
 
-    /// The placard currently covering this pane, if any — reconnect retries
-    /// must re-arm the existing one, not stack a second.
+    /// The placard currently covering this pane, if any — a second call
+    /// re-arms it rather than stacking another.
     private weak var currentPlacard: NSView?
 
     /// Kill the morning dead-terminal flash: until the first PTY byte, a
-    /// restoring (or reconnecting) pane shows base material with two muted
-    /// centered lines — the session title in mono, the state in SF Pro —
-    /// cross-fading out on first paint. No spinner (§1.1).
-    ///
-    /// `onFirstData` (optional) also runs on that first byte — the reattach
-    /// loop uses it to reset its backoff. Idempotent while a placard is up:
-    /// repeated calls only re-arm the first-data hook.
-    func showResumingPlacard(
-        title: String,
-        subtitle: String = "resuming…",
-        onFirstData extra: (() -> Void)? = nil
-    ) {
+    /// restoring pane shows base material with two muted centered lines —
+    /// the session title in mono, the state in SF Pro — cross-fading out on
+    /// first paint. No spinner (§1.1). Idempotent while a placard is up.
+    func showResumingPlacard(title: String, subtitle: String = "resuming…") {
         if let placard = currentPlacard {
-            armPlacardDismissal(placard, extra: extra)
+            armPlacardDismissal(placard)
             return
         }
         let placard = NSView()
@@ -517,12 +509,11 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate, WorkspacePan
         ])
 
         currentPlacard = placard
-        armPlacardDismissal(placard, extra: extra)
+        armPlacardDismissal(placard)
     }
 
-    private func armPlacardDismissal(_ placard: NSView, extra: (() -> Void)?) {
+    private func armPlacardDismissal(_ placard: NSView) {
         terminal.onFirstData = { [weak placard] in
-            extra?()
             guard let placard else { return }
             if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
                 placard.removeFromSuperview()

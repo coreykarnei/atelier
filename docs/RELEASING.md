@@ -25,8 +25,7 @@ by itself publish a GitHub release or produce an installable distribution.
 
 Build an optimized bundle with `make bundle CONFIG=release`. Check launching,
 opening a project, editing and saving, session creation, worktree creation and
-removal, notification routing, and quit/relaunch restoration. Exercise remote
-reconnection if remote sessions are included in the release claims.
+removal, notification routing, and quit/relaunch restoration.
 
 Record the macOS versions and architectures actually tested, known limitations,
 and any state migrations. Check the app's About version against

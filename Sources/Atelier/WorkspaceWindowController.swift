@@ -324,10 +324,9 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, Pro
 
     /// Close a project. Plainly, it goes on the shelf (2026-09-24, owner
     /// call): its session tree is kept and its processes stop the way quit
-    /// stops them — remote work keeps running on its host — so opening the
-    /// same place from a Landing brings every session back. `forget` (⌥ on
-    /// the `×`, ⇧⌥⌘W) is the old deliberate "I'm done with this project":
-    /// every session dies, remote ones included, and nothing is kept.
+    /// stops them, so opening the same place from a Landing brings every
+    /// session back. `forget` (⌥ on the `×`, ⇧⌥⌘W) is the old deliberate
+    /// "I'm done with this project": every session dies and nothing is kept.
     /// Unsaved buffers get the informative refusal first (§5), naming the
     /// files — a shelf keeps which file was open, not its edits. The last
     /// project closing closes the window, and with it the app.
@@ -375,11 +374,10 @@ final class WorkspaceWindowController: NSWindowController, NSWindowDelegate, Pro
         guard let index = projects.firstIndex(where: { $0 === project }) else { return }
         if forget {
             if let key = project.shelfKey { ProjectShelf.forget(key) }
-            project.terminateAllSessions()
         } else {
             project.shelve()
-            project.terminateAllSessions(killRemote: false)
         }
+        project.terminateAllSessions()
         detach(at: index)
     }
 

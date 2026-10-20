@@ -9,9 +9,6 @@ import AtelierIPC
 /// `~/.claude/settings.json`, a `claude` in a plain terminal fires none of
 /// them, and the helper they name is always the one in this bundle —
 /// never an older copy that would read a newer verb as `stop`.
-///
-/// Remote agents still get theirs from `provision.sh`: the helper there is
-/// the host's python one.
 enum AgentHooks {
     /// The helper beside the app's executable (`bundle.sh` puts it there).
     /// Nil under a bare `swift run`, where the agent simply runs unhooked.

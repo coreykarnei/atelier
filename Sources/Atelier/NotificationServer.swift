@@ -216,7 +216,7 @@ final class NotificationServer: NSObject, UNUserNotificationCenterDelegate {
         // The sound vocabulary the dotfiles IDE used (POLISH_PLAN §7, resolved
         // 2026-09-16): Blow = finished, Tink = needs you. One audio path — the
         // app plays it, the banner stays silent — so it's heard whether or not
-        // banners are authorised, and for remote sessions it sounds *here*.
+        // banners are authorised.
         // Settings → Sounds turns it off; a sound hook of the user's own
         // that still fires under Atelier turns it off too, so a turn never
         // rings twice (`AgentHooks.userSoundHooks`).

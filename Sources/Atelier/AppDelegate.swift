@@ -117,7 +117,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             activeWindow: workspace?.activeIndex ?? 0
         )
         SessionStore.save(state)
-        isTerminating = true
         return .terminateNow
     }
 
@@ -134,10 +133,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var restoredAny = false
         for window in state.windows {
             let valid = window.sessions.filter { session in
-                // Remote sessions restore optimistically — no pre-flight ssh
-                // (a dead host must not block launch); the reconnecting
-                // placard *is* the offline UX.
-                if session.remoteHost != nil { return true }
                 var isDir: ObjCBool = false
                 let ok = FileManager.default.fileExists(atPath: session.cwd, isDirectory: &isDir) && isDir.boolValue
                 if !ok { orphans.append((session.title, (session.cwd as NSString).lastPathComponent)) }
@@ -294,11 +289,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     #endif
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Quitting: remote work stays alive on its hosts (reattach on relaunch).
-        for controller in projects { controller.terminateAllSessions(killRemote: false) }
+        for controller in projects { controller.terminateAllSessions() }
         workspace?.discardClosedProjects()
         LSPRegistry.terminateAll()
-        RemoteLink.terminateAll()
         notificationServer.stop()
     }
 
@@ -311,8 +304,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
-
-    private var isTerminating = false
 
     // MARK: Projects
 
@@ -348,9 +339,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.removeObserver(self, name: NSWindow.willCloseNotification, object: window)
         // Outside quit the last project closing by hand has already torn
         // itself down (shelved or forgotten) before the window goes, so this
-        // finds nothing; during quit the snapshot already promised these
-        // sessions back, so their remote side must survive.
-        for project in projects { project.terminateAllSessions(killRemote: !isTerminating) }
+        // finds nothing.
+        for project in projects { project.terminateAllSessions() }
         workspace?.discardClosedProjects()
         workspace = nil
     }
@@ -362,7 +352,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let workspace, let project = workspace.activeProject else { return }
         workspace.close(project)
     }
-    /// ⇧⌥⌘W — close without shelving: every session ends, remote included.
+    /// ⇧⌥⌘W — close without shelving: every session ends.
     @objc func closeProjectForgetting(_ sender: Any?) {
         guard let workspace, let project = workspace.activeProject else { return }
         workspace.close(project, forget: true)

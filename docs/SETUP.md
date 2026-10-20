@@ -83,33 +83,6 @@ Examples include `pyright-langserver`, `typescript-language-server`,
 See [LSP.swift](../Sources/Atelier/LSP.swift) for the supported candidates and
 selection order. Install language servers separately.
 
-## Remote sessions
-
-Configure and test SSH access to the host first. The remote host needs tmux and
-Claude Code; the notification bridge also uses Python 3. Choose a host from the
-landing screen or enter `host:directory`.
-
-Remote sessions use a dedicated Atelier tmux server. Atelier writes its tmux
-configuration under `~/.config/atelier/` on the host. The notification bridge
-installs a helper and merges Atelier hooks into the host's Claude settings;
-see [the provisioning script](../Resources/remote/provision.sh) for the exact
-changes.
-
-Quitting Atelier leaves remote tmux sessions running so they can reconnect.
-Closing a remote session explicitly tears down its associated tmux sessions.
-The local editor, file search, and worktree tools are not offered in remote sessions.
-
-## Local state and development signing
-
-Workspace restoration data is stored at `~/.local/state/atelier/session.json`.
-Claude Code manages its own authentication and conversation files. Avoid
-including these files in public bug reports; use a small reproduction instead.
-
-For repeated development builds, `Scripts/make-signing-cert.sh` creates and
-trusts a self-signed code-signing identity in your login keychain. It is optional
-and intended to help permissions persist across rebuilds. Read the script before
-running it. It is not Developer ID signing or Apple notarization.
-
 ## Releasing
 
 `make release` builds the zip the Homebrew cask downloads: a release build

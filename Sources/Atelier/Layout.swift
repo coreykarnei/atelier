@@ -6,20 +6,12 @@ import AppKit
 ///
 /// - `triptych`: editor top-left, shell bottom-left, agent right.
 /// - `split`: agent top, shell bottom, full width; editor hidden (state preserved).
-/// - `splitSide`: shell left, agent right — the two-pane echo of the ide
-///   script's anatomy. Remote sessions (which never show the editor) toggle
-///   `split ↔ splitSide` on ⌘\; the local cycle stays `triptych ↔ split`.
 enum LayoutMode: String {
     case triptych
     case split
-    case splitSide
 
-    /// The local ⌘\ cycle. `splitSide` isn't in it (it exits to triptych if
-    /// a local session ever lands there).
+    /// The ⌘\ cycle.
     var next: LayoutMode { self == .triptych ? .split : .triptych }
-
-    /// The two-pane ⌘\ cycle: stacked ↔ side-by-side.
-    var nextSplit: LayoutMode { self == .split ? .splitSide : .split }
 }
 
 /// Static configuration for one resizable divider: its identity, default position,
@@ -46,9 +38,6 @@ enum LayoutSlots {
     /// Split mode: agent height vs. shell (horizontal divider). Agent takes the
     /// larger share — in this mode you're driving the agent, the shell is a sidecar.
     static let splitVertical = LayoutSlot(id: "split.vertical", defaultFraction: 0.75, minFirst: 160, minSecond: 80)
-    /// Side-by-side split: shell width vs. agent (vertical divider). Mirrors
-    /// the triptych outer proportions — the agent keeps the ide script's 53%.
-    static let splitSide = LayoutSlot(id: "split.side", defaultFraction: 0.47, minFirst: 280, minSecond: 360)
     /// Landing: opener height vs. terminal (horizontal divider). The opener
     /// holds the centered summon card, so it takes the room (owner revision
     /// 2026-07-13: terminal is the bottom third).

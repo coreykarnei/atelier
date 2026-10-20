@@ -323,7 +323,7 @@ the dropped-items list. Reduce Motion: every one of these is a plain appear.
   chose parity with the dotfiles IDE over new notes. Atelier plays the same
   two system sounds (`Blow` = finished, `Tink` = needs you) itself via
   `NSSound` and posts silent banners — one audio path, audible whether or
-  not banners are authorised, and remote sessions sound on this machine.
+  not banners are authorised.
   The dotfiles' `afplay` hooks double it while both are merged into
   `~/.claude/settings.json`; drop those once Atelier is the daily driver.
 - **The promote transition, kernel only** — keep continuous identity (the

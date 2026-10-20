@@ -20,7 +20,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// Whether this project is the one on screen. Focus requests from a
     /// hidden project are dropped — a hidden pane must never steal the caret.
     var isActive = false
-    /// The tab's name: the repo (or host); `New Tab` before promotion.
+    /// The tab's name: the folder it was opened on; `New Tab` before promotion.
     private(set) var title = "New Tab" {
         didSet { if oldValue != title { host?.projectDidChangeTitle(self) } }
     }
@@ -154,16 +154,9 @@ final class ProjectController: NSObject, BottomBarDelegate {
     // MARK: Shelf
 
     /// Where this project lives, as the Landing names it: the folder it was
-    /// opened on, or a remote project's `ssh://host:dir`. Nil for a project
-    /// that never became one (still a Landing) — nothing to come back to.
-    var shelfKey: String? {
-        if let projectRoot { return projectRoot }
-        if let remote = sessions.first(where: { $0.isRemote && $0.state == .ide }),
-           case .remote(let host) = remote.location {
-            return RemoteTarget(host: host, dir: remote.cwd).id
-        }
-        return nil
-    }
+    /// opened on. Nil for a project that never became one (still a Landing)
+    /// — nothing to come back to.
+    var shelfKey: String? { projectRoot }
 
     /// Closing by hand keeps the session tree to come back to (the caller
     /// then tears the processes down the way quit does).
@@ -183,7 +176,6 @@ final class ProjectController: NSObject, BottomBarDelegate {
         let isFresh = landing.map { sessions.count == 1 && sessions[0] === $0 } ?? sessions.isEmpty
         guard isFresh, let entry = ProjectShelf.take(key) else { return false }
         let restorable = entry.window.sessions.filter { persisted in
-            if persisted.remoteHost != nil { return true }
             var isDir: ObjCBool = false
             return FileManager.default.fileExists(atPath: persisted.cwd, isDirectory: &isDir) && isDir.boolValue
         }
@@ -201,7 +193,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
         }
         // Anchor on the folder that was opened, not on whichever session
         // happens to come back first (a worktree's, say).
-        if RemoteTarget.parse(key) == nil { anchor(on: key) }
+        anchor(on: key)
         for persisted in restorable { adopt(Session(restored: persisted)) }
         showSession(at: restorable.firstIndex { $0.claudeSessionId == activeId } ?? 0)
         updateBottomBar()
@@ -305,31 +297,14 @@ final class ProjectController: NSObject, BottomBarDelegate {
     }
 
     /// Another session on the project's *main* checkout, no question asked
-    /// (the chooser's default answer). A remote session's sibling is another
-    /// session on the same host and dir. Falls back to a Landing when the
+    /// (the chooser's default answer). Falls back to a Landing when the
     /// window isn't anchored to a project yet.
     func addSessionOnMain() {
-        if let session = activeSession, case .remote(let host) = session.location {
-            adopt(Session(remoteHost: host, remoteDir: session.cwd))
-        } else if let root = projectRoot {
+        if let root = projectRoot {
             adopt(Session(ideRoot: root))
         } else {
             addSession()
         }
-    }
-
-    /// A Landing picked a remote target: replace it, same tab slot, with a
-    /// fresh remote session (promotion-in-place can't cross machines — the
-    /// landing shell's PTY is local).
-    private func replaceLanding(_ landing: Session, withRemote host: String, dir: String) {
-        guard let index = sessions.firstIndex(where: { $0 === landing }) else { return }
-        if restoreShelved(key: RemoteTarget(host: host, dir: dir).id, replacing: landing) { return }
-        RecentsStore.record(RemoteTarget(host: host, dir: dir).id)
-        landing.terminate()
-        landing.container.removeFromSuperview()
-        sessions.remove(at: index)
-        adopt(Session(remoteHost: host, remoteDir: dir), at: index)
-        view.window?.refreshShadowAfterLayout()
     }
 
     private func adopt(_ session: Session, at index: Int? = nil) {
@@ -351,10 +326,6 @@ final class ProjectController: NSObject, BottomBarDelegate {
         session.editorPane.onNavigateRequest = { [weak self, weak session] path, line, column in
             guard let self, let session else { return }
             self.openInEditor(url: URL(fileURLWithPath: path), session: session, cursor: (line, column))
-        }
-        session.onRemoteRequested = { [weak self, weak session] host, dir in
-            guard let self, let session else { return }
-            self.replaceLanding(session, withRemote: host, dir: dir)
         }
         session.onPromoteRequested = { [weak self, weak session] root in
             guard let self, let session else { return false }
@@ -382,9 +353,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// Anchor the window to its project once the first IDE session exists: cache
     /// the folder it opened (the tab's name) and the repo behind it, if any.
     private func noteProjectRoot(for session: Session) {
-        // A remote dir is not a local repo root — anchoring the window to it
-        // would aim ⌥⌘T and the worktree chooser at a path that isn't here.
-        guard session.state == .ide, !session.isRemote else {
+        guard session.state == .ide else {
             refreshTitle()
             return
         }
@@ -411,13 +380,9 @@ final class ProjectController: NSObject, BottomBarDelegate {
 
     /// The project's name, nothing else (owner call 2026-09-10): the worktree
     /// and the session live in the bottom bar; the project tab says which
-    /// folder (or host) this is — the folder you opened, not the repo it
-    /// happens to sit in (owner call 2026-09-21).
+    /// folder this is — the folder you opened, not the repo it happens to
+    /// sit in (owner call 2026-09-21).
     private func refreshTitle() {
-        if let session = activeSession, case .remote(let host) = session.location {
-            title = host
-            return
-        }
         guard let root = projectRoot else {
             title = "New Tab"
             return
@@ -427,12 +392,8 @@ final class ProjectController: NSObject, BottomBarDelegate {
 
     /// Kill every session's hosted processes (window closing / app quitting) —
     /// including closed-but-alive ones still in their reopen grace window.
-    ///
-    /// `killRemote: false` (the quit path) leaves remote sessions' tmux'd work
-    /// running on their hosts for relaunch to reattach to. Sessions in the
-    /// reopen grace were already deliberately closed, so they always kill.
-    func terminateAllSessions(killRemote: Bool = true) {
-        for session in sessions { session.terminate(killRemote: killRemote) }
+    func terminateAllSessions() {
+        for session in sessions { session.terminate() }
         for entry in recentlyClosed { evict(entry: entry) }
         recentlyClosed.removeAll()
     }
@@ -549,11 +510,8 @@ final class ProjectController: NSObject, BottomBarDelegate {
     func reopenClosedSession() -> Bool {
         while let entry = recentlyClosed.popLast() {
             let (cwd, index) = entryLocation(entry)
-            // Remote roots aren't stat-able here; reopen optimistically (the
-            // reconnecting placard covers a host that's gone).
             var isDir: ObjCBool = false
-            guard entryIsRemote(entry)
-                || (FileManager.default.fileExists(atPath: cwd, isDirectory: &isDir) && isDir.boolValue) else {
+            guard FileManager.default.fileExists(atPath: cwd, isDirectory: &isDir), isDir.boolValue else {
                 evict(entry: entry)
                 continue
             }
@@ -591,13 +549,6 @@ final class ProjectController: NSObject, BottomBarDelegate {
         }
     }
 
-    private func entryIsRemote(_ entry: ClosedEntry) -> Bool {
-        switch entry {
-        case .live(let session, _, _): return session.isRemote
-        case .snapshot(let persisted, _, _): return persisted.remoteHost != nil
-        }
-    }
-
     /// Grace over: the hidden session's processes die and the entry becomes
     /// a `--resume` snapshot.
     private func expireGrace(for session: Session) {
@@ -631,10 +582,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
 
     // MARK: Editor (M2.1)
 
-    var canUseEditor: Bool {
-        guard let session = activeSession else { return false }
-        return session.state == .ide && !session.isRemote
-    }
+    var canUseEditor: Bool { activeSession?.state == .ide }
     var editorHasFile: Bool { activeSession?.editorPane.filePath != nil }
     /// The `⎇+` / `⇧⌥⌘T` door: only where worktrees are on and possible.
     var canChooseWorktree: Bool { projectRepoRoot != nil && Settings.worktreesEnabled }
@@ -680,14 +628,14 @@ final class ProjectController: NSObject, BottomBarDelegate {
 
     /// ⌘⇧E — the sidebar search panel.
     func focusExplorerSearch() {
-        guard let session = activeSession, session.state == .ide, !session.isRemote else { return }
+        guard let session = activeSession, session.state == .ide else { return }
         if session.layoutMode == .split { toggleLayout() }
         session.editorPane.focusExplorerSearch()
     }
 
     /// ⌘B — the editor's file tree, shown or hidden for every session.
     func toggleExplorer() {
-        guard let session = activeSession, session.state == .ide, !session.isRemote else { return }
+        guard let session = activeSession, session.state == .ide else { return }
         session.editorPane.toggleExplorer()
         if session.layoutMode == .split { toggleLayout() }
     }
@@ -1070,11 +1018,8 @@ final class ProjectController: NSObject, BottomBarDelegate {
         return groupOrder.flatMap { groups[$0] ?? [] }
     }
 
-    /// Remote sessions group by host — every jarvis tab sits together
-    /// regardless of remote dir, like worktree tabs share their root.
-    private func groupKey(for session: Session) -> String {
-        session.location.host.map { "ssh://\($0)" } ?? session.cwd
-    }
+    /// Tabs group by root: worktree tabs share theirs.
+    private func groupKey(for session: Session) -> String { session.cwd }
 
     private func groupedTabs() -> [SessionTabInfo] {
         barOrder.map { index in
@@ -1085,7 +1030,6 @@ final class ProjectController: NSObject, BottomBarDelegate {
                 index: index,
                 title: session.displayTitle,
                 isWorktree: session.isWorktree,
-                remoteHost: session.location.host,
                 groupKey: key,
                 groupLabel: folderLabel(for: session, key: key),
                 attention: session.attention,
@@ -1098,11 +1042,10 @@ final class ProjectController: NSObject, BottomBarDelegate {
 
     /// What a group's folder tab says: the *worktree*, never the branch —
     /// `main` for the main working tree (git's own term for the primary; the
-    /// pill already says the repo's name), `⎇ dir` for a linked worktree,
-    /// `@host` for a remote group. Folders are places; the branch checked out
-    /// in one is a state, revealed on hover (owner calls 2026-09-07/08).
+    /// pill already says the repo's name), `⎇ dir` for a linked worktree.
+    /// Folders are places; the branch checked out in one is a state,
+    /// revealed on hover (owner calls 2026-09-07/08).
     private func folderLabel(for session: Session, key: String) -> String {
-        if let host = session.location.host { return "@\(host)" }
         if session.isWorktree { return "⎇ \((session.cwd as NSString).lastPathComponent)" }
         // "main" is git's word for the primary checkout — a folder with no repo
         // behind it has no primary, so it wears its own name instead.
@@ -1160,8 +1103,8 @@ final class ProjectController: NSObject, BottomBarDelegate {
             // turn's end is old news by then — read as *waiting*, it settled
             // every unseen ring a minute in, as though you'd looked (owner
             // report 2026-10-07). It only corrects a mark that missed the
-            // end: a blue whose Stop never came (an interrupt on a remote
-            // host), a peach answered where we couldn't read it. Settled
+            // end: a blue whose Stop never came (an interrupt the transcript
+            // poll missed), a peach answered where we couldn't read it. Settled
             // marks stay. (It never fires over an open permission prompt, nor,
             // in current Claude Code, while background agents run. If an older
             // one sends it then, a blue waiting on them is right anyway.)
@@ -1214,18 +1157,15 @@ final class ProjectController: NSObject, BottomBarDelegate {
     }
 
     /// Re-read each session's title from its transcript; rebuild tabs if any changed.
-    /// Remote sessions keep their seeded title — their transcript lives on the
-    /// remote host, not under the local `~/.claude/projects/`. (Reading the
-    /// ai-title over the shared ssh link is a possible follow-up.)
     private func refreshTitles() {
         // Off the main thread and incremental (TranscriptTitle): a day's
         // transcripts run to 50 MB, and reading them whole every 2 s here
         // was the ¼–½ s judder the owner saw scrolling the Claude pane.
-        let targets = sessions.filter { !$0.isRemote }.map { (id: $0.claudeSessionId, cwd: $0.cwd) }
+        let targets = sessions.map { (id: $0.claudeSessionId, cwd: $0.cwd) }
         TranscriptTitle.titles(for: targets) { [weak self] readings in
             guard let self else { return }
             var changed = false
-            for session in self.sessions where !session.isRemote {
+            for session in self.sessions {
                 let reading = readings[session.claudeSessionId]
                 let seed = (session.cwd as NSString).lastPathComponent
                 let resolved = reading?.title ?? seed
@@ -1254,19 +1194,9 @@ final class ProjectController: NSObject, BottomBarDelegate {
 
     /// A folder's `+`: a sibling *there*, immediately — pointing at the
     /// folder already answered the only question the chooser asked (owner
-    /// call 2026-09-21). Remote folders get another session on the host (the
-    /// active session's dir when it lives there, else the folder's first).
-    /// Branching has its own door now: the row's `⎇+`.
+    /// call 2026-09-21). Branching has its own door now: the row's `⎇+`.
     func bottomBarDidRequestNewSession(inGroup groupKey: String) {
-        if groupKey.hasPrefix("ssh://") {
-            let host = String(groupKey.dropFirst("ssh://".count))
-            let sibling = (activeSession?.location.host == host ? activeSession : nil)
-                ?? sessions.first { $0.location.host == host }
-            guard let sibling else { return }
-            adopt(Session(remoteHost: host, remoteDir: sibling.cwd))
-        } else {
-            adopt(Session(ideRoot: groupKey))
-        }
+        adopt(Session(ideRoot: groupKey))
     }
 
     /// The row's `⎇+` / `⇧⌥⌘T`: the chooser, opened as a chooser — the list
@@ -1289,9 +1219,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
         }
         let alert = NSAlert()
         alert.messageText = "Close \u{201C}\(session.displayTitle)\u{201D}?"
-        alert.informativeText = session.isRemote
-            ? "The remote shell and Claude keep running on \(session.location.host ?? "the host"); this tab detaches from them."
-            : "Its shell ends. The Claude conversation stays in its transcript and can be resumed."
+        alert.informativeText = "Its shell ends. The Claude conversation stays in its transcript and can be resumed."
         alert.addButton(withTitle: "Close")
         alert.addButton(withTitle: "Cancel")
         alert.showsSuppressionButton = true
@@ -1367,13 +1295,10 @@ final class ProjectController: NSObject, BottomBarDelegate {
 
     /// The `+` / `⌥⌘T`: a new session *here*, no question asked (owner call
     /// 2026-09-21) — the worktree the active session lives in, which is what
-    /// the chooser defaulted to anyway. A remote session's sibling is another
-    /// session on the same host and dir (no worktrees across the wire); an
-    /// unanchored window gets a Landing. Another worktree is the `⎇+`.
+    /// the chooser defaulted to anyway. An unanchored window gets a Landing.
+    /// Another worktree is the `⎇+`.
     func requestNewSession() {
-        if let session = activeSession, case .remote = session.location {
-            addSessionOnMain()
-        } else if let session = activeSession, session.state == .ide {
+        if let session = activeSession, session.state == .ide {
             adopt(Session(ideRoot: session.cwd))
         } else {
             addSessionOnMain()
@@ -1673,14 +1598,12 @@ final class ProjectController: NSObject, BottomBarDelegate {
             commands.append(PaletteCommand(id: "editor.open", title: "Editor: Open File…", key: "⌘O") { [weak self] in
                 self?.openFileInEditor()
             })
-            if !(activeSession?.isRemote ?? true) {
-                commands.append(PaletteCommand(id: "editor.explorer", title: "Editor: Toggle Explorer", key: "⌘B") { [weak self] in
-                    self?.toggleExplorer()
-                })
-                commands.append(PaletteCommand(id: "editor.explorer.search", title: "Editor: Search Files and Text", key: "⌘⇧E") { [weak self] in
-                    self?.focusExplorerSearch()
-                })
-            }
+            commands.append(PaletteCommand(id: "editor.explorer", title: "Editor: Toggle Explorer", key: "⌘B") { [weak self] in
+                self?.toggleExplorer()
+            })
+            commands.append(PaletteCommand(id: "editor.explorer.search", title: "Editor: Search Files and Text", key: "⌘⇧E") { [weak self] in
+                self?.focusExplorerSearch()
+            })
             if editorHasFile {
                 commands.append(PaletteCommand(id: "editor.save", title: "Editor: Save", key: "⌘S") { [weak self] in
                     self?.saveEditor()

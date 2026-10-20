@@ -11,15 +11,13 @@ struct PersistedSession: Codable {
     var title: String
     var customTitle: String?
     var claudeSessionId: String
-    /// Names the host-side tmux sessions when it differs from
-    /// `claudeSessionId` (a new conversation started in the tab). Optional:
-    /// absent means the two are the same, as in every older snapshot.
-    var tmuxKey: String? = nil
     var dividers: [String: Double]
     /// Editor buffer path (M2.1). Optional so pre-M2 snapshots still decode.
     var openFile: String?
-    /// Set for remote sessions: the ssh host; `cwd` is then the *remote* dir.
-    /// Optional so pre-remote snapshots still decode.
+    /// Read only, never written: remote sessions were removed in v1.5.0, and
+    /// a snapshot or shelf entry from before can still hold one, its `cwd` a
+    /// directory on the host. Kept so `droppingLegacyRemote()` can leave such
+    /// a session behind on load instead of restoring it as a local one.
     var remoteHost: String? = nil
     /// The tab's attention state at quit (`Session.Attention` raw value), so a
     /// relaunch shows what you hadn't seen yet. Optional: older snapshots.
@@ -31,9 +29,25 @@ struct PersistedWindow: Codable {
     var activeIndex: Int
     /// The folder the project was opened on (`ProjectController.projectRoot`)
     /// — its name, kept so a relaunch doesn't rename the project after
-    /// whichever session comes back first. Nil for a remote or unpromoted
-    /// project, and in older snapshots.
+    /// whichever session comes back first. Nil for an unpromoted project,
+    /// and in older snapshots.
     var root: String? = nil
+
+    /// The window without sessions from before v1.5.0's removal of remote
+    /// sessions, its active tab found again by conversation (an index would
+    /// land on a neighbour once an earlier tab is gone). Nil when nothing
+    /// local is left.
+    func droppingLegacyRemote() -> PersistedWindow? {
+        guard sessions.contains(where: { $0.remoteHost != nil }) else { return self }
+        let active = sessions.indices.contains(activeIndex) ? sessions[activeIndex].claudeSessionId : nil
+        var kept = self
+        kept.sessions = sessions.filter { $0.remoteHost == nil }
+        guard !kept.sessions.isEmpty else { return nil }
+        kept.activeIndex = kept.sessions.firstIndex { $0.claudeSessionId == active }
+            ?? min(activeIndex, kept.sessions.count - 1)
+        NSLog("Atelier: left \(sessions.count - kept.sessions.count) remote session(s) behind — remote sessions were removed")
+        return kept
+    }
 }
 
 struct PersistedState: Codable {
@@ -47,8 +61,18 @@ enum SessionStore {
     }
 
     static func load() -> PersistedState? {
-        guard let data = FileManager.default.contents(atPath: path) else { return nil }
-        return try? JSONDecoder().decode(PersistedState.self, from: data)
+        guard let data = FileManager.default.contents(atPath: path),
+              let state = try? JSONDecoder().decode(PersistedState.self, from: data) else { return nil }
+        // A window with nothing local left goes; the active one is found
+        // again among those that stay.
+        var windows: [PersistedWindow] = []
+        var active = 0
+        for (index, window) in state.windows.enumerated() {
+            guard let kept = window.droppingLegacyRemote() else { continue }
+            if index <= state.activeWindow { active = windows.count }
+            windows.append(kept)
+        }
+        return PersistedState(windows: windows, activeWindow: active)
     }
 
     static func save(_ state: PersistedState) {
@@ -63,8 +87,8 @@ enum SessionStore {
 
 /// Projects closed by hand, kept to come back to (2026-09-24, owner call):
 /// closing a project shelves its session tree under the folder it was opened
-/// on — the project's `projectRoot`, or a remote project's `ssh://host:dir`,
-/// the same strings the Landing offers — and opening that place again from a
+/// on — the project's `projectRoot`, the same string the Landing offers —
+/// and opening that place again from a
 /// Landing restores the tree the way a relaunch would. `⌥`-close forgets
 /// instead: the old "I'm done with this project". Its own file beside the
 /// quit snapshot, so a quit neither drops the shelf nor restores it as tabs.
@@ -81,8 +105,14 @@ enum ProjectShelf {
     }
 
     private static func load() -> [String: Entry] {
-        guard let data = FileManager.default.contents(atPath: path) else { return [:] }
-        return (try? decoder.decode([String: Entry].self, from: data)) ?? [:]
+        guard let data = FileManager.default.contents(atPath: path),
+              let shelf = try? decoder.decode([String: Entry].self, from: data) else { return [:] }
+        // Remote projects (`ssh://host:dir` keys) and remote sessions inside
+        // local ones are from before v1.5.0; the next write drops them.
+        return shelf.compactMapValues { entry in
+            guard let window = entry.window.droppingLegacyRemote(), window.sessions.contains(where: \.isIDE) else { return nil }
+            return Entry(window: window, shelvedAt: entry.shelvedAt)
+        }.filter { !$0.key.hasPrefix("ssh://") }
     }
 
     private static func save(_ shelf: [String: Entry]) {

@@ -13,7 +13,7 @@ keyboard-first interactions, and native macOS behavior are deliberate choices.
 Include the Atelier version or commit, macOS version, Mac architecture, and
 whether you built a debug or release bundle. Describe the steps to reproduce,
 what you expected, and what happened. For agent issues, include the Claude Code
-version; for remote issues, include the relevant host tools and versions.
+version.
 
 A small sample file or a screenshot often helps. Remove credentials, private
 paths, hostnames, and conversation content from anything you attach. Please

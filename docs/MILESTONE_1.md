@@ -286,7 +286,8 @@ clicks through to it.
   2026-09-07 — folders are places, a branch is a state): `main` for the main
   working tree (git's term; the pill already names the repo), a drawn tree
   silhouette (cloud canopy, forked trunk — the owner's reference) + `dir` for
-  a linked worktree, `@host` for a remote group. **One group draws
+  a linked worktree (and, until v1.5.0 removed remote sessions, `@host`
+  for a remote group). **One group draws
   no folder chrome** — bare tabs; folders appear when a second group opens.
   Label coats are the folder's body pulled toward mantle and opaque, so the
   label text holds at subtext0 on every rung. Worktree folders share the

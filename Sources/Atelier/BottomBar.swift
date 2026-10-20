@@ -5,7 +5,7 @@ protocol BottomBarDelegate: AnyObject {
     func bottomBarDidSelectSession(at index: Int)
     func bottomBarDidRequestNewSession()
     /// A folder's own `+`: a new session in that group — the worktree at
-    /// `groupKey`, or another session on the host for an `ssh://host` key.
+    /// `groupKey`.
     func bottomBarDidRequestNewSession(inGroup groupKey: String)
     func bottomBarDidRequestCloseSession(at index: Int)
     /// Inline rename finished. `title` is the committed text (nil = revert to
@@ -32,13 +32,10 @@ struct SessionTabInfo {
     let index: Int
     let title: String
     let isWorktree: Bool
-    /// Set for remote sessions: the ssh host, worn on the tab (`@host`) the
-    /// way ⎇ marks a worktree — where the work lives, always visible.
-    let remoteHost: String?
     /// Group boundary marker — tabs sharing a root sit together (MILESTONE_1 §7);
     /// the grouping *is* how codebase sharing is shown.
     let groupKey: String
-    /// What the group's folder tab says (branch, `⎇ worktree`, `@host`).
+    /// What the group's folder tab says (branch, `⎇ worktree`).
     let groupLabel: String
     let attention: Session.Attention
     /// When the attention state began — surfaced only in the hover tooltip
@@ -53,7 +50,7 @@ struct SessionTabInfo {
 /// The bottom bar (MILESTONE_1 §7, revised 2026-09-03). Static project pill
 /// on the left, session tabs in the middle — each root's tabs sitting inside a
 /// **folder**: a cell with a small label tab rising from its top-left edge
-/// naming the worktree (main's branch, `⎇ dir`, `@host`). Wraps to a second
+/// naming the worktree (main's branch, `⎇ dir`). Wraps to a second
 /// row group-aware when full, with a `»` overflow menu as the hard ceiling —
 /// and the clock, layout toggle, and settings gear on the right. Styling
 /// follows the tmux status bar this app succeeds: blue pill, green active tab,
@@ -177,7 +174,7 @@ final class BottomBar: NSView {
     /// active: its fill already draws the edge.
     private var trailingRules: [String: NSView] = [:]
     /// Reserved key for the bare-mode tick between the `+` and the `⎇+`; no
-    /// group key can collide (they are paths or `ssh://host`).
+    /// group key can collide (they are paths).
     private static let worktreeRuleKey = "⎇+"
     private var foldersVisible = true
     /// Whether the trailing `⎇+` is drawn: worktrees enabled and the project
@@ -428,7 +425,6 @@ final class BottomBar: NSView {
         let symbol: String
         switch mode {
         case .triptych: symbol = "rectangle.split.3x1"
-        case .splitSide: symbol = "rectangle.split.2x1"
         default: symbol = "rectangle.split.1x2"
         }
         layoutButton.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Toggle layout")
@@ -478,7 +474,7 @@ final class BottomBar: NSView {
 
     private func refreshTintIndex() {
         let open = Set(tabs.map(\.groupKey).filter {
-            $0.hasPrefix(WorktreeManager.base + "/") || $0.hasPrefix("ssh://")
+            $0.hasPrefix(WorktreeManager.base + "/")
         })
         tintIndex = tintIndex.filter { open.contains($0.key) }
         // Newcomers in strip order, each taking the lowest accent not in use.
@@ -565,12 +561,12 @@ final class BottomBar: NSView {
 
         // Folder chrome earns its place by saying where you are: the main
         // checkout alone draws bare tabs (owner call 2026-09-08), but a
-        // worktree or a remote host is somewhere else and always wears its
-        // name — even once it's the only group left (owner report
-        // 2026-09-16: closing the main session stripped the ⎇ tag).
+        // worktree is somewhere else and always wears its name — even once
+        // it's the only group left (owner report 2026-09-16: closing the main
+        // session stripped the ⎇ tag).
         foldersVisible = chunks.count > 1 || chunks.contains { chunk in
             guard let key = chunk.first?.groupKey else { return false }
-            return key.hasPrefix(WorktreeManager.base + "/") || key.hasPrefix("ssh://")
+            return key.hasPrefix(WorktreeManager.base + "/")
         }
         refreshTintIndex()
 
@@ -871,7 +867,7 @@ final class BottomBar: NSView {
                         folder.onDragMoved = { [weak self] view, event in self?.folderDragMoved(view, event) }
                         folder.onDragEnded = { [weak self] view in self?.folderDragEnded(view) }
                         let key = segment.groupKey
-                        folder.branchProvider = key.hasPrefix("ssh://") ? nil : { WorktreeManager.currentBranch(key) }
+                        folder.branchProvider = { WorktreeManager.currentBranch(key) }
                         folderViews[segment.poolKey] = folder
                         // Below every tab — folders are the ground the tabs sit on.
                         tabsArea.addSubview(folder, positioned: .below, relativeTo: nil)
@@ -881,7 +877,7 @@ final class BottomBar: NSView {
                     folder.groupKey = segment.groupKey
                     // The main checkout's folder is the ground everything else
                     // stands on — grouped, but unlabeled (owner call 2026-09-10);
-                    // worktree and host folders wear their name on the tab.
+                    // worktree folders wear their name on the tab.
                     let isMain = colorIndex(for: segment.groupKey) == 0
                     folder.apply(
                         label: segment.ordinal == 0 && !isMain ? segment.label : nil,
@@ -1242,7 +1238,7 @@ final class BottomBar: NSView {
         guard let info = tabs.first(where: { $0.id == view.sessionId }) else { return }
         let draft = SessionTabInfo(
             id: info.id, index: info.index, title: text, isWorktree: info.isWorktree,
-            remoteHost: info.remoteHost, groupKey: info.groupKey, groupLabel: info.groupLabel,
+            groupKey: info.groupKey, groupLabel: info.groupLabel,
             attention: info.attention, attentionSince: info.attentionSince
         )
         let wanted = SessionTabView.desiredWidth(for: draft, isActive: info.index == activeIndex)
@@ -1493,16 +1489,12 @@ private final class SessionTabView: NSView, NSTextFieldDelegate {
     /// The `×`'s pad: 16pt around an 8pt glyph, centred where the dot sits.
     static let closeWidth: CGFloat = 16
 
-    /// The tab's label: the title, then the `@host` mark for remote sessions —
-    /// dropped when the title *is* the host ("jarvis @jarvis" says it once).
-    /// The worktree mark moved to the folder the tab sits in (2026-09-03);
+    /// The tab's label: the title. The worktree mark moved to the folder the tab sits in (2026-09-03);
     /// only the `»` menu, which has no folder, puts ⎇ back. (Index numbering
     /// was tried and dropped — the tmux reference was about presentation, not
     /// anatomy; owner call 2026-07-13.)
     static func label(for info: SessionTabInfo) -> String {
-        let title = info.title.isEmpty ? "untitled" : info.title
-        let host = info.remoteHost.flatMap { $0 == info.title ? nil : " @\($0)" } ?? ""
-        return title + host
+        info.title.isEmpty ? "untitled" : info.title
     }
 
     func apply(info: SessionTabInfo, isActive: Bool) {
