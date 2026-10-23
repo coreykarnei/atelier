@@ -1524,4 +1524,30 @@ final class ExplorerOutlineView: NSOutlineView {
         if row >= 0 { selectRowIndexes([row], byExtendingSelection: false) }
         return menuProvider?(row)
     }
+
+    /// Disclosure triangles AppKit dropped with their rows, to hand back
+    /// (2026-10-23, owner report: Atelier took 0.6–1.8s to come forward from
+    /// the Dock). Every `reloadData` asks for a fresh triangle per folder row
+    /// and never reuses one, and a dropped triangle never dies: a notification
+    /// observer AppKit registers at the button's creation holds it. Each of
+    /// them re-tints on every key change of the window, so a day of FSEvents
+    /// reloads left ~30k of them (~70 MB), and activating the app re-tinted
+    /// them all on the main thread before it took focus. Handing the dropped
+    /// ones back caps them at the most rows ever on screen at once.
+    private var spareDisclosureButtons: [NSView] = []
+
+    override func makeView(withIdentifier identifier: NSUserInterfaceItemIdentifier, owner: Any?) -> NSView? {
+        if identifier == NSOutlineView.disclosureButtonIdentifier, let spare = spareDisclosureButtons.popLast() {
+            return spare
+        }
+        return super.makeView(withIdentifier: identifier, owner: owner)
+    }
+
+    override func didRemove(_ rowView: NSTableRowView, forRow row: Int) {
+        super.didRemove(rowView, forRow: row)
+        for button in rowView.subviews where button.identifier == NSOutlineView.disclosureButtonIdentifier {
+            button.removeFromSuperview()
+            spareDisclosureButtons.append(button)
+        }
+    }
 }
