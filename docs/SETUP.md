@@ -117,6 +117,14 @@ One-time setup, on an Apple Developer Program account:
    # security list-keychains -d user -s ~/Library/Keychains/login.keychain-db
    ```
 
+   Always pass the path to `set-keychain-settings`. Without one it acts on
+   the default keychain, the login one, which then locks every 10 minutes
+   and on sleep; sharingd, syspolicyd, `security` and the rest then ask for
+   its password nonstop (found 2026-10-25, the login keychain carrying the
+   release keychain's `-l -u -t 600`). `security set-keychain-settings
+   ~/Library/Keychains/login.keychain-db`, with no flags, puts it back to
+   never locking.
+
 2. **A Developer ID Application identity in it.**
    - Make one in Xcode (Settings → Accounts → Manage Certificates → **+**).
    - Export it from the login keychain with Keychain Access (My
