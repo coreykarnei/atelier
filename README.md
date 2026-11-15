@@ -12,7 +12,7 @@ Built with AppKit, with a keyboard-first workflow, Catppuccin Mocha colors,
 and native translucency. Claude Code runs as its own process, with its tools
 and permissions intact.
 
-Atelier is the author's daily driver. Version **1.5.1** installs with
+Atelier is the author's daily driver. Version **1.6.0** installs with
 Homebrew, or you can build it from source.
 
 <a href="https://raw.githubusercontent.com/coreykarnei/atelier/main/docs/media/atelier-demo-full.avif"><picture><source srcset="docs/media/atelier-demo.avif" type="image/avif"><img src="docs/media/atelier-demo-poster.jpg" width="100%" alt="Atelier at work: Claude Code, a VS Code–style editor and a terminal lift apart and settle back into one window. Along the session bar, each Claude session shows its status; one needs attention, and a click opens its permission prompt, which is approved. Then the project row shows every project's sessions at a glance."></picture></a>
@@ -22,7 +22,8 @@ Homebrew, or you can build it from source.
 
 - **Code, shell, and agent together.** A focused three-pane layout, with
   projects across the top and sessions along the bottom. Session titles follow
-  Claude's conversation summaries, or you can name them yourself.
+  Claude's conversation summaries, or you can name them yourself. When you
+  need two shells, the editor's pane trades places with a second terminal.
 - **An editor with familiar controls.** Syntax highlighting, a file explorer,
   file and text search, multiple cursors, Markdown preview, and optional
   autosave. Installed language servers add navigation and diagnostics.
@@ -102,6 +103,7 @@ ID-signed and notarized; the setup guide covers the one-time setup.
 | Close project (reopen it to get its sessions back) | ⌥⌘W |
 | Close project and end its sessions | ⇧⌥⌘W |
 | Switch layout | ⌘\ |
+| Terminal in the editor pane (and back) | ⌃` |
 | Settings | ⌘, |
 
 Worktree selection and autosave can be enabled in Settings. Both are off by
