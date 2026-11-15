@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17; v1.2.0 (the worktree door below) 2026-09-21; v1.3.0 (the 2026-09-23 work below — close-is-quit through drawn-row caching; `docs/releases/v1.3.0.md`) 2026-09-23; v1.4.0 (the project shelf + project-tab drag below; `docs/releases/v1.4.0.md`) 2026-09-24; v1.4.1 (a fresh prompt never titles a tab; the Landing's recent dot is gone) 2026-09-25; v1.4.2 (a folder's tabs share the width its label sets, so a short title reaches its `+`) 2026-09-26; v1.4.3 (Atelier brings its own hooks, SessionStart, Settings → Sounds — below) 2026-09-26; v1.4.4 (an inline rename widens its tab as you type, grow-only) 2026-09-26; v1.4.5 (⌘-clicking a path opens the file — below) 2026-09-30; v1.4.6 (pinned folders sit at the top and slide — below) 2026-10-01; v1.4.7 (a project tab's dots follow the bar — below) 2026-10-07; v1.4.8 (every live agent wears a dot, a cut-off turn comes back hollow, blue breathes — below; `docs/releases/v1.4.8.md`) 2026-10-07; v1.4.9 (a worktree never names the project — below) 2026-10-07; v1.4.10 (the frames hold their ground, no Landing ghost, one Atelier per state directory — below) 2026-10-10; v1.4.11 (the selected project is a raised chip, folder labels slant, folders sit closer — below) 2026-10-10; v1.4.12 (the selected project is a pill and its `×` always shows — below) 2026-10-11; v1.4.13 (a project's last session closing closes the project — below) 2026-10-12; v1.4.14 (bigger dots, a stronger ring — below) 2026-10-12; v1.4.15 (a turn waiting on its background agents stays blue — below) 2026-10-12; v1.5.0 (the security pass; remote sessions removed — below; `docs/releases/v1.5.0.md`, `docs/devlog/2026-10-20-security-hardening.md`) 2026-10-20; v1.5.1 (the explorer stops leaking disclosure triangles — below) 2026-10-23. Milestones 0, 1 and 2 built (M1.1–M1.6,
+**v1.0.0 tagged 2026-09-16; v1.1.0 (the post-release tweaks below) 2026-09-17; v1.2.0 (the worktree door below) 2026-09-21; v1.3.0 (the 2026-09-23 work below — close-is-quit through drawn-row caching; `docs/releases/v1.3.0.md`) 2026-09-23; v1.4.0 (the project shelf + project-tab drag below; `docs/releases/v1.4.0.md`) 2026-09-24; v1.4.1 (a fresh prompt never titles a tab; the Landing's recent dot is gone) 2026-09-25; v1.4.2 (a folder's tabs share the width its label sets, so a short title reaches its `+`) 2026-09-26; v1.4.3 (Atelier brings its own hooks, SessionStart, Settings → Sounds — below) 2026-09-26; v1.4.4 (an inline rename widens its tab as you type, grow-only) 2026-09-26; v1.4.5 (⌘-clicking a path opens the file — below) 2026-09-30; v1.4.6 (pinned folders sit at the top and slide — below) 2026-10-01; v1.4.7 (a project tab's dots follow the bar — below) 2026-10-07; v1.4.8 (every live agent wears a dot, a cut-off turn comes back hollow, blue breathes — below; `docs/releases/v1.4.8.md`) 2026-10-07; v1.4.9 (a worktree never names the project — below) 2026-10-07; v1.4.10 (the frames hold their ground, no Landing ghost, one Atelier per state directory — below) 2026-10-10; v1.4.11 (the selected project is a raised chip, folder labels slant, folders sit closer — below) 2026-10-10; v1.4.12 (the selected project is a pill and its `×` always shows — below) 2026-10-11; v1.4.13 (a project's last session closing closes the project — below) 2026-10-12; v1.4.14 (bigger dots, a stronger ring — below) 2026-10-12; v1.4.15 (a turn waiting on its background agents stays blue — below) 2026-10-12; v1.5.0 (the security pass; remote sessions removed — below; `docs/releases/v1.5.0.md`, `docs/devlog/2026-10-20-security-hardening.md`) 2026-10-20; v1.5.1 (the explorer stops leaking disclosure triangles — below) 2026-10-23; v1.6.0 (a selection drag scrolls, the editor's slot takes a second shell, a repo opens on its README — below; `docs/releases/v1.6.0.md`) prepared 2026-11-15 on `feat/terminal-reach`, **not yet merged, tagged or released**. Milestones 0, 1 and 2 built (M1.1–M1.6,
 M2.1–M2.6 landed); polish pass (docs/POLISH_PLAN.md) built through all
 phases — 0 (foundation tokens), 1 (cockpit), 2 (distances), 3 (arrivals),
 4 (overlay physiology).** Read `VISION.md` (the
@@ -771,6 +771,67 @@ alone does nothing. Measure the lag in `/usr/bin/log show`, from
 WindowServer's `Making … the front process` to the app's
 `TUINSCursorUIController activate`; count the triangles with
 `heap <pid> | grep NSOutlineButtonCell`.
+
+**Terminals reach what's off screen** (2026-11-15, v1.6.0, owner ask:
+"when scrolling in a terminal, I need to be able to scroll to lines
+offscreen"). SwiftTerm patch 14, all of it the local-scrollback path —
+a full-screen program with mouse reporting on (the owner's Claude) still
+owns its own viewport and selection. A selection drag held past a pane's
+top or bottom edge scrolls that way and carries the selection along:
+upstream's autoscroll timer was never scheduled, so a drag selected rows
+it never showed. The wheel mid-drag extends the selection too. Local
+scrollback moves by the line (trackpad points against the cell height
+with the 1.5 feel multiplier the forwarded route already had; a wheel
+notch is 3 lines) where every event used to move at least a line and a
+fast one a page. Panes keep 10,000 lines (`FreezableTerminalView.scrollbackLines`;
+SwiftTerm's default was 500). The trackpad feel in the shell is new and
+awaits an owner feel-check. Measured in a background test instance:
+30 wheel events of 4pt moved 9 lines (30 before), a drag held 20pt past
+the top for 1s scrolled 41 lines and selected 51.
+
+**The editor's slot takes a second shell** (2026-11-15, v1.6.0, owner
+ask: "turn the code editor into a second terminal sometimes"). The shape
+stays three panes; only the top-left pane's tenant changes
+(`Session.EditorSlot`, `secondShellPane`, `editorSlotPane`). `⌃`` (View →
+Terminal in Editor Pane) follows VSCode's rule for that chord
+(`ProjectController.editorTerminalStep`): show the terminal; if it is up
+and focus is elsewhere, go to it; from inside it, put it away. The bar's
+terminal glyph beside the layout toggle (outlined / filled) and the
+palette always trade. The shell is a login zsh on the session's root,
+spawned once its pane has its size; it and the editor each keep their
+state while the other is up; `exit` closes it and hands the slot back.
+Asking for the editor — ⌘P, ⌘O, ⌘⇧F, ⌘⇧E, ⌘B, F12 — brings it back
+(`bringEditorForward`). From Split the chord means Triptych with the
+terminal up. The slot rides `session.json` (`PersistedSession.editorSlot`),
+the shell coming back fresh. **The main shell respawns** too: `exit` there
+used to leave a dead pane for good; a fresh shell now takes it one
+main-queue turn after the exit (SwiftTerm finishes tearing the old
+process down *after* its `processTerminated` callback — a shell started
+inside the callback comes up deaf), unless the last one died within 2s
+of starting (a broken rc file).
+
+**A repo opens on its README** (2026-11-15, v1.6.0, owner ask). A session
+with nothing in its editor — promoted, a new sibling, or restored without
+a file — opens the root's README (Markdown first, any case), else
+CLAUDE.md, else AGENTS.md (`Session.defaultFile(in:)`), as a *preview*:
+read-only, wrapped, the tree wide beside it, not persisted as the
+session's file until you enter it. Regular files up to 2MB only.
+
+Test-harness notes from this pass: the `snapshot` debug action paints no
+terminal text while the editor has a file open or the second shell is
+up — read a pane with `probe:text=<agent|shell|second>[,n]`, or capture
+the real window, occluded or not, without activating anything:
+`screencapture -x -o -l<windowid>` (the id from `CGWindowListCopyWindowInfo`
+by pid). New probes, none of which activate the app: `probe:slot` (the
+slot, panes, focus, the editor's file), `probe:second=<text>` (type into
+the second shell), `probe:seldrag=<pane>,overshoot,ms` (a selection drag
+held past an edge; releases without copying), `probe:key=<char>,…,menu`
+(hands the key-down to the main menu as a key equivalent and reports
+whether an item took it; `backtick` is a named key), `probe:quit` (the
+real ⌘Q — guard, snapshot, teardown — so a test's `session.json` gets
+written and its agents die with it), and `probe:scroll` now reports the
+top row before and after. While the editor is swapped out its own
+`window` is nil — probes find terminals through `probePane`.
 
 ## Commands
 
