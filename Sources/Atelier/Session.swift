@@ -80,16 +80,22 @@ final class Session: NSObject, NSSplitViewDelegate {
     enum EditorSlot: String { case editor, terminal }
     private(set) var editorSlot: EditorSlot = .editor
 
-    /// The second shell. Made the first time the slot asks for it; it
-    /// leaves when its process does (`exit`, ⌃D), handing the slot back.
-    private(set) var secondShellPane: TerminalPane?
+    /// The second shell, in its host (the rail with the way back). Made
+    /// the first time the slot asks for it; it leaves when its process
+    /// does (`exit`, ⌃D), handing the slot back.
+    private var secondShellHost: SecondShellHost?
+    var secondShellPane: TerminalPane? { secondShellHost?.pane }
     private var secondShellStarted = false
 
     /// The pane in the editor's slot right now.
     var editorSlotPane: WorkspacePane {
-        if editorSlot == .terminal, let secondShellPane { return secondShellPane }
+        if editorSlot == .terminal, let secondShellHost { return secondShellHost }
         return editorPane
     }
+
+    /// A button in the slot asked for the other tenant: the tree rail's
+    /// terminal button, or the terminal rail's way back.
+    var onEditorSlotToggleRequested: (() -> Void)?
 
     /// Every terminal this session owns, the second shell included.
     private var terminalPanes: [TerminalPane] {
@@ -336,7 +342,8 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// file that is already open.
     private func openDefaultFile() {
         guard editorPane.filePath == nil, let path = Session.defaultFile(in: cwd) else { return }
-        try? editorPane.open(path: path, preview: true)
+        // Rendered: it is there to be read (owner call 2026-11-15).
+        try? editorPane.open(path: path, preview: true, rendered: true)
     }
 
     /// The file a repo introduces itself with, by name, whatever its case:
@@ -370,19 +377,21 @@ final class Session: NSObject, NSSplitViewDelegate {
     func setEditorSlot(_ slot: EditorSlot) {
         guard state == .ide, slot != editorSlot else { return }
         editorSlot = slot
-        if slot == .terminal, secondShellPane == nil { makeSecondShell() }
+        if slot == .terminal, secondShellHost == nil { makeSecondShell() }
         rebuildLayout()
         startSecondShell()
     }
 
     private func makeSecondShell() {
-        let pane = TerminalPane()
-        pane.onProcessTerminated = { [weak self, weak pane] _ in
-            guard let self, let pane else { return }
-            self.secondShellExited(pane)
+        let host = SecondShellHost()
+        host.onBack = { [weak self] in self?.onEditorSlotToggleRequested?() }
+        host.pane.onProcessTerminated = { [weak self, weak host] _ in
+            guard let self, let host else { return }
+            self.secondShellExited(host)
         }
-        secondShellPane = pane
+        secondShellHost = host
         secondShellStarted = false
+        editorPane.secondShellIsLive = true
     }
 
     /// Spawn the second shell once it is on screen — never while Split has
@@ -390,19 +399,20 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// zsh draws its first prompt at the right width (the PROMPT_SP lesson,
     /// 2026-10-08).
     private func startSecondShell() {
-        guard shellStarted, !secondShellStarted, let pane = secondShellPane, pane.superview != nil else { return }
+        guard shellStarted, !secondShellStarted, let host = secondShellHost, host.superview != nil else { return }
         secondShellStarted = true
         container.layoutSubtreeIfNeeded()
-        pane.start(executable: "/bin/zsh", args: ["-l"], cwd: cwd)
+        host.pane.start(executable: "/bin/zsh", args: ["-l"], cwd: cwd)
     }
 
     /// `exit` in the second shell closes it: the editor has its slot back.
-    private func secondShellExited(_ pane: TerminalPane) {
-        guard !intentionalTeardown, pane === secondShellPane else { return }
-        let hadFocus = container.window?.firstResponder === pane.terminal
-        secondShellPane = nil
+    private func secondShellExited(_ host: SecondShellHost) {
+        guard !intentionalTeardown, host === secondShellHost else { return }
+        let hadFocus = container.window?.firstResponder === host.pane.terminal
+        secondShellHost = nil
         secondShellStarted = false
-        pane.removeFromSuperview()
+        editorPane.secondShellIsLive = false
+        host.removeFromSuperview()
         if editorSlot == .terminal {
             editorSlot = .editor
             rebuildLayout()
@@ -788,7 +798,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         }
         liveSplits.removeAll()
         var panes: [NSView] = [editorPane, shellPane, agentPane]
-        if let secondShellPane { panes.append(secondShellPane) }
+        if let secondShellHost { panes.append(secondShellHost) }
         if let landingView { panes.append(landingView) }
         for pane in panes { pane.removeFromSuperview() }
         rootView?.removeFromSuperview()

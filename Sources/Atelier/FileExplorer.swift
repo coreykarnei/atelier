@@ -77,6 +77,28 @@ final class FileExplorerView: NSView {
     /// top, centred in the rail's width.
     private let rail = HoverPadButton(frame: .zero)
     private let railChevron = NSImageView()
+    /// At the rail's foot (owner design 2026-11-15): the second terminal,
+    /// in the editor's place. Only the folded tree has it — unfolded, that
+    /// corner belongs to the file rows. Its twin, the way back, sits at the
+    /// same spot in the terminal's own rail (`SecondShellHost`).
+    private let terminalButton = HoverPadButton(frame: .zero)
+    /// The rail's terminal button was pressed.
+    var onTerminal: (() -> Void)?
+    /// A second shell is already running behind the editor: the button
+    /// goes to it, so its glyph drops the `+` that promises a new one.
+    var terminalIsLive = false {
+        didSet {
+            guard terminalIsLive != oldValue else { return }
+            refreshTerminalButton()
+        }
+    }
+
+    private func refreshTerminalButton() {
+        terminalButton.image = SlotGlyph.terminal(adding: !terminalIsLive)
+        terminalButton.toolTip = terminalIsLive ? "Terminal (⌃`)" : "New Terminal Here (⌃`)"
+    }
+
+    @objc private func terminalClicked() { onTerminal?() }
 
     /// A text hit was chosen (search bar, Text mode): open at the hit.
     var onOpenAt: ((URL, SearchHit) -> Void)?
@@ -192,6 +214,7 @@ final class FileExplorerView: NSView {
         searchHost.isHidden = collapsed
         rail.isHidden = !collapsed
         railChevron.isHidden = !collapsed
+        terminalButton.isHidden = !collapsed
         updateSticky()
     }
 
@@ -389,14 +412,28 @@ final class FileExplorerView: NSView {
         railChevron.isHidden = true
         addSubview(rail)
         addSubview(railChevron)
+        refreshTerminalButton()
+        terminalButton.contentTintColor = Theme.chromeText
+        terminalButton.setAccessibilityLabel("Terminal in the editor pane")
+        terminalButton.target = self
+        terminalButton.action = #selector(terminalClicked)
+        terminalButton.translatesAutoresizingMaskIntoConstraints = false
+        terminalButton.isHidden = true
+        addSubview(terminalButton)
 
         searchHostHeight = searchHost.heightAnchor.constraint(equalToConstant: 0)
         searchHostBottom = searchHost.bottomAnchor.constraint(equalTo: bottomAnchor)
         NSLayoutConstraint.activate([
             rail.topAnchor.constraint(equalTo: topAnchor),
             rail.leadingAnchor.constraint(equalTo: leadingAnchor),
-            rail.bottomAnchor.constraint(equalTo: bottomAnchor),
+            // The tall button stops short of the foot, so hovering the
+            // terminal button lights one pad, not two.
+            rail.bottomAnchor.constraint(equalTo: terminalButton.topAnchor, constant: -SecondShellHost.footButtonInset),
             rail.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -1),
+            terminalButton.centerXAnchor.constraint(equalTo: rail.centerXAnchor),
+            terminalButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -SecondShellHost.footButtonInset),
+            terminalButton.widthAnchor.constraint(equalToConstant: SecondShellHost.footButtonSize),
+            terminalButton.heightAnchor.constraint(equalToConstant: SecondShellHost.footButtonSize),
             railChevron.centerXAnchor.constraint(equalTo: rail.centerXAnchor),
             railChevron.topAnchor.constraint(equalTo: topAnchor, constant: 6),
             railChevron.widthAnchor.constraint(equalToConstant: 14),

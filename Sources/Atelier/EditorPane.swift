@@ -34,6 +34,13 @@ final class EditorPane: NSView, WorkspacePane {
     var onOpenAtRequest: ((URL, SearchHit) -> Void)?
     /// Arrowing through sidebar search results: preview, optionally at a hit.
     var onPreviewRequest: ((URL, SearchHit?) -> Void)?
+    /// The folded tree's terminal button: the second shell, in this pane's place.
+    var onTerminalRequest: (() -> Void)?
+    /// A second shell is running behind this pane (the button's glyph says so).
+    var secondShellIsLive: Bool {
+        get { explorer.terminalIsLive }
+        set { explorer.terminalIsLive = newValue }
+    }
     /// Everything right of the tree: the empty-state line, then the header
     /// strip and the buffer (or, for markdown in Preview, the rendering).
     private let contentHost = NSView()
@@ -115,6 +122,12 @@ final class EditorPane: NSView, WorkspacePane {
         get { UserDefaults.standard.bool(forKey: Self.previewKey) }
         set { UserDefaults.standard.set(newValue, forKey: Self.previewKey) }
     }
+    /// This buffer's own answer, when the open came with one: the file a
+    /// session opens by default is there to be read, so it arrives rendered
+    /// whatever mode was last chosen (owner call 2026-11-15). Choosing a
+    /// mode in the header ends it, and no other open inherits it.
+    private var renderedOverride: Bool?
+    private var showsRendered: Bool { renderedOverride ?? previewMode }
     private var contentLeading: NSLayoutConstraint!
     private var explorerWidth: NSLayoutConstraint!
     /// The grab strip on the tree's edge — a few points straddling the
@@ -191,6 +204,7 @@ final class EditorPane: NSView, WorkspacePane {
         explorer.onOpenAt = { [weak self] url, hit in self?.onOpenAtRequest?(url, hit) }
         explorer.onPreview = { [weak self] url, hit in self?.onPreviewRequest?(url, hit) }
         explorer.onRenamed = { [weak self] from, to in self?.fileRenamed(from: from, to: to) }
+        explorer.onTerminal = { [weak self] in self?.onTerminalRequest?() }
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
             selector: #selector(accessibilityDisplayChanged),
@@ -293,6 +307,7 @@ final class EditorPane: NSView, WorkspacePane {
         fileHeader.onForward = { [weak self] in self?.goForward() }
         fileHeader.onModeChange = { [weak self] previewOn in
             guard let self else { return }
+            self.renderedOverride = nil
             self.previewMode = previewOn
             self.applyViewMode()
         }
@@ -427,7 +442,8 @@ final class EditorPane: NSView, WorkspacePane {
         let panes = probeTerminals(in: window).filter { !$0.isHiddenOrHasHiddenAncestor }
         if name == "agent" { return panes.max { probeX($0) < probeX($1) } }
         guard let left = panes.map(probeX).min() else { return nil }
-        let column = panes.filter { abs(probeX($0) - left) < 1 }
+        // The second shell sits a rail's width in from the shell below it.
+        let column = panes.filter { probeX($0) - left <= FileExplorerView.railWidth + 1 }
             .sorted { $0.convert($0.bounds, to: nil).minY < $1.convert($1.bounds, to: nil).minY }
         if name == "second" { return column.count > 1 ? column.last : nil }
         return column.first
@@ -1116,7 +1132,10 @@ final class EditorPane: NSView, WorkspacePane {
     /// (double-click/↩: unwrap, fold the tree) or simply start typing.
     /// Committing the same path afterwards flips configuration only — the
     /// text doesn't reload.
-    func open(path: String, preview: Bool = false) throws {
+    ///
+    /// `rendered`: for Markdown, show the rendering (or the text) this once,
+    /// whatever mode was last chosen; nil follows that choice.
+    func open(path: String, preview: Bool = false, rendered: Bool? = nil) throws {
         // Clicking the file that's already here changes nothing — a committed
         // buffer must not fall back to a read-only preview of itself.
         if preview, filePath == path { return }
@@ -1139,6 +1158,9 @@ final class EditorPane: NSView, WorkspacePane {
         }
         isPreview = preview
         isWrapped = preview
+        renderedOverride = rendered
+        self.preview.baseDirectory = (path as NSString).deletingLastPathComponent
+        self.preview.imageRoot = lspRoot
 
         if let controller {
             controller.configuration = Self.configuration(wrap: preview)
@@ -1194,8 +1216,9 @@ final class EditorPane: NSView, WorkspacePane {
         bufferLanguage = language
         watchFile(path)
         setFileHeaderVisible(true)
-        fileHeader.configure(name: displayName(for: path), markdown: isMarkdown, previewOn: isMarkdown && previewMode)
+        fileHeader.configure(name: displayName(for: path), markdown: isMarkdown, previewOn: isMarkdown && showsRendered)
         applyViewMode()
+        self.preview.scrollToTop()
 
         if !preview {
             recordVisit(path)
@@ -1253,7 +1276,9 @@ final class EditorPane: NSView, WorkspacePane {
         filePath = to
         watchFile(to)
         explorer.reveal(path: to, scroll: false)
-        fileHeader.configure(name: displayName(for: to), markdown: isMarkdown, previewOn: isMarkdown && previewMode)
+        preview.baseDirectory = (to as NSString).deletingLastPathComponent
+        fileHeader.configure(name: displayName(for: to), markdown: isMarkdown, previewOn: isMarkdown && showsRendered)
+        applyViewMode()
         if !isPreview { announceOpen(path: to, text: controller.text) }
     }
 
@@ -1315,6 +1340,10 @@ final class EditorPane: NSView, WorkspacePane {
         let origin = controller.scrollView?.contentView.bounds.origin
         controller.text = text
         isDirty = false
+        // The rendering follows the file too: a README sits open rendered
+        // while an agent rewrites it, and the reload above doesn't pass
+        // through the typing path that re-renders.
+        if !preview.isHidden { preview.render(markdown: text) }
         if !cursors.isEmpty { controller.setCursorPositions(cursors) }
         if let origin, let clip = controller.scrollView?.contentView {
             clip.scroll(to: origin)
@@ -1431,7 +1460,7 @@ final class EditorPane: NSView, WorkspacePane {
     /// Text or Preview: the rendering stands in for the buffer for markdown
     /// files in Preview; everything else is the buffer.
     private func applyViewMode() {
-        let showPreview = isMarkdown && previewMode && controller != nil
+        let showPreview = isMarkdown && showsRendered && controller != nil
         preview.isHidden = !showPreview
         controller?.view.isHidden = showPreview
         if showPreview, let controller { preview.render(markdown: controller.text) }

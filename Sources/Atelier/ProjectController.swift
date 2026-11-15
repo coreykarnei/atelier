@@ -342,6 +342,14 @@ final class ProjectController: NSObject, BottomBarDelegate {
             self.updateBottomBar()
         }
         session.onAttentionChanged = { [weak self] in self?.updateBottomBar() }
+        // The slot's own buttons — the tree rail's terminal, the terminal
+        // rail's way back — trade tenants, as the bar's glyph does.
+        let trade: () -> Void = { [weak self, weak session] in
+            guard let self, let session, session === self.activeSession else { return }
+            self.toggleEditorTerminal()
+        }
+        session.editorPane.onTerminalRequest = trade
+        session.onEditorSlotToggleRequested = trade
         session.onEditorSlotChanged = { [weak self] in
             self?.updateBottomBar()
             self?.refreshFocusArticulation()
@@ -622,6 +630,23 @@ final class ProjectController: NSObject, BottomBarDelegate {
             }
             window?.contentView.map(walk)
             try? (lines.joined(separator: "\n") + "\n").write(
+                toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8
+            )
+            return
+        }
+        if query == "probe:rail" {
+            // Press the slot's own button — the folded tree's terminal, or
+            // the terminal rail's way back — whichever is on screen.
+            func find(_ view: NSView) -> NSButton? {
+                if let button = view as? HoverPadButton, !button.isHiddenOrHasHiddenAncestor,
+                   ["Terminal in the editor pane", "Back to the editor"].contains(button.accessibilityLabel() ?? "") {
+                    return button
+                }
+                return view.subviews.lazy.compactMap(find).first
+            }
+            let button = activeSession.flatMap { find($0.container) }
+            button?.performClick(nil)
+            try? "rail button: \(button?.accessibilityLabel() ?? "none on screen")\n".write(
                 toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8
             )
             return
