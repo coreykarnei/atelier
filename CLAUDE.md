@@ -797,7 +797,19 @@ Terminal in Editor Pane) follows VSCode's rule for that chord
 (`ProjectController.editorTerminalStep`): show the terminal; if it is up
 and focus is elsewhere, go to it; from inside it, put it away. The bar's
 terminal glyph beside the layout toggle (outlined / filled) and the
-palette always trade. The shell is a login zsh on the session's root,
+palette always trade. **The slot has its own buttons** (owner design, same
+day: "a terminal + button, at the very bottom of the left side filesystem
+pane, only when the pane is closed", and "a clear way to get back"): the
+folded tree's rail carries a terminal button at its foot
+(`FileExplorerView.terminalButton`; the tall expand button stops short of
+it so one pad lights, not two), and the second shell lives in
+`SecondShellHost` — a rail of the tree rail's width and coat down its left
+edge with the way back (`</>`) on the same pixels, so the pointer undoes
+what it just did without moving. `SlotGlyph` draws them: the terminal
+wears a `+` (the `⎇+`'s halo construction) only while pressing it would
+start a shell, and drops it once one is alive behind the editor. A rail's
+hairline must sit on the rail's own coat: 6% white over bare blur reads as
+a bright line. The shell is a login zsh on the session's root,
 spawned once its pane has its size; it and the editor each keep their
 state while the other is up; `exit` closes it and hands the slot back.
 Asking for the editor — ⌘P, ⌘O, ⌘⇧F, ⌘⇧E, ⌘B, F12 — brings it back
@@ -815,7 +827,32 @@ with nothing in its editor — promoted, a new sibling, or restored without
 a file — opens the root's README (Markdown first, any case), else
 CLAUDE.md, else AGENTS.md (`Session.defaultFile(in:)`), as a *preview*:
 read-only, wrapped, the tree wide beside it, not persisted as the
-session's file until you enter it. Regular files up to 2MB only.
+session's file until you enter it. Regular files up to 2MB only. It
+arrives **rendered** (owner report, same day: "it puts it in text mode
+instead of view mode"): `EditorPane.open(path:preview:rendered:)` carries
+a per-buffer answer over the Text/Preview preference (`renderedOverride`),
+which ends the moment a mode is picked in the header and which no other
+open inherits.
+
+**The Markdown preview draws pictures** (2026-11-15, v1.6.0, owner
+report: the README's image didn't render). Foundation's parser hands raw
+HTML back as text and drops an image's address once it sits inside a
+link, so `MarkdownSource` readies the document first: code (fenced blocks,
+inline spans) is shelved untouched, every image — Markdown's or an
+`<img>` — is set aside behind a private-use marker that survives parsing,
+and the layout HTML READMEs lean on (`<a>`, `<p align>`, `<picture>`,
+`<br>`, `<h1>`, `<b>`/`<i>`/`<code>`, comments) is folded into Markdown.
+`ImageResolver` draws an image only when it is a regular file inside the
+session's root after symlinks resolve (relative to the document; a
+leading `/` is the root, as on GitHub), cached by path and modification
+date; `FittedImageAttachment` scales it to the column at layout, honouring
+a `width="128"`. **A picture on the network is never fetched** — a README
+now opens by default, and opening a folder must not phone anyone — and
+shows its alt text, muted, linked to its address. Two fixes rode along:
+a clean buffer reloaded from disk re-renders the preview (it went stale
+while an agent rewrote the file), and a newly opened document is pinned
+to its top through the first real layout (`scrollToTop`; rendered before
+its pane had a size, it could come up part-way down).
 
 Test-harness notes from this pass: the `snapshot` debug action paints no
 terminal text while the editor has a file open or the second shell is
@@ -827,7 +864,8 @@ slot, panes, focus, the editor's file), `probe:second=<text>` (type into
 the second shell), `probe:seldrag=<pane>,overshoot,ms` (a selection drag
 held past an edge; releases without copying), `probe:key=<char>,…,menu`
 (hands the key-down to the main menu as a key equivalent and reports
-whether an item took it; `backtick` is a named key), `probe:quit` (the
+whether an item took it; `backtick` is a named key), `probe:rail` (presses
+the slot's own button, whichever rail is on screen), `probe:quit` (the
 real ⌘Q — guard, snapshot, teardown — so a test's `session.json` gets
 written and its agents die with it), and `probe:scroll` now reports the
 top row before and after. While the editor is swapped out its own
