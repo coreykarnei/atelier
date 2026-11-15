@@ -70,6 +70,35 @@ final class Session: NSObject, NSSplitViewDelegate {
     let editorPane = EditorPane(frame: .zero)
     let shellPane = TerminalPane()
     let agentPane = TerminalPane(deguttersCopy: true)
+
+    /// What the editor's slot holds (2026-11-15, owner ask: "turn the code
+    /// editor into a second terminal sometimes"). The shape stays fixed —
+    /// three panes, the same dividers — and only the top-left pane's tenant
+    /// changes: the editor, or a second shell on the session's root. Each
+    /// keeps its state while the other is up (the buffer and its tree; the
+    /// shell and its scrollback), the way the editor does through Split.
+    enum EditorSlot: String { case editor, terminal }
+    private(set) var editorSlot: EditorSlot = .editor
+
+    /// The second shell. Made the first time the slot asks for it; it
+    /// leaves when its process does (`exit`, ⌃D), handing the slot back.
+    private(set) var secondShellPane: TerminalPane?
+    private var secondShellStarted = false
+
+    /// The pane in the editor's slot right now.
+    var editorSlotPane: WorkspacePane {
+        if editorSlot == .terminal, let secondShellPane { return secondShellPane }
+        return editorPane
+    }
+
+    /// Every terminal this session owns, the second shell included.
+    private var terminalPanes: [TerminalPane] {
+        [shellPane, agentPane] + (secondShellPane.map { [$0] } ?? [])
+    }
+
+    /// The slot changed from inside the session (the second shell exited):
+    /// the bar and the focus must follow.
+    var onEditorSlotChanged: (() -> Void)?
     private var landingView: LandingView?
 
     /// The view the window shows for this session; holds the current split tree.
@@ -169,6 +198,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         super.init()
         container.translatesAutoresizingMaskIntoConstraints = false
         editorPane.setRoot(ideRoot)
+        openDefaultFile()
         rebuildLayout()
     }
 
@@ -214,6 +244,11 @@ final class Session: NSObject, NSSplitViewDelegate {
         self.dividers = restored.dividers.mapValues { CGFloat($0) }
         super.init()
         container.translatesAutoresizingMaskIntoConstraints = false
+        // The slot comes back as it was; its shell is a fresh one.
+        if state == .ide, restored.editorSlot == EditorSlot.terminal.rawValue {
+            editorSlot = .terminal
+            makeSecondShell()
+        }
 
         if state == .landing {
             let landing = LandingView(defaultFolder: cwd)
@@ -231,6 +266,7 @@ final class Session: NSObject, NSSplitViewDelegate {
            FileManager.default.fileExists(atPath: file) {
             try? editorPane.open(path: file)
         }
+        if state == .ide { openDefaultFile() }
     }
 
     /// Snapshot for the session store.
@@ -244,7 +280,8 @@ final class Session: NSObject, NSSplitViewDelegate {
             claudeSessionId: claudeSessionId,
             dividers: dividers.mapValues { Double($0) },
             openFile: editorPane.committedFilePath,
-            attention: attention.rawValue
+            attention: attention.rawValue,
+            editorSlot: editorSlot == .terminal ? editorSlot.rawValue : nil
         )
     }
 
@@ -261,8 +298,117 @@ final class Session: NSObject, NSSplitViewDelegate {
         guard !shellStarted else { return }
         shellStarted = true
         agentPane.terminal.onInput = { [weak self] bytes in self?.agentInput(bytes) }
-        shellPane.start(executable: "/bin/zsh", args: ["-l"], cwd: cwd)
+        shellPane.onProcessTerminated = { [weak self] _ in self?.shellExited() }
+        spawnShell()
+        startSecondShell()
         if state == .ide { startAgent() }
+    }
+
+    private var shellSpawnedAt = Date.distantPast
+
+    private func spawnShell() {
+        shellSpawnedAt = Date()
+        shellPane.start(executable: "/bin/zsh", args: ["-l"], cwd: cwd)
+    }
+
+    /// The shell ended (`exit`, ⌃D). Its pane is part of the shape and
+    /// can't leave, so a fresh shell takes it, on the session's root, under
+    /// what the last one printed. One that died on arrival stays down — a
+    /// broken rc file would otherwise respawn without end.
+    private func shellExited() {
+        guard !intentionalTeardown, Date().timeIntervalSince(shellSpawnedAt) > 2 else { return }
+        // A turn later: SwiftTerm announces the exit and *then* finishes
+        // tearing the process down (marks it stopped, cancels its exit
+        // watch) — a shell started inside the callback inherits that and
+        // comes up deaf to typing.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.intentionalTeardown else { return }
+            self.spawnShell()
+        }
+    }
+
+    // MARK: The editor's slot
+
+    /// The repo's own introduction is what a fresh editor shows (2026-11-15,
+    /// owner ask): its README, else its CLAUDE.md — as a preview, the tree's
+    /// kind of open: read-only, wrapped, the tree still wide beside it, and
+    /// not the session's file until you enter it. Nothing here replaces a
+    /// file that is already open.
+    private func openDefaultFile() {
+        guard editorPane.filePath == nil, let path = Session.defaultFile(in: cwd) else { return }
+        try? editorPane.open(path: path, preview: true)
+    }
+
+    /// The file a repo introduces itself with, by name, whatever its case:
+    /// a README (Markdown first), else CLAUDE.md, else AGENTS.md. Top level
+    /// only, regular files only, and nothing too big to be a page of prose.
+    static func defaultFile(in root: String) -> String? {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: root) else { return nil }
+        let order = ["readme.md", "readme.markdown", "readme.mdx", "readme", "readme.txt", "readme.rst",
+                     "claude.md", "agents.md"]
+        func rank(_ name: String) -> Int? {
+            let lower = name.lowercased()
+            if let exact = order.firstIndex(of: lower) { return exact * 2 }
+            // README.org, README.adoc…: after the READMEs named above.
+            return lower.hasPrefix("readme.") ? order.firstIndex(of: "readme.rst")! * 2 + 1 : nil
+        }
+        let candidates = names.compactMap { name in rank(name).map { (rank: $0, name: name) } }
+            .sorted { ($0.rank, $0.name) < ($1.rank, $1.name) }
+        for candidate in candidates {
+            let path = (root as NSString).appendingPathComponent(candidate.name)
+            guard let attributes = try? FileManager.default.attributesOfItem(atPath: (path as NSString).resolvingSymlinksInPath),
+                  attributes[.type] as? FileAttributeType == .typeRegular,
+                  let size = attributes[.size] as? Int, size > 0, size <= 2_000_000 else { continue }
+            return path
+        }
+        return nil
+    }
+
+    /// Put the editor or the second shell in the editor's slot. Triptych
+    /// shows the change at once; in Split the slot is off screen and simply
+    /// holds the choice.
+    func setEditorSlot(_ slot: EditorSlot) {
+        guard state == .ide, slot != editorSlot else { return }
+        editorSlot = slot
+        if slot == .terminal, secondShellPane == nil { makeSecondShell() }
+        rebuildLayout()
+        startSecondShell()
+    }
+
+    private func makeSecondShell() {
+        let pane = TerminalPane()
+        pane.onProcessTerminated = { [weak self, weak pane] _ in
+            guard let self, let pane else { return }
+            self.secondShellExited(pane)
+        }
+        secondShellPane = pane
+        secondShellStarted = false
+    }
+
+    /// Spawn the second shell once it is on screen — never while Split has
+    /// its slot folded away. It starts with its pane already at size, so
+    /// zsh draws its first prompt at the right width (the PROMPT_SP lesson,
+    /// 2026-10-08).
+    private func startSecondShell() {
+        guard shellStarted, !secondShellStarted, let pane = secondShellPane, pane.superview != nil else { return }
+        secondShellStarted = true
+        container.layoutSubtreeIfNeeded()
+        pane.start(executable: "/bin/zsh", args: ["-l"], cwd: cwd)
+    }
+
+    /// `exit` in the second shell closes it: the editor has its slot back.
+    private func secondShellExited(_ pane: TerminalPane) {
+        guard !intentionalTeardown, pane === secondShellPane else { return }
+        let hadFocus = container.window?.firstResponder === pane.terminal
+        secondShellPane = nil
+        secondShellStarted = false
+        pane.removeFromSuperview()
+        if editorSlot == .terminal {
+            editorSlot = .editor
+            rebuildLayout()
+        }
+        if hadFocus { container.window?.makeFirstResponder(editorPane.focusView) }
+        onEditorSlotChanged?()
     }
 
     /// Promote this Landing into an IDE session rooted at `root`: re-root the shell,
@@ -276,6 +422,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         RecentsStore.record(root)
 
         editorPane.setRoot(root)
+        openDefaultFile()
         startAgent()
 
         rebuildLayout()
@@ -420,6 +567,7 @@ final class Session: NSObject, NSSplitViewDelegate {
     func terminate() {
         intentionalTeardown = true
         shellPane.terminate()
+        if secondShellStarted { secondShellPane?.terminate() }
         if agentStarted { agentPane.terminate() }
     }
 
@@ -450,7 +598,7 @@ final class Session: NSObject, NSSplitViewDelegate {
             return [landingView, shellPane].compactMap { $0 }
         case .ide:
             switch layoutMode {
-            case .triptych: return [editorPane, shellPane, agentPane]
+            case .triptych: return [editorSlotPane, shellPane, agentPane]
             case .split: return [agentPane, shellPane]
             }
         }
@@ -486,7 +634,7 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// so a background window would keep a solid block. Solid means "typing
     /// goes here", and in a non-key window it doesn't.
     func syncCaretFocus(firstResponder: NSResponder?, windowIsKey: Bool) {
-        for pane in [shellPane, agentPane] {
+        for pane in terminalPanes {
             let isFocused = (firstResponder as? NSView) === pane.terminal
             pane.terminal.hasFocus = windowIsKey && isFocused
         }
@@ -579,6 +727,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         guard state == .ide else { return }
         layoutMode = layoutMode.next
         rebuildLayout()
+        startSecondShell()
     }
 
     private func fraction(for slot: LayoutSlot) -> CGFloat {
@@ -598,12 +747,9 @@ final class Session: NSObject, NSSplitViewDelegate {
     /// observed as claude dying on a ⌘\ toggle. Only the final
     /// geometry may land.
     private func rebuildLayout() {
-        shellPane.terminal.resizeFrozen = true
-        agentPane.terminal.resizeFrozen = true
-        defer {
-            shellPane.terminal.resizeFrozen = false
-            agentPane.terminal.resizeFrozen = false
-        }
+        let frozen = terminalPanes
+        for pane in frozen { pane.terminal.resizeFrozen = true }
+        defer { for pane in frozen { pane.terminal.resizeFrozen = false } }
         tearDownCurrentLayout()
 
         let root: NSView
@@ -613,7 +759,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         case .ide:
             switch layoutMode {
             case .triptych:
-                let leftColumn = makeSplit(slot: LayoutSlots.triptychInner, vertical: false, first: editorPane, second: shellPane)
+                let leftColumn = makeSplit(slot: LayoutSlots.triptychInner, vertical: false, first: editorSlotPane, second: shellPane)
                 let outer = makeSplit(slot: LayoutSlots.triptychOuter, vertical: true, first: leftColumn, second: agentPane)
                 outer.installCornerHandle(inner: leftColumn)
                 root = outer
@@ -642,6 +788,7 @@ final class Session: NSObject, NSSplitViewDelegate {
         }
         liveSplits.removeAll()
         var panes: [NSView] = [editorPane, shellPane, agentPane]
+        if let secondShellPane { panes.append(secondShellPane) }
         if let landingView { panes.append(landingView) }
         for pane in panes { pane.removeFromSuperview() }
         rootView?.removeFromSuperview()
@@ -660,8 +807,7 @@ final class Session: NSObject, NSSplitViewDelegate {
             // §1.5 revised 2026-09-16 (owner call): the grid follows the
             // pointer live, the PTY hears about it at a throttled beat, and
             // the final size lands on release — see `resizeThrottled`.
-            self.shellPane.terminal.resizeThrottled = dragging
-            self.agentPane.terminal.resizeThrottled = dragging
+            for pane in self.terminalPanes { pane.terminal.resizeThrottled = dragging }
         }
         first.translatesAutoresizingMaskIntoConstraints = false
         second.translatesAutoresizingMaskIntoConstraints = false

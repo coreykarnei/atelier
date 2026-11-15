@@ -227,7 +227,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Dev-only workspace probes over `explorerSearch`, neither of which
     /// brings the app forward: `probe:projects` writes the project row (and
     /// the projects `⌘⇧T` could bring back) to probe.txt; `probe:menu=<sel>`
-    /// sends a menu action (`closeSession:`, `reopenSession:`) as its chord would.
+    /// sends a menu action (`closeSession:`, `reopenSession:`) as its chord would;
+    /// `probe:quit` quits as ⌘Q does.
     private func debugWorkspaceProbe(_ query: String) -> Bool {
         if query == "probe:projects" {
             var lines = projects.enumerated().map { index, project in
@@ -239,6 +240,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try? (lines.joined(separator: "\n") + "\n").write(
                 toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8
             )
+            return true
+        }
+        if query == "probe:quit" {
+            // ⌘Q without the chord: the real quit — guard, snapshot, teardown
+            // — with nothing brought forward (a posted ⌘Q activates the app).
+            NSApp.terminate(nil)
             return true
         }
         if query.hasPrefix("probe:menu=") {
@@ -371,6 +378,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func toggleLayout(_ sender: Any?) { keyController?.toggleLayout() }
+    @objc func toggleEditorTerminal(_ sender: Any?) { keyController?.stepEditorTerminal() }
 
     @objc func newSession(_ sender: Any?) { keyController?.requestNewSession() }
     @objc func newWorktreeSession(_ sender: Any?) { keyController?.bottomBarDidRequestWorktreeSession() }
@@ -411,6 +419,15 @@ extension AppDelegate: NSMenuItemValidation {
         if menuItem.action == #selector(toggleAutosave(_:)) {
             menuItem.state = Settings.autosave ? .on : .off
             return true
+        }
+        if menuItem.action == #selector(toggleEditorTerminal(_:)) {
+            // The title is what the chord will do from where you are.
+            switch keyController?.editorTerminalStep ?? .show {
+            case .show: menuItem.title = "Terminal in Editor Pane"
+            case .focus: menuItem.title = "Focus Terminal in Editor Pane"
+            case .hide: menuItem.title = "Back to Editor"
+            }
+            return keyController?.canUseEditor ?? false
         }
         if menuItem.action == #selector(newWorktreeSession(_:)) {
             return keyController?.canChooseWorktree ?? false

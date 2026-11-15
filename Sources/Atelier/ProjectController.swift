@@ -342,6 +342,10 @@ final class ProjectController: NSObject, BottomBarDelegate {
             self.updateBottomBar()
         }
         session.onAttentionChanged = { [weak self] in self?.updateBottomBar() }
+        session.onEditorSlotChanged = { [weak self] in
+            self?.updateBottomBar()
+            self?.refreshFocusArticulation()
+        }
         let insertAt = min(index ?? sessions.count, sessions.count)
         sessions.insert(session, at: insertAt)
         if processesStarted { session.start() }
@@ -622,6 +626,29 @@ final class ProjectController: NSObject, BottomBarDelegate {
             )
             return
         }
+        if query == "probe:slot" {
+            // The editor's slot and what it holds: which tenant, the panes on
+            // screen top-left first, where focus is, and the editor's file.
+            guard let session = activeSession else { return }
+            let responder = window?.firstResponder as? NSView
+            let focused = session.visiblePanes.firstIndex { pane in
+                guard let responder else { return false }
+                return responder === pane.focusView || responder.isDescendant(of: pane)
+            }
+            let editor = session.editorPane
+            let lines = [
+                "slot=\(session.editorSlot.rawValue) layout=\(session.layoutMode.rawValue) shows=\(editorSlotShowsTerminal)",
+                "panes=" + session.visiblePanes.map { String(describing: type(of: $0)) }.joined(separator: ","),
+                "second=\(session.secondShellPane.map { $0.hostedPid.map { "pid \($0)" } ?? "not started" } ?? "none")"
+                    + " shell=\(session.shellPane.hostedPid.map { "pid \($0)" } ?? "none")",
+                "focus=\(focused.map(String.init) ?? "-") (\(responder.map { String(describing: type(of: $0)) } ?? "nil"))",
+                "file=\(editor.filePath ?? "-") preview=\(editor.isPreview) committed=\(editor.committedFilePath ?? "-")",
+            ]
+            try? (lines.joined(separator: "\n") + "\n").write(
+                toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8
+            )
+            return
+        }
         activeSession?.editorPane.debugExplorer(query)
     }
     #endif
@@ -629,15 +656,75 @@ final class ProjectController: NSObject, BottomBarDelegate {
     /// ⌘⇧E — the sidebar search panel.
     func focusExplorerSearch() {
         guard let session = activeSession, session.state == .ide else { return }
-        if session.layoutMode == .split { toggleLayout() }
+        bringEditorForward(in: session)
         session.editorPane.focusExplorerSearch()
     }
 
     /// ⌘B — the editor's file tree, shown or hidden for every session.
+    /// With the second shell in the editor's slot the tree is off screen
+    /// with the editor, so the chord brings both back as they were left.
     func toggleExplorer() {
         guard let session = activeSession, session.state == .ide else { return }
+        if session.editorSlot == .terminal {
+            bringEditorForward(in: session)
+            focus(session.editorPane.focusView)
+            return
+        }
         session.editorPane.toggleExplorer()
         if session.layoutMode == .split { toggleLayout() }
+    }
+
+    /// Asking for the editor — a file, the tree, a search — puts it on
+    /// screen: back in its slot if the second shell had it, and out of
+    /// Split.
+    private func bringEditorForward(in session: Session) {
+        if session.editorSlot == .terminal {
+            session.setEditorSlot(.editor)
+            updateBottomBar()
+            refreshFocusArticulation()
+        }
+        if session === activeSession, session.layoutMode == .split { toggleLayout() }
+    }
+
+    /// What `⌃`` does from here — VSCode's rule for the chord it borrows:
+    /// the terminal comes up; if it is up but you are elsewhere, the chord
+    /// takes you to it; from inside it, the chord puts it away.
+    enum EditorTerminalStep { case show, focus, hide }
+
+    var editorTerminalStep: EditorTerminalStep {
+        guard editorSlotShowsTerminal, let pane = activeSession?.secondShellPane else { return .show }
+        return window?.firstResponder === pane.terminal ? .hide : .focus
+    }
+
+    /// `⌃`` and its menu item: one step of `editorTerminalStep`.
+    func stepEditorTerminal() {
+        guard let session = activeSession, session.state == .ide else { return }
+        if editorTerminalStep == .focus {
+            focus(session.editorSlotPane.focusView)
+            session.glowFocus()
+        } else {
+            toggleEditorTerminal()
+        }
+    }
+
+    /// The editor's slot trades the editor for a second shell and back
+    /// (2026-11-15, owner ask) — the bar's glyph and the palette, which
+    /// always trade. From Split, where that slot is folded away, it means
+    /// "the terminal, up there": Triptych, with the shell in the slot.
+    /// Focus goes to whatever arrives.
+    func toggleEditorTerminal() {
+        guard let session = activeSession, session.state == .ide else { return }
+        session.setEditorSlot(editorSlotShowsTerminal ? .editor : .terminal)
+        if session.layoutMode == .split { session.toggleLayout() }
+        updateBottomBar()
+        focus(session.editorSlotPane.focusView)
+        refreshFocusArticulation()
+    }
+
+    /// The second shell is what the editor's slot shows on screen now.
+    var editorSlotShowsTerminal: Bool {
+        guard let session = activeSession, session.state == .ide else { return false }
+        return session.layoutMode == .triptych && session.editorSlot == .terminal
     }
 
     /// `⌘O` — open a file into the editor pane. The panel roots at the
@@ -676,9 +763,9 @@ final class ProjectController: NSObject, BottomBarDelegate {
                 } else if let cursor {
                     session.editorPane.reveal(line: cursor.line, column: cursor.column)
                 }
-                if session === self.activeSession {
-                    if session.layoutMode == .split { self.toggleLayout() }
-                    if !preview { self.focus(session.editorPane.focusView) }
+                self.bringEditorForward(in: session)
+                if session === self.activeSession, !preview {
+                    self.focus(session.editorPane.focusView)
                 }
             } catch {
                 self.presentError(title: "Couldn't open \(url.lastPathComponent)", error: error)
@@ -989,7 +1076,8 @@ final class ProjectController: NSObject, BottomBarDelegate {
             tabs: groupedTabs(),
             activeIndex: activeIndex,
             pill: pill,
-            mode: mode
+            mode: mode,
+            slotShowsTerminal: editorSlotShowsTerminal
         )
         // Every attention change passes through here — the Dock badge and the
         // project tab's dots ride along.
@@ -1231,6 +1319,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
         }
     }
     func bottomBarDidToggleLayout() { toggleLayout() }
+    func bottomBarDidToggleEditorTerminal() { toggleEditorTerminal() }
     func bottomBarDidRequestRemoveWorktree(at path: String) { removeWorktree(atPath: path) }
     func bottomBarDidRequestSettings() { SettingsWindowController.shared.show() }
 
@@ -1618,6 +1707,13 @@ final class ProjectController: NSObject, BottomBarDelegate {
             commands.append(PaletteCommand(id: "view.layout", title: "View: Toggle Layout", key: "⌘\\") { [weak self] in
                 self?.toggleLayout()
             })
+            commands.append(PaletteCommand(
+                id: "view.editorTerminal",
+                title: editorSlotShowsTerminal ? "View: Back to the Editor" : "View: Terminal in the Editor Pane",
+                key: "⌃`"
+            ) { [weak self] in
+                self?.toggleEditorTerminal()
+            })
         }
         if editorHasFile {
             commands.append(PaletteCommand(id: "editor.definition", title: "Editor: Go to Definition", key: "F12") { [weak self] in
@@ -1634,7 +1730,7 @@ final class ProjectController: NSObject, BottomBarDelegate {
             Theme.TypeScale.reset()
         })
         let focusTargets: [(String, WorkspacePane?)] = [
-            ("Editor", activeSession?.editorPane),
+            (activeSession?.editorSlot == .terminal ? "Second Terminal" : "Editor", activeSession?.editorSlotPane),
             ("Shell", activeSession?.shellPane),
             ("Agent", activeSession?.agentPane),
         ]

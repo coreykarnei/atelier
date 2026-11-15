@@ -417,6 +417,22 @@ final class EditorPane: NSView, WorkspacePane {
 
     private static func probeX(_ view: NSView) -> CGFloat { view.convert(view.bounds, to: nil).minX }
 
+    /// The terminal a probe names: `agent` is the rightmost; of the
+    /// leftmost column, `second` is the one on top (the editor's slot, when
+    /// the second shell has it) and anything else — `shell` — the lowest.
+    private static func probePane(_ name: String, in window: NSWindow?) -> FreezableTerminalView? {
+        // The editor pane is out of the window while the second shell has
+        // its slot, so its own `window` can't be the only way there.
+        let window = window ?? NSApp.windows.first { $0 is AtelierWindow }
+        let panes = probeTerminals(in: window).filter { !$0.isHiddenOrHasHiddenAncestor }
+        if name == "agent" { return panes.max { probeX($0) < probeX($1) } }
+        guard let left = panes.map(probeX).min() else { return nil }
+        let column = panes.filter { abs(probeX($0) - left) < 1 }
+            .sorted { $0.convert($0.bounds, to: nil).minY < $1.convert($1.bounds, to: nil).minY }
+        if name == "second" { return column.count > 1 ? column.last : nil }
+        return column.first
+    }
+
     /// Dev-only: unfold the tree and hand the query to the explorer's driver.
     /// `probe:dupundo` instead exercises ⇧⌥↓ then ⌘Z on the buffer and
     /// writes what happened to ~/.local/state/atelier/probe.txt.
@@ -524,21 +540,83 @@ final class EditorPane: NSView, WorkspacePane {
         if query.hasPrefix("probe:shell=") {
             // `probe:shell=<text>` — the text, then a Return, into the shell
             // pane (the leftmost visible terminal).
-            guard let shell = Self.probeTerminals(in: window).filter({ !$0.isHiddenOrHasHiddenAncestor })
-                .min(by: { Self.probeX($0) < Self.probeX($1) }) else { return }
+            guard let shell = Self.probePane("shell", in: window) else { return }
             shell.send(txt: String(query.dropFirst("probe:shell=".count)) + "\r")
             return
         }
+        if query.hasPrefix("probe:second=") {
+            // `probe:second=<text>` — the same, into the second shell (the
+            // editor's slot), when it is on screen.
+            guard let second = Self.probePane("second", in: window) else { return }
+            second.send(txt: String(query.dropFirst("probe:second=".count)) + "\r")
+            return
+        }
+        if query.hasPrefix("probe:text=") {
+            // `probe:text=<agent|shell|second>[,n]` — the pane's last `n`
+            // non-empty buffer lines (20), scrollback included, with where
+            // its viewport sits: reading a terminal without a screenshot.
+            let parts = query.dropFirst("probe:text=".count).split(separator: ",").map(String.init)
+            guard let name = parts.first, let pane = Self.probePane(name, in: window) else {
+                try? "no such pane\n".write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
+                return
+            }
+            let terminal = pane.getTerminal()
+            let all = String(decoding: terminal.getBufferAsData(), as: UTF8.self)
+                .split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            let lines = all.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            let count = parts.count > 1 ? Int(parts[1]) ?? 20 : 20
+            let report = "\(name) \(terminal.cols)x\(terminal.rows) top=\(terminal.getTopVisibleRow()) lines=\(all.count) "
+                + "scrollback=\(terminal.options.scrollback) canScroll=\(pane.canScroll) position=\(pane.scrollPosition)\n"
+                + lines.suffix(count).joined(separator: "\n") + "\n"
+            try? report.write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
+            return
+        }
+        if query.hasPrefix("probe:seldrag=") {
+            // `probe:seldrag=<agent|shell|second>,overshoot,ms` — a selection
+            // drag with no pointer and no activation: press mid-pane, drag
+            // `overshoot` points past the top edge (negative: past the
+            // bottom), hold `ms`, release. Reports the top row before and
+            // after and what ended up selected. The release copies nothing.
+            let parts = query.dropFirst("probe:seldrag=".count).split(separator: ",").map(String.init)
+            guard parts.count == 3, let overshoot = Double(parts[1]), let ms = Double(parts[2]),
+                  let window = window ?? NSApp.windows.first(where: { $0 is AtelierWindow }),
+                  let pane = Self.probePane(parts[0], in: window) else { return }
+            func event(_ type: NSEvent.EventType, _ local: NSPoint) -> NSEvent? {
+                NSEvent.mouseEvent(
+                    with: type, location: pane.convert(local, to: nil), modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+                )
+            }
+            let mid = NSPoint(x: pane.bounds.midX, y: pane.bounds.midY)
+            let past = NSPoint(x: mid.x, y: overshoot >= 0 ? pane.bounds.maxY + overshoot : overshoot)
+            let topBefore = pane.getTerminal().getTopVisibleRow()
+            pane.probeDragHeld = true
+            if let down = event(.leftMouseDown, mid) { pane.mouseDown(with: down) }
+            if let drag = event(.leftMouseDragged, NSPoint(x: mid.x + 4, y: mid.y)) { pane.mouseDragged(with: drag) }
+            if let drag = event(.leftMouseDragged, past) { pane.mouseDragged(with: drag) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + ms / 1000) {
+                let selected = pane.getSelection() ?? ""
+                let lines = selected.split(separator: "\n", omittingEmptySubsequences: false)
+                let report = "seldrag \(parts[0]) overshoot=\(overshoot) held=\(Int(ms))ms top \(topBefore)→\(pane.getTerminal().getTopVisibleRow()) "
+                    + "selected=\(lines.count) lines first='\(lines.first?.prefix(40) ?? "")' last='\(lines.last?.prefix(40) ?? "")'\n"
+                try? report.write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
+                let copies = pane.copyOnSelect
+                pane.copyOnSelect = false
+                if let up = event(.leftMouseUp, past) { pane.mouseUp(with: up) }
+                pane.copyOnSelect = copies
+                pane.probeDragHeld = false
+            }
+            return
+        }
         if query.hasPrefix("probe:link=") {
-            // `probe:link=<agent|shell>,row,col[,click]` — writes the link at
+            // `probe:link=<agent|shell|second>,row,col[,click]` — writes the link at
             // that screen cell and the file it resolves to to probe.txt;
             // `click` then ⌘-clicks the cell, posted like `probe:click`.
             let parts = query.dropFirst("probe:link=".count).split(separator: ",").map(String.init)
             guard parts.count >= 3, let row = Int(parts[1]), let col = Int(parts[2]),
                   let window = window ?? NSApp.windows.first(where: { $0 is AtelierWindow }) else { return }
-            let panes = Self.probeTerminals(in: window).filter { !$0.isHiddenOrHasHiddenAncestor }
-                .sorted { Self.probeX($0) < Self.probeX($1) }
-            guard let pane = parts[0] == "agent" ? panes.last : panes.first else { return }
+            guard let pane = Self.probePane(parts[0], in: window) else { return }
             let link = pane.getTerminal().link(at: .screen(Position(col: col, row: row)), mode: .explicitAndImplicit)
             let resolved = link.flatMap { pane.fileURL(forLink: $0) }
             let report = "link=\(link ?? "nil") file=\(resolved?.path ?? "nil") base=\(pane.linkBaseDirectory ?? "nil")\n"
@@ -560,16 +638,15 @@ final class EditorPane: NSView, WorkspacePane {
             return
         }
         if query.hasPrefix("probe:scroll=") {
-            // `probe:scroll=<agent|shell>,ticks,dy` — `ticks` real wheel events
+            // `probe:scroll=<agent|shell|second>,ticks,dy` — `ticks` real wheel events
             // (continuous, `dy` pixels each) posted to this process at 60Hz over
             // the pane's centre; reports that pane's draws while they ran, to
             // 0.5s after the last. The window must be uncovered at that point.
             let parts = query.dropFirst("probe:scroll=".count).split(separator: ",").map(String.init)
             guard parts.count == 3, let ticks = Int(parts[1]), let dy = Int32(parts[2]),
                   let window = window ?? NSApp.windows.first(where: { $0 is AtelierWindow }) else { return }
-            let panes = Self.probeTerminals(in: window).sorted { Self.probeX($0) < Self.probeX($1) }
-            guard let pane = parts[0] == "agent" ? panes.last : panes.first(where: { !$0.isHiddenOrHasHiddenAncestor }),
-                  let screen = window.screen else { return }
+            guard let pane = Self.probePane(parts[0], in: window), let screen = window.screen else { return }
+            let topBefore = pane.getTerminal().getTopVisibleRow()
             let rect = window.convertToScreen(pane.convert(pane.bounds, to: nil))
             let point = CGPoint(x: rect.midX, y: screen.frame.maxY - rect.midY)
             pane.drawTimes = []
@@ -586,7 +663,8 @@ final class EditorPane: NSView, WorkspacePane {
                         let report = "scroll \(parts[0]) ticks=\(ticks) draws=\(times.count) "
                             + (times.isEmpty ? "" : "mean=\(ms(times.reduce(0, +) / Double(times.count)))ms p50=\(ms(sorted[sorted.count / 2]))ms "
                                + "p90=\(ms(sorted[sorted.count * 9 / 10]))ms max=\(ms(sorted.last!))ms total=\(ms(times.reduce(0, +)))ms ")
-                            + "wall=\(ms(CACurrentMediaTime() - start))ms rows hit=\(RowRenderCache.hits) miss=\(RowRenderCache.misses)\n"
+                            + "wall=\(ms(CACurrentMediaTime() - start))ms rows hit=\(RowRenderCache.hits) miss=\(RowRenderCache.misses) "
+                            + "top \(topBefore)→\(pane.getTerminal().getTopVisibleRow())\n"
                         try? report.write(toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8)
                     }
                     return
@@ -675,9 +753,11 @@ final class EditorPane: NSView, WorkspacePane {
             return
         }
         if query.hasPrefix("probe:key=") {
-            // `probe:key=<char>[,cmd][,shift][,opt][,ctrl]` — one keystroke
+            // `probe:key=<char>[,cmd][,shift][,opt][,ctrl][,menu]` — one keystroke
             // posted to the queue (menus and modal alerts included). `\r`
-            // for ↩, `\e` for esc.
+            // for ↩, `\e` for esc. With `menu` the key-down goes straight to
+            // the main menu as a key equivalent — nothing is activated — and
+            // probe.txt says whether an item took it.
             let parts = query.dropFirst("probe:key=".count).split(separator: ",").map(String.init)
             // A Landing's editor isn't in the window; its keys go to the workspace.
             guard let first = parts.first,
@@ -690,7 +770,7 @@ final class EditorPane: NSView, WorkspacePane {
             let named: [String: (String, UInt16)] = [
                 "\\r": ("\r", 36), "\\e": ("\u{1b}", 53),
                 "down": ("\u{F701}", 125), "up": ("\u{F700}", 126),
-                "tab": ("\t", 48), "space": (" ", 49), "comma": (",", 43),
+                "tab": ("\t", 48), "space": (" ", 49), "comma": (",", 43), "backtick": ("`", 50),
             ]
             // ANSI key codes for letters: AppKit resolves shifted menu
             // chords (⇧⌥⌘W) from the key code, so code 0 (`a`) never matches.
@@ -698,6 +778,18 @@ final class EditorPane: NSView, WorkspacePane {
             let chars = named[first]?.0 ?? first
             let code: UInt16 = named[first]?.1
                 ?? first.lowercased().first.flatMap { c in letters.firstIndex(of: c).map(UInt16.init) } ?? 0
+            if parts.contains("menu") {
+                let event = NSEvent.keyEvent(
+                    with: .keyDown, location: .zero, modifierFlags: mods, timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, characters: chars, charactersIgnoringModifiers: chars,
+                    isARepeat: false, keyCode: code
+                )
+                let taken = event.map { NSApp.mainMenu?.performKeyEquivalent(with: $0) ?? false } ?? false
+                try? "key \(first) menu=\(taken)\n".write(
+                    toFile: AtelierIPC.stateDirectory() + "/probe.txt", atomically: true, encoding: .utf8
+                )
+                return
+            }
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
             for type in [NSEvent.EventType.keyDown, .keyUp] {

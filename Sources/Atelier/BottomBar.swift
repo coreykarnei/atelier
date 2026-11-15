@@ -12,6 +12,9 @@ protocol BottomBarDelegate: AnyObject {
     /// the live auto title); a cancelled rename never reaches this.
     func bottomBarDidRenameSession(at index: Int, title: String?)
     func bottomBarDidToggleLayout()
+    /// The terminal glyph beside the layout toggle: the editor's slot
+    /// trades the editor for a second shell, or back.
+    func bottomBarDidToggleEditorTerminal()
     /// Right-click on a worktree folder's label: tear the worktree down.
     func bottomBarDidRequestRemoveWorktree(at path: String)
     /// The `⎇+` at the row's trailing end: a session in *another* worktree —
@@ -152,6 +155,7 @@ final class BottomBar: NSView {
     private let clockColonLabel = BreathingColonLabel(labelWithString: ":")
     private let clockSuffixLabel = NSTextField(labelWithString: "")
     private let layoutButton = HoverPadButton()
+    private let slotButton = HoverPadButton()
     private let settingsButton = HoverPadButton()
     private let topBorder = NSBox()
     /// The mantle field — the visible bar. Pinned to the bottom `desiredHeight`.
@@ -328,6 +332,12 @@ final class BottomBar: NSView {
         layoutButton.setAccessibilityLabel("Switch layout")
         layoutButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(layoutButton)
+        // The editor's slot: outlined while the editor has it, filled while
+        // the second shell does — the glyph is the state.
+        configureIconButton(slotButton, symbol: "terminal", action: #selector(slotTapped))
+        slotButton.translatesAutoresizingMaskIntoConstraints = false
+        slotButton.isHidden = true
+        addSubview(slotButton)
         configureIconButton(settingsButton, symbol: "gearshape", action: #selector(settingsTapped))
         settingsButton.tip = "Settings…  ⌘,"
         settingsButton.setAccessibilityLabel("Settings")
@@ -354,12 +364,15 @@ final class BottomBar: NSView {
             layoutButton.trailingAnchor.constraint(equalTo: settingsButton.leadingAnchor, constant: -4),
             layoutButton.widthAnchor.constraint(equalToConstant: 22),
             layoutButton.heightAnchor.constraint(equalToConstant: 22),
+            slotButton.trailingAnchor.constraint(equalTo: layoutButton.leadingAnchor, constant: -4),
+            slotButton.widthAnchor.constraint(equalToConstant: 22),
+            slotButton.heightAnchor.constraint(equalToConstant: 22),
 
             // One cap-height (§3 micro-pass): same mono face and size as the
             // pill label, centered on the same axis — identical baselines
             // without cross-branch baseline constraints (which AppKit's
             // window-sizing pass mishandles; see the tabsArea note below).
-            clockSuffixLabel.trailingAnchor.constraint(equalTo: layoutButton.leadingAnchor, constant: -12),
+            clockSuffixLabel.trailingAnchor.constraint(equalTo: slotButton.leadingAnchor, constant: -12),
             clockColonLabel.trailingAnchor.constraint(equalTo: clockSuffixLabel.leadingAnchor),
             clockPrefixLabel.trailingAnchor.constraint(equalTo: clockColonLabel.leadingAnchor),
 
@@ -388,7 +401,7 @@ final class BottomBar: NSView {
         // Everything outside the flow sits on the bottom tab row's axis — the
         // folder label band above it is the tabs' own business. These yield
         // too while the bar is hidden at height 0.
-        for view in [pillView, clockPrefixLabel, clockColonLabel, clockSuffixLabel, layoutButton, settingsButton] {
+        for view in [pillView, clockPrefixLabel, clockColonLabel, clockSuffixLabel, slotButton, layoutButton, settingsButton] {
             let axis = view.centerYAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottomRowAxis)
             axis.priority = NSLayoutConstraint.Priority(999)
             axis.isActive = true
@@ -407,7 +420,7 @@ final class BottomBar: NSView {
 
     // MARK: Update
 
-    func update(tabs: [SessionTabInfo], activeIndex: Int, pill: String, mode: LayoutMode?) {
+    func update(tabs: [SessionTabInfo], activeIndex: Int, pill: String, mode: LayoutMode?, slotShowsTerminal: Bool) {
         if drag != nil || groupDrag != nil {
             // Mid-drag the strip's order is the pointer's, not the owner's
             // (the title timer refreshes every 2 s): keep the local order.
@@ -428,6 +441,14 @@ final class BottomBar: NSView {
         default: symbol = "rectangle.split.1x2"
         }
         layoutButton.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Toggle layout")
+
+        slotButton.isHidden = mode == nil
+        slotButton.image = NSImage(
+            systemSymbolName: slotShowsTerminal ? "terminal.fill" : "terminal",
+            accessibilityDescription: nil
+        )
+        slotButton.tip = slotShowsTerminal ? "Back to the Editor  ⌃`" : "Terminal in the Editor Pane  ⌃`"
+        slotButton.setAccessibilityLabel(slotShowsTerminal ? "Back to the editor" : "Terminal in the editor pane")
 
         flowTabs(animated: true)
     }
@@ -1373,6 +1394,7 @@ final class BottomBar: NSView {
     }
 
     @objc private func layoutTapped() { delegate?.bottomBarDidToggleLayout() }
+    @objc private func slotTapped() { delegate?.bottomBarDidToggleEditorTerminal() }
     @objc private func settingsTapped() { delegate?.bottomBarDidRequestSettings() }
     @objc private func overflowTapped() {
         overflowButton.menu?.popUp(positioning: nil, at: NSPoint(x: 0, y: overflowButton.bounds.maxY), in: overflowButton)

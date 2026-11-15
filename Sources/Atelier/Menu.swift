@@ -75,6 +75,10 @@ enum Menu {
         viewItem.submenu = viewMenu
 
         viewMenu.addItem(withTitle: "Toggle Layout", action: #selector(AppDelegate.toggleLayout(_:)), keyEquivalent: "\\")
+        // ⌃` — the VSCode chord for "the terminal", with its rule: show it,
+        // go to it, or — from inside it — put it away. Validation retitles
+        // the item to whichever comes next.
+        viewMenu.addItem(chord("Terminal in Editor Pane", #selector(AppDelegate.toggleEditorTerminal(_:)), "`", [.control]))
         viewMenu.addItem(chord("Command Palette…", #selector(AppDelegate.showPalette(_:)), "p", [.command, .shift]))
         viewMenu.addItem(withTitle: "Go to File…", action: #selector(AppDelegate.goToFile(_:)), keyEquivalent: "p")
         viewMenu.addItem(chord("Find in Project…", #selector(AppDelegate.searchRepo(_:)), "f", [.command, .shift]))

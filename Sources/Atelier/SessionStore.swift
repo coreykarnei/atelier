@@ -22,6 +22,10 @@ struct PersistedSession: Codable {
     /// The tab's attention state at quit (`Session.Attention` raw value), so a
     /// relaunch shows what you hadn't seen yet. Optional: older snapshots.
     var attention: String? = nil
+    /// `"terminal"` when the editor's slot held the second shell
+    /// (`Session.EditorSlot`); nil — the editor — otherwise and in older
+    /// snapshots.
+    var editorSlot: String? = nil
 }
 
 struct PersistedWindow: Codable {
