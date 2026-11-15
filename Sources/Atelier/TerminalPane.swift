@@ -17,6 +17,12 @@ class FreezableTerminalView: LocalProcessTerminalView {
         configure()
     }
 
+    /// How far back a pane remembers. SwiftTerm's default is 500 lines — a
+    /// test run or a build log outlives that before you look up, and the
+    /// lines above it were simply gone (owner ask 2026-11-15). The store
+    /// grows only as lines arrive, so a quiet shell pays nothing.
+    static let scrollbackLines = 10_000
+
     /// Trackpad wheel feel over the Ghostty-equivalent 1.0 (owner: "still
     /// feels slow", 2026-09-10).
     static let wheelFeel: CGFloat = 1.5
@@ -28,6 +34,7 @@ class FreezableTerminalView: LocalProcessTerminalView {
 
     private func configure() {
         showsScroller = false
+        changeScrollback(Self.scrollbackLines)
         wheelPrecisionMultiplier = Self.wheelFeel
         copyOnSelect = true // Ghostty parity: highlight is copy (owner call 2026-09-10)
         // ⌘-click: an app, a script or a terminal's file asks first.
@@ -204,6 +211,10 @@ class FreezableTerminalView: LocalProcessTerminalView {
     /// Bytes the hosted process has written — dev probes measure a resize's
     /// repaint cost with it.
     private(set) var bytesReceived = 0
+
+    /// Dev probes hold a selection drag with no button down (`probe:seldrag`).
+    var probeDragHeld = false
+    override func selectionDragIsLive() -> Bool { probeDragHeld || super.selectionDragIsLive() }
     #endif
 
     override func dataReceived(slice: ArraySlice<UInt8>) {

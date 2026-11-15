@@ -114,3 +114,34 @@ a PR; when one lands, drop it here and note the version.
     app or a script (OSC 8 text can hide where a link goes).
     `clipboardCopy(source:content:)` is `open`, so a host can say when a
     program set the clipboard.
+14. **A selection drag reaches rows off screen; the wheel scrolls by the
+    line** (`Mac/MacTerminalView.swift`; owner ask 2026-11-15: "when
+    scrolling in a terminal, I need to be able to scroll to lines
+    offscreen"). Three gaps in the local-scrollback path, none of them in
+    the mouse-reporting path a full-screen program owns:
+    - *Drag autoscroll never ran.* Upstream computes an `autoScrollDelta`
+      in `mouseDragged` and has a `scrollingTimerElapsed` to act on it, but
+      nothing ever schedules that timer (and both its branches call
+      `scrollUp`). A drag held past the top or bottom edge selected rows
+      that were not on screen without ever showing them. Now the drag
+      selects among the rows on screen (`selectionDragTarget`), and held
+      past an edge a 30Hz timer in the common run-loop modes scrolls that
+      way and carries the selection's end to the edge row — 10 lines/s at
+      the edge, rising 1.5 lines/s per point of overshoot, capped at 600,
+      counted in elapsed time. It stops when the pointer returns, on
+      mouse-up, or when `selectionDragIsLive()` (`open`; the left button's
+      state) says the button came up somewhere that never told the view.
+    - *The wheel mid-drag left the selection behind.* Scrolling while
+      holding a drag moved the viewport but the selection's end stayed on
+      its old row until the pointer next moved; it now follows on each
+      wheel event.
+    - *Local scrollback moved a line per event.* The wheel's third route
+      used `calcScrollingVelocity` on `deltaY`: every trackpad event
+      scrolled at least one line and a fast one a whole page (`max(rows,
+      20)`), so a slow two-finger drag flew and a flick skipped screens.
+      It now shares `wheelLines` with the two forwarded routes — trackpad
+      points accumulate against the cell height (`wheelPrecisionMultiplier`
+      applies), and a wheel notch is `wheelDiscreteLines` (3, Ghostty's
+      `mouse-scroll-multiplier.discrete`). Measured in a 20pt-cell pane at
+      the host's 1.5 multiplier: 30 events of 4pt moved 9 lines (30 before),
+      10 events of 1pt moved 1 (10 before).

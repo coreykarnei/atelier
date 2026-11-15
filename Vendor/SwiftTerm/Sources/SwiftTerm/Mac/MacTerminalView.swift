@@ -1973,20 +1973,99 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         terminal.sendEvent(buttonFlags: buttonFlags, x: hit.grid.col, y: screenRow, pixelX: hit.pixels.col, pixelY: hit.pixels.row)
     }
     
-    private var autoScrollDelta = 0
-    // Callback from when the mouseDown autoscrolling timer goes off
-    private func scrollingTimerElapsed (source: Timer)
-    {
-        if autoScrollDelta == 0 {
+    // MARK: A selection drag reaches rows off screen
+
+    /// Where the pointer last was during a selection drag, in view
+    /// coordinates; nil when no drag is in flight.
+    private var selectionDragPoint: CGPoint?
+    private var selectionScrollTimer: Timer?
+    private var selectionScrollRemainder: CGFloat = 0
+    private var selectionScrollStamp: CFTimeInterval = 0
+
+    /// The cell a selection drag at `point` reaches: the pointer's column on
+    /// the nearest row *on screen*. Past an edge the drag holds that edge's
+    /// row and the scrollback comes to it (`selectionAutoscrollTick`), so
+    /// what is selected is always what is shown.
+    private func selectionDragTarget(at point: CGPoint) -> Position {
+        let displayBuffer = terminal.displayBuffer
+        let col = min(max(0, Int(point.x / cellDimension.width)), terminal.cols - 1)
+        let screenRow = min(max(0, Int((frame.height - point.y) / cellDimension.height)), displayBuffer.rows - 1)
+        let row = min(screenRow + displayBuffer.yDisp, max(0, displayBuffer.lines.count - 1))
+        return Position(col: col, row: row)
+    }
+
+    /// How far the pointer is past the top edge (negative) or the bottom
+    /// edge (positive), in points; 0 while it is over the grid.
+    private func selectionOvershoot(at point: CGPoint) -> CGFloat {
+        if point.y > bounds.height { return bounds.height - point.y }
+        if point.y < 0 { return -point.y }
+        return 0
+    }
+
+    /// Whether the button that began the drag is still down. The autoscroll
+    /// asks on every beat, so a mouse-up that never reached this view (a
+    /// sheet, a space switch mid-drag) can't leave it scrolling. `open` for
+    /// hosts that drive a drag without a pointer.
+    open func selectionDragIsLive() -> Bool {
+        NSEvent.pressedMouseButtons & 1 != 0
+    }
+
+    /// Start or stop the autoscroll to match where the drag now is.
+    private func updateSelectionAutoscroll() {
+        guard let point = selectionDragPoint, selection.active, canScroll,
+              selectionOvershoot(at: point) != 0 else {
+            stopSelectionAutoscroll()
             return
         }
-        if autoScrollDelta < 0 {
-            scrollUp(lines: autoScrollDelta * -1)
-        } else {
-            scrollUp(lines: autoScrollDelta)
+        guard selectionScrollTimer == nil else { return }
+        selectionScrollRemainder = 0
+        selectionScrollStamp = CACurrentMediaTime()
+        // Common modes: the drag can be delivered inside a tracking loop.
+        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            self?.selectionAutoscrollTick()
         }
+        RunLoop.main.add(timer, forMode: .common)
+        selectionScrollTimer = timer
     }
-    
+
+    private func stopSelectionAutoscroll() {
+        selectionScrollTimer?.invalidate()
+        selectionScrollTimer = nil
+    }
+
+    /// One beat of a drag held past an edge: bring rows in from that side
+    /// and carry the selection's end to the edge row. The speed follows the
+    /// distance past the edge — a nudge creeps a line at a time, a long
+    /// reach pages — counted in time, so it doesn't depend on the tick.
+    private func selectionAutoscrollTick() {
+        guard let point = selectionDragPoint, selection.active, window != nil, selectionDragIsLive() else {
+            // The button came up somewhere that never told us.
+            selectionDragPoint = nil
+            stopSelectionAutoscroll()
+            return
+        }
+        let overshoot = selectionOvershoot(at: point)
+        guard overshoot != 0 else {
+            stopSelectionAutoscroll()
+            return
+        }
+        let now = CACurrentMediaTime()
+        let elapsed = min(now - selectionScrollStamp, 0.1)
+        selectionScrollStamp = now
+        let linesPerSecond = min(10 + abs(overshoot) * 1.5, 600)
+        selectionScrollRemainder += linesPerSecond * CGFloat(elapsed)
+        let lines = Int(selectionScrollRemainder)
+        guard lines > 0 else { return }
+        selectionScrollRemainder -= CGFloat(lines)
+        if overshoot < 0 {
+            scrollUp(lines: lines)
+        } else {
+            scrollDown(lines: lines)
+        }
+        selection.dragExtend(bufferPosition: selectionDragTarget(at: point))
+        setNeedsDisplay(bounds)
+    }
+
     public override func mouseDown(with event: NSEvent) {
         if allowMouseReporting && terminal.mouseMode.sendButtonPress() {
             sharedMouseEvent(with: event)
@@ -2050,6 +2129,8 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     public var linkOpenPolicy: ((_ target: URL, _ open: @escaping () -> Void) -> Void)?
 
     public override func mouseUp(with event: NSEvent) {
+        selectionDragPoint = nil
+        stopSelectionAutoscroll()
         let hit = calculateMouseHit(with: event).grid
         updateHoverLink(at: hit, commandOverride: commandActive || event.modifierFlags.contains(.command))
         if let result = linkForClick(at: hit, hasCommandModifier: event.modifierFlags.contains(.command)) {
@@ -2085,22 +2166,19 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             }
         }
                 
+        // The drag selects among the rows on screen; held past the top or
+        // bottom edge it scrolls more in (`updateSelectionAutoscroll`).
+        let point = convert(event.locationInWindow, from: nil)
+        let target = selectionDragTarget(at: point)
         if selection.active {
-            selection.dragExtend(bufferPosition: Position(col: hit.col, row: hit.row))
+            selection.dragExtend(bufferPosition: target)
         } else {
-            selection.setSoftStart(bufferPosition: Position(col: hit.col, row: hit.row))
+            selection.setSoftStart(bufferPosition: target)
             selection.startSelection()
         }
         didSelectionDrag = true
-        autoScrollDelta = 0
-        let screenRow = hit.row - displayBuffer.yDisp
-        if selection.active {
-            if screenRow <= 0 {
-                autoScrollDelta = calcScrollingVelocity(delta: screenRow * -1) * -1
-            } else if screenRow >= displayBuffer.rows {
-                autoScrollDelta = calcScrollingVelocity(delta: screenRow - displayBuffer.rows)
-            }
-        }
+        selectionDragPoint = point
+        updateSelectionAutoscroll()
         setNeedsDisplay(bounds)
     }
     
@@ -2245,15 +2323,25 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             }
             return
         }
-        wheelRemainder = 0
-        if event.deltaY == 0 {
-            return
-        }
-        let velocity = calcScrollingVelocity(delta: Int (abs (event.deltaY)))
-        if event.deltaY > 0 {
-            scrollUp (lines: velocity)
+        // Local scrollback, by the same measure as the two routes above: a
+        // trackpad moves the text with the fingers, line for line, and a
+        // wheel notch is `wheelDiscreteLines`. (Upstream moved at least a
+        // line per event and a page per fast one, so a slow drag flew and a
+        // quick one skipped whole screens.)
+        let lines = wheelLines(event, perNotch: wheelDiscreteLines)
+        guard lines != 0 else { return }
+        if lines > 0 {
+            scrollUp(lines: lines)
         } else {
-            scrollDown(lines: velocity)
+            scrollDown(lines: -lines)
+        }
+        // Mid-drag, the wheel is the other way to reach rows off screen:
+        // the selection follows to wherever the pointer now sits.
+        if selectionDragPoint != nil, selection.active {
+            let point = convert(event.locationInWindow, from: nil)
+            selectionDragPoint = point
+            selection.dragExtend(bufferPosition: selectionDragTarget(at: point))
+            setNeedsDisplay(bounds)
         }
     }
 
@@ -2266,16 +2354,25 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     /// quantised into lines — Ghostty's `mouse-scroll-multiplier.precision`.
     public var wheelPrecisionMultiplier: CGFloat = 1
 
-    private func forwardWheel(_ event: NSEvent, _ emit: (_ up: Bool, _ hit: (grid: Position, pixels: Position)) -> Void) {
-        let lines: Int
+    /// Lines a local-scrollback wheel notch moves (a mouse wheel, not a
+    /// trackpad) — Ghostty's `mouse-scroll-multiplier.discrete`.
+    public var wheelDiscreteLines: CGFloat = 3
+
+    /// Whole lines this wheel event amounts to, up positive. Trackpad
+    /// deltas are points: they accumulate against the cell height.
+    private func wheelLines(_ event: NSEvent, perNotch: CGFloat = 1) -> Int {
         if event.hasPreciseScrollingDeltas {
             wheelRemainder += event.scrollingDeltaY * wheelPrecisionMultiplier / max(1, cellDimension.height)
-            lines = Int(wheelRemainder.rounded(.towardZero))
+            let lines = Int(wheelRemainder.rounded(.towardZero))
             wheelRemainder -= CGFloat(lines)
-        } else {
-            wheelRemainder = 0
-            lines = Int(event.scrollingDeltaY.rounded(.awayFromZero))
+            return lines
         }
+        wheelRemainder = 0
+        return Int((event.scrollingDeltaY * perNotch).rounded(.awayFromZero))
+    }
+
+    private func forwardWheel(_ event: NSEvent, _ emit: (_ up: Bool, _ hit: (grid: Position, pixels: Position)) -> Void) {
+        let lines = wheelLines(event)
         guard lines != 0 else { return }
         let hit = calculateMouseHit(with: event)
         for _ in 0..<min(abs(lines), 256) {
@@ -2283,20 +2380,6 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         }
     }
 
-    private func calcScrollingVelocity (delta: Int) -> Int
-    {
-        if delta > 9 {
-            return max (terminal.rows, 20)
-        }
-        if delta > 5 {
-            return 10
-        }
-        if delta > 1 {
-            return 3
-        }
-        return 1
-    }
-    
     open override func resetCursorRects() {
         addCursorRect(bounds, cursor: .iBeam)
     }
